@@ -21,7 +21,7 @@ npm test             # node --test, Node 18 or newer
 ```
 
 The tests cover the game rules, saving and restoring, the stats, the
-strategy chart and money formatting. They use only Node's built-in test
+strategy chart, bet validation and money formatting. They use only Node's built-in test
 runner.
 
 ## Table rules

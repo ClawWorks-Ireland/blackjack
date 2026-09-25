@@ -13,6 +13,7 @@
   const Sound = window.BlackjackSound;
   const Strategy = window.BlackjackStrategy;
   const { money, signedMoney } = window.BlackjackFormat;
+  const Betting = window.BlackjackBetting;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   let game = loadGame() || new Game({ bankroll: START_BANKROLL });
@@ -386,7 +387,7 @@
     els.noInsure.firstChild.textContent = evenMoney ? 'No even money ' : 'No insurance ';
     els.deal.disabled = live;
     els.betInput.disabled = live;
-    els.betInput.max = String(game.bankroll);
+    els.betInput.max = String(Betting.maxBet(game.bankroll));
 
     if (game.phase === 'done' && game.results.length) {
       els.message.textContent = resultMessage();
@@ -484,7 +485,13 @@
 
   els.betForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    const bet = Math.floor(Number(els.betInput.value));
+    const bet = Number(els.betInput.value);
+    const error = Betting.betError(bet, { bankroll: game.bankroll, min: game.minBet });
+    if (error) {
+      els.message.textContent = error;
+      delete els.message.dataset.outcome;
+      return;
+    }
     act(() => { game.deal(bet); round++; coachNote = null; }, 'chip');
   });
   els.hit.addEventListener('click', () => act(() => game.hit(), null, 'hit'));
