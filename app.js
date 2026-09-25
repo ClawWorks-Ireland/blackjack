@@ -30,6 +30,8 @@
   let hintFor = null; // decision point the hint was requested for
   let coachNote = null; // feedback on your last off-chart move
   let coachOn = storage('get', COACH_KEY) !== '0'; // on unless turned off
+  let inFlight = false; // dealt cards still animating onto the table
+  let revealTimer = null;
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -83,6 +85,7 @@
   const saveGame = () => storage('set', GAME_KEY, JSON.stringify(game));
 
   const stepMs = () => (reducedMotion.matches ? 0 : 180);
+  const LAND_MS = 400; // longest card animation (the hole-card flip)
 
   function cardEl(card, hidden, anim) {
     const div = document.createElement('div');
@@ -146,7 +149,7 @@
     return { plan, settleAt: Math.max(0, slot - 1) * step };
   }
 
-  function handEl(hand, i, plan) {
+  function handEl(hand, i, plan, inFlight) {
     const multi = game.hands.length > 1;
     const isActive = game.phase === 'player' && i === game.active;
     const result = game.phase === 'done' ? game.results[i] : null;
@@ -157,9 +160,10 @@
 
     const label = document.createElement('h2');
     const name = multi ? `Hand ${i + 1}` : 'You';
-    let text = `${name} (${formatTotal(hand.cards)})`;
+    // While cards are still flying in, the total and outcome would give them away.
+    let text = inFlight ? name : `${name} (${formatTotal(hand.cards)})`;
     if (multi) text += ` · ${money(hand.bet)}`;
-    if (result && multi) text += ` · ${SHORT[result.outcome]}`;
+    if (result && multi && !inFlight) text += ` · ${SHORT[result.outcome]}`;
     label.textContent = text;
     if (isActive && multi) label.setAttribute('aria-current', 'true');
 
@@ -303,31 +307,66 @@
     Sound.play(cue, (settleAt + 250) / 1000);
   }
 
+  /** Chips the finished round paid back (stakes, winnings, insurance). */
+  function returnedThisRound() {
+    if (game.phase !== 'done') return 0;
+    const hands = game.hands.reduce((sum, h, i) => sum + h.bet + game.results[i].net, 0);
+    return hands + (game.insuranceNet > 0 ? game.insurance + game.insuranceNet : 0);
+  }
+
+  const ACTION_BUTTONS = ['hit', 'stand', 'double', 'split', 'surrender', 'insure', 'noInsure', 'hint', 'deal'];
+
+  /**
+   * Two passes per change. While newly dealt cards are still in flight,
+   * show the cards but hold back anything that gives them away (totals,
+   * result, payout, stats) and lock the controls. Once the last card has
+   * landed, render() runs again and fills everything in.
+   */
   function render() {
+    clearTimeout(revealTimer);
     const inRound = game.phase === 'player';
     const offering = game.phase === 'insurance';
     const live = inRound || offering;
     const { plan, settleAt } = planAnimations(live);
+    inFlight = plan.size > 0 && stepMs() > 0;
 
     els.dealerCards.replaceChildren(
       ...game.dealer.map((card, i) => cardEl(card, live && i === 1, plan.get(card)))
     );
-    els.dealerTotal.textContent = !game.dealer.length ? ''
-      : live ? `(${game.dealer[0].rank === 'A' ? 'ace' : handValue([game.dealer[0]]).total} showing)`
-      : `(${formatTotal(game.dealer)})`;
-
     if (game.hands.length) {
-      els.playerHands.replaceChildren(...game.hands.map((h, i) => handEl(h, i, plan)));
+      els.playerHands.replaceChildren(...game.hands.map((h, i) => handEl(h, i, plan, inFlight)));
     } else {
       const empty = document.createElement('h2');
       empty.textContent = 'You';
       els.playerHands.replaceChildren(empty);
     }
 
-    els.bankroll.textContent = money(game.bankroll);
     const staked = game.hands.reduce((sum, h) => sum + h.bet, 0);
     const inPlay = staked + game.insurance;
-    els.betDisplay.textContent = live ? `· In play: ${money(inPlay)}` : '';
+    els.betDisplay.textContent = live || inFlight ? `· In play: ${money(inPlay)}` : '';
+
+    maybeRecord(settleAt);
+    saveGame();
+
+    if (inFlight) {
+      els.dealerTotal.textContent = '';
+      els.bankroll.textContent = money(game.bankroll - returnedThisRound());
+      ACTION_BUTTONS.forEach((k) => { els[k].disabled = true; });
+      els.betInput.disabled = true;
+      els.message.textContent = '';
+      delete els.message.dataset.outcome;
+      els.message.classList.remove('reveal');
+      els.hintText.hidden = true;
+      els.coach.hidden = true;
+      els.reset.hidden = true;
+      revealTimer = setTimeout(render, settleAt + LAND_MS);
+      return;
+    }
+
+    els.dealerTotal.textContent = !game.dealer.length ? ''
+      : live ? `(${game.dealer[0].rank === 'A' ? 'ace' : handValue([game.dealer[0]]).total} showing)`
+      : `(${formatTotal(game.dealer)})`;
+    els.bankroll.textContent = money(game.bankroll);
 
     els.hit.disabled = !inRound;
     els.stand.disabled = !inRound;
@@ -336,6 +375,7 @@
     els.surrender.disabled = !game.canSurrender();
     els.insurance.hidden = !offering;
     els.insure.disabled = !game.canInsure();
+    els.noInsure.disabled = !offering;
     els.insure.firstChild.textContent = `Take insurance (${money(game.insuranceCost)}) `;
     els.deal.disabled = live;
     els.betInput.disabled = live;
@@ -344,8 +384,6 @@
     if (game.phase === 'done' && game.results.length) {
       els.message.textContent = resultMessage();
       els.message.dataset.outcome = netOutcome();
-      // Let the last card land before the result appears.
-      els.message.style.animationDelay = `${settleAt}ms`;
       els.message.classList.remove('reveal');
       void els.message.offsetWidth; // restart the animation
       els.message.classList.add('reveal');
@@ -376,8 +414,6 @@
       : `Out of chips. Start over with ${money(START_BANKROLL)}`;
     els.deal.disabled = els.deal.disabled || broke;
 
-    maybeRecord(settleAt);
-    saveGame();
     renderStats();
     renderHistory();
   }
@@ -419,6 +455,7 @@
   }
 
   function act(fn, cue, move) {
+    if (inFlight) return; // wait for the cards to land
     try {
       scoreMove(move);
       fn();
