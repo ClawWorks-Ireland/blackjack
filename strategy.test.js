@@ -28,6 +28,9 @@ test('soft totals', () => {
   assert.equal(move(['A', '6'], '3'), 'double');    // soft 17 vs 3
   assert.equal(move(['A', '6'], '2'), 'hit');
   assert.equal(move(['A', '7'], '6'), 'double');    // soft 18 vs 6
+  assert.equal(move(['A', '7'], '3'), 'double');    // soft 18 vs 3
+  assert.equal(move(['A', '7'], '2'), 'stand');     // soft 18 vs 2 (S17; H17 doubles)
+  assert.equal(move(['A', '7'], '7'), 'stand');
   assert.equal(move(['A', '7'], '8'), 'stand');
   assert.equal(move(['A', '7'], '9'), 'hit');
   assert.equal(move(['A', '8'], '6'), 'stand');     // soft 19 (S17)

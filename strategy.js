@@ -38,7 +38,8 @@
   function softMove(total, up) {
     if (total >= 19) return 'stand';
     if (total === 18) {
-      if (inRange(up, 2, 6)) return 'double-or-stand';
+      // S17: stand vs 2. (Doubling soft 18 vs 2 is the H17 play.)
+      if (inRange(up, 3, 6)) return 'double-or-stand';
       return up <= 8 ? 'stand' : 'hit';
     }
     if (total === 17) return inRange(up, 3, 6) ? 'double' : 'hit';
