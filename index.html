@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blackjack</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="table">
+    <h1>Blackjack</h1>
+    <p class="rules">Dealer stands on 17 · Blackjack pays 3:2 · Double on any two cards · Split pairs up to 4 hands</p>
+
+    <section class="hand" aria-labelledby="dealer-label">
+      <h2 id="dealer-label">Dealer <span id="dealer-total" class="total"></span></h2>
+      <div id="dealer-cards" class="cards" aria-live="polite"></div>
+    </section>
+
+    <p id="message" class="message" role="status" aria-live="polite">Place your bet to start.</p>
+
+    <section class="hand" aria-label="Your hands">
+      <div id="player-hands" class="player-hands" aria-live="polite"></div>
+    </section>
+
+    <section class="controls">
+      <div class="bank">
+        Bankroll: <strong id="bankroll">$1000</strong>
+        <span id="bet-display"></span>
+      </div>
+
+      <form id="bet-form" class="bet-form">
+        <label for="bet">Bet</label>
+        <input id="bet" type="number" min="1" step="1" value="50" required>
+        <button type="submit" id="deal">Deal</button>
+      </form>
+
+      <div class="actions">
+        <button id="hit" disabled>Hit <kbd>H</kbd></button>
+        <button id="stand" disabled>Stand <kbd>S</kbd></button>
+        <button id="double" disabled>Double <kbd>D</kbd></button>
+        <button id="split" disabled>Split <kbd>P</kbd></button>
+      </div>
+
+      <button id="reset" class="link" hidden>Out of chips. Start over with $1000</button>
+    </section>
+  </main>
+
+  <script src="blackjack.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

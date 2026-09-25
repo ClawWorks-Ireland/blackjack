@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+# KiroCrew workspace settings, not part of the game
+.kiro/
