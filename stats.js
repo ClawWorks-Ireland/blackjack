@@ -13,6 +13,7 @@
     return {
       rounds: 0, hands: 0, wins: 0, losses: 0, pushes: 0, blackjacks: 0,
       net: 0, bestRound: 0, worstRound: 0, streak: 0, bestStreak: 0,
+      hintsShown: 0, hintsFollowed: 0,
     };
   }
 
@@ -36,6 +37,20 @@
     else if (net < 0) s.streak = s.streak < 0 ? s.streak - 1 : -1;
     s.bestStreak = Math.max(s.bestStreak, s.streak);
     return s;
+  }
+
+  /** Record your move after a hint was shown (does not mutate input). */
+  function recordHint(stats, followed) {
+    return {
+      ...stats,
+      hintsShown: stats.hintsShown + 1,
+      hintsFollowed: stats.hintsFollowed + (followed ? 1 : 0),
+    };
+  }
+
+  /** Fraction of shown hints you followed, or null before any were shown. */
+  function hintRate(stats) {
+    return stats.hintsShown ? stats.hintsFollowed / stats.hintsShown : null;
   }
 
   /** Wins as a fraction of decided hands, or null before any are decided. */
@@ -82,7 +97,7 @@
   }
 
   const api = {
-    emptyStats, recordRound, winRate, parseStats, HISTORY_MAX, addHistory, parseHistory,
+    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, HISTORY_MAX, addHistory, parseHistory,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackStats = api;

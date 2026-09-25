@@ -95,3 +95,26 @@ test('parseHistory drops malformed entries and bad storage', () => {
   const parsed = S.parseHistory(JSON.stringify([entry(1), bad, noHands, { round: 'x' }]));
   assert.deepEqual(parsed.map((e) => e.round), [1]);
 });
+
+// --- Hint tracking ---
+
+test('recordHint counts shown and followed hints without mutating', () => {
+  const start = S.emptyStats();
+  let s = S.recordHint(start, true);
+  s = S.recordHint(s, false);
+  s = S.recordHint(s, true);
+  assert.equal(start.hintsShown, 0);
+  assert.equal(s.hintsShown, 3);
+  assert.equal(s.hintsFollowed, 2);
+  assert.equal(S.hintRate(s), 2 / 3);
+});
+
+test('hint rate is empty before any hint and survives recordRound and storage', () => {
+  assert.equal(S.hintRate(S.emptyStats()), null);
+  let s = S.recordHint(S.emptyStats(), true);
+  s = S.recordRound(s, [{ outcome: 'win' }], 10);
+  const restored = S.parseStats(JSON.stringify(s));
+  assert.equal(restored.hintsFollowed, 1);
+  // Stats saved before this feature load with zero hints.
+  assert.equal(S.parseStats(JSON.stringify({ wins: 2 })).hintsShown, 0);
+});

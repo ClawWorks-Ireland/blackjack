@@ -37,7 +37,7 @@
     hint: $('hint'), hintText: $('hint-text'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
-      net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
+      hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
     },
   };
 
@@ -184,6 +184,9 @@
     els.stat.rate.textContent = rate === null ? '–' : `${Math.round(rate * 100)}%`;
     els.stat.record.textContent = `${stats.wins}–${stats.losses}–${stats.pushes}`;
     els.stat.blackjacks.textContent = String(stats.blackjacks);
+    const hr = Stats.hintRate(stats);
+    els.stat.hints.textContent = hr === null ? '–'
+      : `${stats.hintsFollowed} of ${stats.hintsShown} (${Math.round(hr * 100)}%)`;
     els.stat.net.textContent = money(stats.net);
     els.stat.net.dataset.sign = stats.net > 0 ? 'up' : stats.net < 0 ? 'down' : '';
     els.stat.streak.textContent = stats.streak > 0 ? `${stats.streak} won`
@@ -356,8 +359,22 @@
     renderHistory();
   }
 
-  function act(fn, cue) {
+  /**
+   * If a hint is showing for this decision, count whether `move` matches it.
+   * Runs before the move so the advice reflects the state you acted on.
+   */
+  function scoreHint(move) {
+    if (!move || hintFor !== decisionKey()) return;
+    const advice = currentAdvice();
+    hintFor = null;
+    if (!advice) return;
+    stats = Stats.recordHint(stats, advice.action === move);
+    storage('set', STATS_KEY, JSON.stringify(stats));
+  }
+
+  function act(fn, cue, move) {
     try {
+      scoreHint(move);
       fn();
       if (cue) Sound.play(cue);
     } catch (err) {
@@ -376,13 +393,13 @@
     const bet = Math.floor(Number(els.betInput.value));
     act(() => { game.deal(bet); round++; }, 'chip');
   });
-  els.hit.addEventListener('click', () => act(() => game.hit()));
-  els.stand.addEventListener('click', () => act(() => game.stand()));
-  els.double.addEventListener('click', () => act(() => game.double(), 'chip'));
-  els.split.addEventListener('click', () => act(() => game.split(), 'chip'));
-  els.surrender.addEventListener('click', () => act(() => game.surrender()));
-  els.insure.addEventListener('click', () => act(() => game.takeInsurance(), 'chip'));
-  els.noInsure.addEventListener('click', () => act(() => game.declineInsurance()));
+  els.hit.addEventListener('click', () => act(() => game.hit(), null, 'hit'));
+  els.stand.addEventListener('click', () => act(() => game.stand(), null, 'stand'));
+  els.double.addEventListener('click', () => act(() => game.double(), 'chip', 'double'));
+  els.split.addEventListener('click', () => act(() => game.split(), 'chip', 'split'));
+  els.surrender.addEventListener('click', () => act(() => game.surrender(), null, 'surrender'));
+  els.insure.addEventListener('click', () => act(() => game.takeInsurance(), 'chip', 'insurance'));
+  els.noInsure.addEventListener('click', () => act(() => game.declineInsurance(), null, 'no-insurance'));
   els.reset.addEventListener('click', () => {
     game = new Game({ bankroll: START_BANKROLL });
     shown = new WeakSet();
