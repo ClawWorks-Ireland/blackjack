@@ -2,7 +2,8 @@
  * Blackjack core rules. Pure and DOM-free so it runs in the browser
  * (as window.Blackjack) and under Node for tests (via module.exports).
  *
- * House rules: 6-deck shoe, dealer stands on all 17s, blackjack pays 3:2,
+ * House rules: 6-deck shoe with a cut card at 75% (reshuffled only
+ * between rounds), dealer stands on all 17s, blackjack pays 3:2,
  * double down on any first two cards (including after a split), split
  * same-rank pairs up to 4 hands, split aces get one card each, a 21 on a
  * split hand pays 1:1 (not blackjack).
@@ -21,7 +22,7 @@
   const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
   const DEALER_STAND = 17;
   const MAX_HANDS = 4;
-  const RESHUFFLE_AT = 52; // reshuffle when fewer cards than one deck remain
+  const PENETRATION = 0.75; // cut card sits three quarters of the way into the shoe
 
   function createShoe(decks = 6) {
     const shoe = [];
@@ -95,12 +96,15 @@
    * Phases: betting -> [insurance] -> player -> done.
    */
   class Game {
-    constructor({ bankroll = 1000, decks = 6, minBet = 1, rng = Math.random } = {}) {
+    constructor({ bankroll = 1000, decks = 6, minBet = 1, penetration = PENETRATION, rng = Math.random } = {}) {
       this.bankroll = bankroll;
       this.decks = decks;
       this.minBet = minBet;
+      this.penetration = penetration;
       this.rng = rng;
       this.shoe = shuffle(createShoe(decks), rng);
+      this.shuffles = 0; // new shoes started at the cut card (between rounds)
+      this.emergencyShuffles = 0; // shoe ran dry mid-round (tiny shoes only)
       this.phase = 'betting';
       this.hands = [];
       this.active = 0;
@@ -128,11 +132,34 @@
       return this.hands.length ? this.hands[0].bet / 2 : 0;
     }
 
+    /** True once the cut card has come out: shuffle before the next round. */
+    get cutCardReached() {
+      return this.shoe.length <= Math.round(this.decks * 52 * (1 - this.penetration));
+    }
+
     draw() {
-      if (this.shoe.length < RESHUFFLE_AT) {
-        this.shoe = shuffle(createShoe(this.decks), this.rng);
-      }
+      if (!this.shoe.length) this.refillFromDiscards();
       return this.shoe.pop();
+    }
+
+    /**
+     * Last resort if a round outlasts the cards behind the cut card: shuffle
+     * the discards (every card not on the table) and keep dealing, as a
+     * dealer would. Only reachable with very small shoes.
+     */
+    refillFromDiscards() {
+      const onTable = new Map();
+      const key = (c) => c.rank + c.suit;
+      for (const c of [...this.dealer, ...this.hands.flatMap((h) => h.cards)]) {
+        onTable.set(key(c), (onTable.get(key(c)) || 0) + 1);
+      }
+      const discards = createShoe(this.decks).filter((c) => {
+        const n = onTable.get(key(c)) || 0;
+        if (n) onTable.set(key(c), n - 1);
+        return !n;
+      });
+      this.shoe = shuffle(discards, this.rng);
+      this.emergencyShuffles++;
     }
 
     canInsure() {
@@ -160,6 +187,12 @@
       if (!Number.isFinite(bet) || bet <= 0) throw new Error('Bet must be positive');
       if (bet < this.minBet) throw new Error(`Minimum bet is $${this.minBet}`);
       if (bet > this.bankroll) throw new Error('Bet exceeds bankroll');
+      // Between rounds is the only time the shoe is replaced.
+      this.newShoe = this.cutCardReached;
+      if (this.newShoe) {
+        this.shoe = shuffle(createShoe(this.decks), this.rng);
+        this.shuffles++;
+      }
       this.bankroll -= bet;
       this.results = [];
       this.insurance = 0;

@@ -118,11 +118,60 @@ test('deal rejects invalid bets and mid-round deals', () => {
   assert.throws(() => g.deal(10));
 });
 
-test('shoe reshuffles when running low', () => {
-  const g = new BJ.Game({ decks: 1 });
-  g.shoe = g.shoe.slice(0, 10);
-  g.draw();
-  assert.ok(g.shoe.length >= 50);
+// --- Cut card: the shoe is only replaced between rounds ---
+
+test('cut card sits three quarters of the way into the shoe', () => {
+  const g = new BJ.Game(); // 6 decks: 78 cards behind the cut card
+  g.shoe = g.shoe.slice(0, 79);
+  assert.ok(!g.cutCardReached);
+  g.shoe.pop();
+  assert.ok(g.cutCardReached);
+});
+
+test('a round that passes the cut card finishes from the same shoe', () => {
+  // 80 cards left; the deal takes it past the cut card (78).
+  const g = riggedGame([c('10'), c('2'), c('10'), c('6'), c('2'), c('2'), c('3'), c('K')]);
+  g.shoe = g.shoe.slice(-80);
+  const lengths = [g.shoe.length];
+  g.deal(10);
+  lengths.push(g.shoe.length);
+  assert.ok(g.cutCardReached);
+  while (g.phase === 'player') { g.hit(); lengths.push(g.shoe.length); }
+  assert.equal(g.shuffles, 0);
+  for (let i = 1; i < lengths.length; i++) assert.ok(lengths[i] < lengths[i - 1], 'no reshuffle mid-round');
+  // The next deal starts a fresh shoe before any card is dealt.
+  g.deal(10);
+  assert.equal(g.shuffles, 1);
+  assert.ok(g.newShoe);
+  assert.equal(g.shoe.length, 312 - 4);
+});
+
+test('no mid-round reshuffles over many rounds', () => {
+  let seed = 7;
+  const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const g = new BJ.Game({ bankroll: 1e9, rng });
+  for (let i = 0; i < 3000; i++) {
+    g.deal(10);
+    let last = g.shoe.length;
+    if (g.phase === 'insurance') g.declineInsurance();
+    while (g.phase === 'player') {
+      if (g.canSplit()) g.split(); else g.hit();
+      assert.ok(g.shoe.length < last, `reshuffled mid-round in round ${i}`);
+      last = g.shoe.length;
+    }
+  }
+  assert.ok(g.shuffles > 30, 'the cut card does come out');
+  assert.equal(g.emergencyShuffles, 0);
+});
+
+test('a shoe that runs dry mid-round reuses only the discards', () => {
+  const g = riggedGame([c('8'), c('8'), c('10'), c('7')]);
+  g.deal(10);
+  g.shoe = [];
+  g.split(); // second 8 needs a card: shoe is empty
+  assert.equal(g.emergencyShuffles, 1);
+  const onTable = [...g.dealer, ...g.hands.flatMap((h) => h.cards)].length;
+  assert.equal(g.shoe.length + onTable, 312);
 });
 
 // --- Splitting ---
