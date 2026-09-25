@@ -87,3 +87,6 @@ kbd { font-size: 0.75rem; opacity: 0.6; margin-left: 0.2rem; }
 .player-hand[data-outcome="lose"] h2, .player-hand[data-outcome="bust"] h2 { color: #ffb3b3; }
 .player-hands:has(> :nth-child(3)) .card { width: 60px; height: 86px; }
 .player-hands:has(> :nth-child(3)) .pip { font-size: 1.8rem; }
+
+/* Keep the hidden attribute authoritative over display rules above */
+[hidden] { display: none !important; }

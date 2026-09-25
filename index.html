@@ -9,7 +9,7 @@
 <body>
   <main class="table">
     <h1>Blackjack</h1>
-    <p class="rules">Dealer stands on 17 · Blackjack pays 3:2 · Double on any two cards · Split pairs up to 4 hands</p>
+    <p class="rules">Dealer stands on 17 · Blackjack pays 3:2 · Double on any two cards · Split pairs up to 4 hands<br>Insurance pays 2:1 · Late surrender returns half your bet</p>
 
     <section class="hand" aria-labelledby="dealer-label">
       <h2 id="dealer-label">Dealer <span id="dealer-total" class="total"></span></h2>
@@ -39,6 +39,12 @@
         <button id="stand" disabled>Stand <kbd>S</kbd></button>
         <button id="double" disabled>Double <kbd>D</kbd></button>
         <button id="split" disabled>Split <kbd>P</kbd></button>
+        <button id="surrender" disabled>Surrender <kbd>R</kbd></button>
+      </div>
+
+      <div id="insurance" class="actions" hidden>
+        <button id="insure">Take insurance <kbd>I</kbd></button>
+        <button id="no-insure">No insurance <kbd>N</kbd></button>
       </div>
 
       <button id="reset" class="link" hidden>Out of chips. Start over with $1000</button>

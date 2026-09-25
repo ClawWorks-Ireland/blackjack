@@ -5,7 +5,14 @@
  * House rules: 6-deck shoe, dealer stands on all 17s, blackjack pays 3:2,
  * double down on any first two cards (including after a split), split
  * same-rank pairs up to 4 hands, split aces get one card each, a 21 on a
- * split hand pays 1:1 (not blackjack), no insurance.
+ * split hand pays 1:1 (not blackjack).
+ *
+ * Insurance: offered when the dealer shows an ace, costs half the bet and
+ * pays 2:1 if the dealer has blackjack. The dealer peeks for blackjack
+ * after insurance is settled (and immediately when showing a ten).
+ *
+ * Surrender (late): on the first two cards of an unsplit hand, after the
+ * dealer peeks, give up half the bet and end the hand.
  */
 (function (root) {
   'use strict';
@@ -66,7 +73,8 @@
    * net chip change relative to that hand's (possibly doubled) bet.
    * A two-card 21 on a split hand is an ordinary 21, not a blackjack.
    */
-  function settle(playerHand, dealerHand, bet, { fromSplit = false } = {}) {
+  function settle(playerHand, dealerHand, bet, { fromSplit = false, surrendered = false } = {}) {
+    if (surrendered) return { outcome: 'surrender', net: -bet / 2 };
     const pBJ = !fromSplit && isBlackjack(playerHand);
     const dBJ = isBlackjack(dealerHand);
     if (pBJ && dBJ) return { outcome: 'push', net: 0 };
@@ -84,6 +92,7 @@
   /**
    * Stateful game wrapper around the rules. The player may hold several
    * hands after splitting; `hands[active]` is the one being played.
+   * Phases: betting -> [insurance] -> player -> done.
    */
   class Game {
     constructor({ bankroll = 1000, decks = 6, rng = Math.random } = {}) {
@@ -91,20 +100,26 @@
       this.decks = decks;
       this.rng = rng;
       this.shoe = shuffle(createShoe(decks), rng);
-      this.phase = 'betting'; // betting | player | done
+      this.phase = 'betting';
       this.hands = [];
       this.active = 0;
       this.dealer = [];
       this.results = [];
+      this.insurance = 0; // side-bet stake
+      this.insuranceNet = null; // null until insurance is settled
     }
 
     get currentHand() {
       return this.phase === 'player' ? this.hands[this.active] : null;
     }
 
-    /** Total chip change for the finished round. */
+    /** Total chip change for the finished round, including insurance. */
     get net() {
-      return this.results.reduce((sum, r) => sum + r.net, 0);
+      return this.results.reduce((sum, r) => sum + r.net, 0) + (this.insuranceNet || 0);
+    }
+
+    get insuranceCost() {
+      return this.hands.length ? this.hands[0].bet / 2 : 0;
     }
 
     draw() {
@@ -112,6 +127,10 @@
         this.shoe = shuffle(createShoe(this.decks), this.rng);
       }
       return this.shoe.pop();
+    }
+
+    canInsure() {
+      return this.phase === 'insurance' && this.bankroll >= this.insuranceCost;
     }
 
     canDouble() {
@@ -125,19 +144,48 @@
         this.hands.length < MAX_HANDS && this.bankroll >= h.bet;
     }
 
+    canSurrender() {
+      const h = this.currentHand;
+      return !!h && !h.fromSplit && h.cards.length === 2;
+    }
+
     deal(bet) {
-      if (this.phase === 'player') throw new Error('Round in progress');
+      if (this.phase === 'player' || this.phase === 'insurance') throw new Error('Round in progress');
       if (!Number.isFinite(bet) || bet <= 0) throw new Error('Bet must be positive');
       if (bet > this.bankroll) throw new Error('Bet exceeds bankroll');
       this.bankroll -= bet;
       this.results = [];
+      this.insurance = 0;
+      this.insuranceNet = null;
       const cards = [this.draw(), this.draw()];
       this.dealer = [this.draw(), this.draw()];
-      this.hands = [{ cards, bet, fromSplit: false, splitAces: false, done: false }];
+      this.hands = [{ cards, bet, fromSplit: false, splitAces: false, surrendered: false, done: false }];
       this.active = 0;
+      if (this.dealer[0].rank === 'A') this.phase = 'insurance';
+      else this.peek();
+    }
+
+    takeInsurance() {
+      if (!this.canInsure()) throw new Error('Cannot take insurance now');
+      this.insurance = this.insuranceCost;
+      this.bankroll -= this.insurance;
+      this.peek();
+    }
+
+    declineInsurance() {
+      if (this.phase !== 'insurance') throw new Error('Insurance is not on offer');
+      this.peek();
+    }
+
+    /** Dealer checks for blackjack; settles insurance; naturals end the round. */
+    peek() {
+      const dBJ = isBlackjack(this.dealer);
+      if (this.insurance > 0) {
+        this.insuranceNet = dBJ ? this.insurance * 2 : -this.insurance;
+        if (dBJ) this.bankroll += this.insurance * 3; // stake back + 2:1
+      }
       this.phase = 'player';
-      // Naturals end the round at once; the dealer does not draw.
-      if (isBlackjack(cards) || isBlackjack(this.dealer)) this.finish();
+      if (dBJ || isBlackjack(this.hands[0].cards)) this.finish();
     }
 
     hit() {
@@ -167,11 +215,21 @@
       const h = this.currentHand;
       const aces = h.cards[0].rank === 'A';
       this.bankroll -= h.bet;
-      const second = { cards: [h.cards.pop()], bet: h.bet, fromSplit: true, splitAces: aces, done: false };
+      const second = {
+        cards: [h.cards.pop()], bet: h.bet, fromSplit: true, splitAces: aces, surrendered: false, done: false,
+      };
       h.fromSplit = true;
       h.splitAces = aces;
       this.hands.splice(this.active + 1, 0, second);
       this.prepare(this.active);
+      this.advance();
+    }
+
+    surrender() {
+      if (!this.canSurrender()) throw new Error('Cannot surrender now');
+      const h = this.currentHand;
+      h.surrendered = true;
+      h.done = true;
       this.advance();
     }
 
@@ -195,15 +253,14 @@
       }
       if (this.active < this.hands.length) return;
       // Dealer only draws if at least one player hand is still live.
-      if (this.hands.some((h) => !isBust(h.cards))) {
+      if (this.hands.some((h) => !h.surrendered && !isBust(h.cards))) {
         while (dealerShouldHit(this.dealer)) this.dealer.push(this.draw());
       }
       this.finish();
     }
 
     finish() {
-      this.results = this.hands.map((h) =>
-        settle(h.cards, this.dealer, h.bet, { fromSplit: h.fromSplit }));
+      this.results = this.hands.map((h) => settle(h.cards, this.dealer, h.bet, h));
       // Stakes were removed when placed, so return stake + net per hand.
       this.hands.forEach((h, i) => { this.bankroll += h.bet + this.results[i].net; });
       this.phase = 'done';

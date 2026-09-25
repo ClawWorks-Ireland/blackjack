@@ -13,6 +13,7 @@
     message: $('message'), bankroll: $('bankroll'), betDisplay: $('bet-display'),
     betForm: $('bet-form'), betInput: $('bet'), deal: $('deal'),
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
+    surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'),
   };
 
@@ -22,8 +23,11 @@
     lose: () => 'Dealer wins.',
     bust: () => 'Bust. Dealer wins.',
     push: () => 'Push. Your bet is returned.',
+    surrender: (net) => `You surrendered. $${-net} is returned.`,
   };
-  const SHORT = { blackjack: 'Blackjack', win: 'Win', lose: 'Lose', bust: 'Bust', push: 'Push' };
+  const SHORT = {
+    blackjack: 'Blackjack', win: 'Win', lose: 'Lose', bust: 'Bust', push: 'Push', surrender: 'Surrender',
+  };
 
   const suitName = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' };
 
@@ -76,27 +80,38 @@
   }
 
   function resultMessage() {
+    let text;
     if (game.results.length === 1) {
       const r = game.results[0];
-      return MESSAGES[r.outcome](r.net);
+      text = MESSAGES[r.outcome](r.net);
+    } else {
+      const parts = game.results.map((r, i) => `Hand ${i + 1}: ${SHORT[r.outcome]}`);
+      text = `${parts.join(' · ')}.`;
     }
-    const parts = game.results.map((r, i) => `Hand ${i + 1}: ${SHORT[r.outcome]}`);
-    return `${parts.join(' · ')}. Net ${money(game.net)}.`;
+    if (game.insuranceNet !== null) {
+      text += game.insuranceNet > 0 ? ` Insurance pays ${money(game.insuranceNet)}.` : ' Insurance lost.';
+    }
+    if (game.results.length > 1 || game.insuranceNet !== null) text += ` Net ${money(game.net)}.`;
+    return text;
   }
 
   function netOutcome() {
-    if (game.results.length === 1) return game.results[0].outcome;
+    if (game.results.length === 1 && game.insuranceNet === null) {
+      return game.results[0].outcome === 'surrender' ? 'lose' : game.results[0].outcome;
+    }
     return game.net > 0 ? 'win' : game.net < 0 ? 'lose' : 'push';
   }
 
   function render() {
     const inRound = game.phase === 'player';
+    const offering = game.phase === 'insurance';
+    const live = inRound || offering;
 
     els.dealerCards.replaceChildren(
-      ...game.dealer.map((card, i) => cardEl(card, inRound && i === 1))
+      ...game.dealer.map((card, i) => cardEl(card, live && i === 1))
     );
     els.dealerTotal.textContent = !game.dealer.length ? ''
-      : inRound ? `(${handValue([game.dealer[0]]).total} showing)`
+      : live ? `(${game.dealer[0].rank === 'A' ? 'ace' : handValue([game.dealer[0]]).total} showing)`
       : `(${formatTotal(game.dealer)})`;
 
     if (game.hands.length) {
@@ -109,28 +124,38 @@
 
     els.bankroll.textContent = money(game.bankroll);
     const staked = game.hands.reduce((sum, h) => sum + h.bet, 0);
-    els.betDisplay.textContent = inRound ? `· In play: $${staked}` : '';
+    const inPlay = staked + game.insurance;
+    els.betDisplay.textContent = live ? `· In play: $${inPlay}` : '';
 
     els.hit.disabled = !inRound;
     els.stand.disabled = !inRound;
     els.double.disabled = !game.canDouble();
     els.split.disabled = !game.canSplit();
-    els.deal.disabled = inRound;
-    els.betInput.disabled = inRound;
+    els.surrender.disabled = !game.canSurrender();
+    els.insurance.hidden = !offering;
+    els.insure.disabled = !game.canInsure();
+    els.insure.firstChild.textContent = `Take insurance ($${game.insuranceCost}) `;
+    els.deal.disabled = live;
+    els.betInput.disabled = live;
     els.betInput.max = String(game.bankroll);
 
     if (game.phase === 'done' && game.results.length) {
       els.message.textContent = resultMessage();
       els.message.dataset.outcome = netOutcome();
+    } else if (offering) {
+      els.message.textContent = game.canInsure()
+        ? `Dealer shows an ace. Insure for $${game.insuranceCost}?`
+        : 'Dealer shows an ace. Not enough chips to insure.';
+      delete els.message.dataset.outcome;
     } else if (inRound) {
       const multi = game.hands.length > 1;
       els.message.textContent = multi
         ? `Playing hand ${game.active + 1} of ${game.hands.length}.`
-        : 'Hit, stand, double, or split?';
+        : 'Your move.';
       delete els.message.dataset.outcome;
     }
 
-    const broke = !inRound && game.bankroll <= 0;
+    const broke = !live && game.bankroll <= 0;
     els.reset.hidden = !broke;
     els.deal.disabled = els.deal.disabled || broke;
   }
@@ -153,6 +178,9 @@
   els.stand.addEventListener('click', () => act(() => game.stand()));
   els.double.addEventListener('click', () => act(() => game.double()));
   els.split.addEventListener('click', () => act(() => game.split()));
+  els.surrender.addEventListener('click', () => act(() => game.surrender()));
+  els.insure.addEventListener('click', () => act(() => game.takeInsurance()));
+  els.noInsure.addEventListener('click', () => act(() => game.declineInsurance()));
   els.reset.addEventListener('click', () => {
     game = new Game({ bankroll: START_BANKROLL });
     els.message.textContent = 'Place your bet to start.';
@@ -160,11 +188,14 @@
     render();
   });
 
-  const SHORTCUTS = { h: els.hit, s: els.stand, d: els.double, p: els.split };
+  const SHORTCUTS = {
+    h: els.hit, s: els.stand, d: els.double, p: els.split, r: els.surrender,
+    i: els.insure, n: els.noInsure,
+  };
   document.addEventListener('keydown', (e) => {
     if (e.target === els.betInput || e.metaKey || e.ctrlKey) return;
     const btn = SHORTCUTS[e.key.toLowerCase()];
-    if (btn && !btn.disabled) btn.click();
+    if (btn && !btn.disabled && !btn.closest('[hidden]')) btn.click();
   });
 
   render();

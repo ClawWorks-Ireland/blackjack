@@ -213,3 +213,116 @@ test('dealer does not draw when every split hand busts', () => {
   assert.deepEqual(g.results.map((r) => r.outcome), ['bust', 'bust']);
   assert.equal(g.bankroll, 980);
 });
+
+// --- Insurance ---
+
+test('dealer ace up offers insurance before play', () => {
+  const g = riggedGame([c('10'), c('9'), c('A'), c('7')]);
+  g.deal(100);
+  assert.equal(g.phase, 'insurance');
+  assert.ok(g.canInsure());
+  assert.throws(() => g.hit());
+  assert.throws(() => g.deal(10));
+});
+
+test('ten up with dealer blackjack ends the round without insurance', () => {
+  const g = riggedGame([c('10'), c('9'), c('K'), c('A')]);
+  g.deal(100);
+  assert.equal(g.phase, 'done');
+  assert.equal(g.results[0].outcome, 'lose');
+  assert.equal(g.insuranceNet, null);
+});
+
+test('insurance pays 2:1 when the dealer has blackjack', () => {
+  const g = riggedGame([c('10'), c('9'), c('A'), c('K')]);
+  g.deal(100);
+  g.takeInsurance();
+  assert.equal(g.phase, 'done');
+  assert.equal(g.results[0].outcome, 'lose');
+  assert.equal(g.insuranceNet, 100);
+  assert.equal(g.net, 0);
+  assert.equal(g.bankroll, 1000);
+});
+
+test('insurance is lost when the dealer has no blackjack, play continues', () => {
+  const g = riggedGame([c('10'), c('9'), c('A'), c('7')]);
+  g.deal(100);
+  g.takeInsurance();
+  assert.equal(g.phase, 'player');
+  assert.equal(g.insuranceNet, -50);
+  g.stand(); // 19 vs soft 18
+  assert.equal(g.results[0].outcome, 'win');
+  assert.equal(g.net, 50);
+  assert.equal(g.bankroll, 1050);
+});
+
+test('declining insurance against dealer blackjack loses only the bet', () => {
+  const g = riggedGame([c('10'), c('9'), c('A'), c('K')]);
+  g.deal(100);
+  g.declineInsurance();
+  assert.equal(g.phase, 'done');
+  assert.equal(g.insuranceNet, null);
+  assert.equal(g.bankroll, 900);
+});
+
+test('player blackjack with insurance against dealer blackjack is even money', () => {
+  const g = riggedGame([c('A'), c('K'), c('A'), c('Q')]);
+  g.deal(100);
+  assert.equal(g.phase, 'insurance');
+  g.takeInsurance();
+  assert.equal(g.results[0].outcome, 'push');
+  assert.equal(g.net, 100);
+  assert.equal(g.bankroll, 1100);
+});
+
+test('player blackjack still pays 3:2 once the dealer peeks clean', () => {
+  const g = riggedGame([c('A'), c('K'), c('A'), c('7')]);
+  g.deal(100);
+  g.declineInsurance();
+  assert.equal(g.phase, 'done');
+  assert.equal(g.results[0].outcome, 'blackjack');
+  assert.equal(g.bankroll, 1150);
+});
+
+test('cannot insure without chips for half the bet', () => {
+  const g = riggedGame([c('10'), c('9'), c('A'), c('7')], 100);
+  g.deal(100);
+  assert.ok(!g.canInsure());
+  assert.throws(() => g.takeInsurance());
+  g.declineInsurance();
+  assert.equal(g.phase, 'player');
+});
+
+// --- Surrender ---
+
+test('surrender returns half the bet and the dealer does not draw', () => {
+  const g = riggedGame([c('10'), c('6'), c('10'), c('6')]);
+  g.deal(100);
+  assert.ok(g.canSurrender());
+  g.surrender();
+  assert.equal(g.phase, 'done');
+  assert.deepEqual(g.results[0], { outcome: 'surrender', net: -50 });
+  assert.equal(g.dealer.length, 2);
+  assert.equal(g.bankroll, 950);
+});
+
+test('surrender is only allowed on the first two cards of an unsplit hand', () => {
+  const hit = riggedGame([c('5'), c('4'), c('10'), c('7'), c('2')]);
+  hit.deal(10);
+  hit.hit();
+  assert.ok(!hit.canSurrender());
+  assert.throws(() => hit.surrender());
+
+  const split = riggedGame([c('8'), c('8'), c('10'), c('7'), c('3'), c('10')]);
+  split.deal(10);
+  split.split();
+  assert.ok(!split.canSurrender());
+});
+
+test('surrender is not offered until insurance is resolved', () => {
+  const g = riggedGame([c('10'), c('6'), c('A'), c('7')]);
+  g.deal(100);
+  assert.ok(!g.canSurrender());
+  g.declineInsurance();
+  assert.ok(g.canSurrender());
+});
