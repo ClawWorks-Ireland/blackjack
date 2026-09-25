@@ -20,29 +20,35 @@ npm start            # serves on http://127.0.0.1:8080 (localhost only)
 npm test             # node --test, Node 18 or newer
 ```
 
-The tests cover the game rules, the stats, and the strategy chart. They
-use only Node's built-in test runner.
+The tests cover the game rules, saving and restoring, the stats, the
+strategy chart and money formatting. They use only Node's built-in test
+runner.
 
 ## Table rules
 
-- 6-deck shoe, reshuffled when fewer than 52 cards remain
+- 6-deck shoe with a cut card three quarters of the way in. Once it
+  comes out, the round finishes from the same shoe and a new one is
+  shuffled before the next deal, never mid-round
 - Dealer stands on all 17s, including soft 17
 - Blackjack pays 3:2
 - Double down on any first two cards, including after a split
 - Split same-rank pairs, up to 4 hands. Split aces get one card each,
   and a 21 on a split hand pays 1:1, not 3:2
 - Insurance is offered when the dealer shows an ace. It costs half your
-  bet and pays 2:1 if the dealer has blackjack
+  bet and pays 2:1 if the dealer has blackjack. If you hold blackjack
+  it's called even money: taking it pays 1:1 whatever the dealer has
 - Late surrender on your first two cards (not after a split) returns
   half your bet
 - The dealer checks for blackjack before you play. If every one of your
   hands busts or is surrendered, the dealer doesn't draw
 
-You start with $1000. If you run out, a button resets the bankroll.
+You start with $1,000. The minimum bet is $1. When you have less than
+that left between rounds, a button starts you over with $1,000.
 
 ## Features
 
-- **Hint (G):** shows the basic-strategy move and why, for example
+- **Hint (G):** shows the basic-strategy move for these rules (dealer
+  stands on soft 17) and why, for example
   "Hard 16 vs dealer ace: Surrender", and highlights the button
 - **Coach notes (C to toggle):** after an off-chart move, a note says
   what the chart recommends. Moves are still scored when notes are off
@@ -52,13 +58,18 @@ You start with $1000. If you run out, a button resets the bankroll.
 - **Sound (M to toggle):** card, chip and outcome sounds made with the
   Web Audio API, no audio files
 - **Deal animations:** cards fly in one at a time in table order and
-  the dealer's hole card flips on reveal. Skipped when your system asks
-  for reduced motion
+  the dealer's hole card flips on reveal. Totals, results and the
+  action buttons appear once the last card lands. Skipped when your
+  system asks for reduced motion
+- **Phones:** the layout fits screens down to 360px wide, with touch
+  targets at least 44px tall
 - **Keyboard play:** press ? for the full list of shortcuts
 
-Stats, history, and the sound and coach settings are saved in the
-browser's `localStorage` under keys starting with `blackjack.`. Use
-"Reset stats and history" in the panel to clear them.
+Your bankroll, the shoe and any hand in progress are saved in the
+browser's `localStorage`, so a reload carries on where you left off. So
+are stats, history, and the sound and coach settings. All keys start
+with `blackjack.`. "Reset stats and history" in the panel clears stats
+and history; it doesn't touch the bankroll.
 
 ## Keyboard shortcuts
 
@@ -70,7 +81,7 @@ browser's `localStorage` under keys starting with `blackjack.`. Use
 | P | Split |
 | R | Surrender |
 | G | Basic-strategy hint |
-| I / N | Take / decline insurance |
+| I / N | Take / decline insurance (or even money) |
 | M | Sound on/off |
 | C | Coach notes on/off |
 | ? | Show shortcuts |
@@ -83,16 +94,17 @@ browser's `localStorage` under keys starting with `blackjack.`. Use
 | `blackjack.js` | Game rules and the `Game` state machine. No DOM code |
 | `strategy.js` | Basic-strategy chart for these table rules. No DOM code |
 | `stats.js` | Stats, history and saved-data parsing. No DOM code |
+| `format.js` | Money formatting ($1,002.50). No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
-| `*.test.js` | Tests for the three rule modules |
+| `*.test.js` | Tests for the four DOM-free modules |
 
-The three rule modules work in both the browser (as `window.Blackjack`,
-`window.BlackjackStrategy` and `window.BlackjackStats`) and Node (via
-`module.exports`). That's why they can be tested without a browser.
+The four DOM-free modules work in both the browser (as
+`window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`
+and `window.BlackjackFormat`) and Node (via `module.exports`). That's
+why they can be tested without a browser.
 
 ## Not included
 
-No card counting aids or side bets. The layout is built for desktop
-screens and hasn't been tuned for phones.
+No card counting aids or side bets.
