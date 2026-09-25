@@ -6,6 +6,7 @@
   const STATS_KEY = 'blackjack.stats';
   const HISTORY_KEY = 'blackjack.history';
   const MUTE_KEY = 'blackjack.muted';
+  const COACH_KEY = 'blackjack.coach';
   const { Game, handValue } = window.Blackjack;
   const Stats = window.BlackjackStats;
   const Sound = window.BlackjackSound;
@@ -25,6 +26,7 @@
   let holeWasHidden = false;
   let hintFor = null; // decision point the hint was requested for
   let coachNote = null; // feedback on your last off-chart move
+  let coachOn = storage('get', COACH_KEY) !== '0'; // on unless turned off
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -35,7 +37,7 @@
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
-    hint: $('hint'), hintText: $('hint-text'), coach: $('coach'),
+    hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
       accuracy: $('stat-accuracy'), hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
@@ -370,8 +372,11 @@
   };
 
   function renderCoach() {
-    els.coach.hidden = !coachNote;
-    els.coach.textContent = coachNote || '';
+    const show = coachOn && !!coachNote;
+    els.coach.hidden = !show;
+    els.coach.textContent = show ? coachNote : '';
+    els.coachToggle.setAttribute('aria-pressed', String(coachOn));
+    els.coachToggle.firstChild.textContent = coachOn ? 'Coach notes on ' : 'Coach notes off ';
   }
 
   /**
@@ -436,6 +441,11 @@
     hintFor = decisionKey();
     renderHint();
   });
+  els.coachToggle.addEventListener('click', () => {
+    coachOn = !coachOn;
+    storage('set', COACH_KEY, coachOn ? '1' : '0');
+    renderCoach();
+  });
   els.mute.addEventListener('click', () => {
     Sound.muted = !Sound.muted;
     storage('set', MUTE_KEY, Sound.muted ? '1' : '0');
@@ -452,7 +462,7 @@
 
   const SHORTCUTS = {
     h: els.hit, s: els.stand, d: els.double, p: els.split, r: els.surrender,
-    i: els.insure, n: els.noInsure, m: els.mute, '?': els.hint, g: els.hint,
+    i: els.insure, n: els.noInsure, m: els.mute, c: els.coachToggle, '?': els.hint, g: els.hint,
   };
   document.addEventListener('keydown', (e) => {
     if (e.target === els.betInput || e.metaKey || e.ctrlKey || e.altKey) return;
