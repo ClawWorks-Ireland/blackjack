@@ -118,3 +118,18 @@ test('hint rate is empty before any hint and survives recordRound and storage', 
   // Stats saved before this feature load with zero hints.
   assert.equal(S.parseStats(JSON.stringify({ wins: 2 })).hintsShown, 0);
 });
+
+// --- Strategy accuracy ---
+
+test('recordMove scores decisions and accuracy', () => {
+  const start = S.emptyStats();
+  assert.equal(S.accuracy(start), null);
+  let s = S.recordMove(start, true);
+  s = S.recordMove(s, true);
+  s = S.recordMove(s, false);
+  s = S.recordMove(s, true);
+  assert.equal(start.movesScored, 0);
+  assert.deepEqual([s.movesScored, s.movesCorrect], [4, 3]);
+  assert.equal(S.accuracy(s), 0.75);
+  assert.equal(S.parseStats(JSON.stringify(s)).movesCorrect, 3);
+});

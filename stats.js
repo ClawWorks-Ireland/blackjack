@@ -13,7 +13,7 @@
     return {
       rounds: 0, hands: 0, wins: 0, losses: 0, pushes: 0, blackjacks: 0,
       net: 0, bestRound: 0, worstRound: 0, streak: 0, bestStreak: 0,
-      hintsShown: 0, hintsFollowed: 0,
+      hintsShown: 0, hintsFollowed: 0, movesScored: 0, movesCorrect: 0,
     };
   }
 
@@ -51,6 +51,20 @@
   /** Fraction of shown hints you followed, or null before any were shown. */
   function hintRate(stats) {
     return stats.hintsShown ? stats.hintsFollowed / stats.hintsShown : null;
+  }
+
+  /** Record one decision scored against basic strategy (does not mutate). */
+  function recordMove(stats, correct) {
+    return {
+      ...stats,
+      movesScored: stats.movesScored + 1,
+      movesCorrect: stats.movesCorrect + (correct ? 1 : 0),
+    };
+  }
+
+  /** Fraction of decisions matching basic strategy, or null before any. */
+  function accuracy(stats) {
+    return stats.movesScored ? stats.movesCorrect / stats.movesScored : null;
   }
 
   /** Wins as a fraction of decided hands, or null before any are decided. */
@@ -97,7 +111,7 @@
   }
 
   const api = {
-    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, HISTORY_MAX, addHistory, parseHistory,
+    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, HISTORY_MAX, addHistory, parseHistory,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackStats = api;

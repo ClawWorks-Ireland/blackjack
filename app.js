@@ -37,7 +37,7 @@
     hint: $('hint'), hintText: $('hint-text'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
-      hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
+      accuracy: $('stat-accuracy'), hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
     },
   };
 
@@ -184,6 +184,9 @@
     els.stat.rate.textContent = rate === null ? '–' : `${Math.round(rate * 100)}%`;
     els.stat.record.textContent = `${stats.wins}–${stats.losses}–${stats.pushes}`;
     els.stat.blackjacks.textContent = String(stats.blackjacks);
+    const acc = Stats.accuracy(stats);
+    els.stat.accuracy.textContent = acc === null ? '–'
+      : `${Math.round(acc * 100)}% (${stats.movesCorrect} of ${stats.movesScored})`;
     const hr = Stats.hintRate(stats);
     els.stat.hints.textContent = hr === null ? '–'
       : `${stats.hintsFollowed} of ${stats.hintsShown} (${Math.round(hr * 100)}%)`;
@@ -360,21 +363,25 @@
   }
 
   /**
-   * If a hint is showing for this decision, count whether `move` matches it.
-   * Runs before the move so the advice reflects the state you acted on.
+   * Score `move` against basic strategy, and against the hint if one is
+   * showing. Runs before the move so the advice reflects the state you
+   * acted on.
    */
-  function scoreHint(move) {
-    if (!move || hintFor !== decisionKey()) return;
+  function scoreMove(move) {
+    if (!move) return;
     const advice = currentAdvice();
+    const hinted = hintFor === decisionKey();
     hintFor = null;
     if (!advice) return;
-    stats = Stats.recordHint(stats, advice.action === move);
+    const correct = advice.action === move;
+    stats = Stats.recordMove(stats, correct);
+    if (hinted) stats = Stats.recordHint(stats, correct);
     storage('set', STATS_KEY, JSON.stringify(stats));
   }
 
   function act(fn, cue, move) {
     try {
-      scoreHint(move);
+      scoreMove(move);
       fn();
       if (cue) Sound.play(cue);
     } catch (err) {
