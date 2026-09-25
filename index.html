@@ -7,8 +7,12 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div class="layout">
   <main class="table">
-    <h1>Blackjack</h1>
+    <header class="top">
+      <h1>Blackjack</h1>
+      <button id="mute" class="toggle" aria-pressed="false">🔊 Sound on <kbd>M</kbd></button>
+    </header>
     <p class="rules">Dealer stands on 17 · Blackjack pays 3:2 · Double on any two cards · Split pairs up to 4 hands<br>Insurance pays 2:1 · Late surrender returns half your bet</p>
 
     <section class="hand" aria-labelledby="dealer-label">
@@ -51,7 +55,25 @@
     </section>
   </main>
 
+  <aside class="stats" aria-labelledby="stats-label">
+    <h2 id="stats-label">Stats</h2>
+    <dl>
+      <div class="headline"><dt>Win rate</dt><dd id="stat-rate">–</dd></div>
+      <div><dt>W–L–P (hands)</dt><dd id="stat-record">0–0–0</dd></div>
+      <div><dt>Blackjacks</dt><dd id="stat-blackjacks">0</dd></div>
+      <div><dt>Net</dt><dd id="stat-net">$0</dd></div>
+      <div><dt>Streak</dt><dd id="stat-streak">–</dd></div>
+      <div><dt>Best round</dt><dd id="stat-best">$0</dd></div>
+      <div><dt>Rounds</dt><dd id="stat-rounds">0</dd></div>
+    </dl>
+    <p class="note">Pushes don't count toward win rate. Saved in this browser.</p>
+    <button id="reset-stats" class="link">Reset stats</button>
+  </aside>
+  </div>
+
   <script src="blackjack.js"></script>
+  <script src="stats.js"></script>
+  <script src="sound.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
