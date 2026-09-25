@@ -13,6 +13,7 @@
       <h1>Blackjack</h1>
       <button id="mute" class="toggle" aria-pressed="false">🔊 Sound on <kbd>M</kbd></button>
       <button id="coach-toggle" class="toggle" aria-pressed="true">Coach notes on <kbd>C</kbd></button>
+      <button id="help-open" class="toggle" aria-haspopup="dialog">Shortcuts <kbd>?</kbd></button>
     </header>
     <p class="rules">Dealer stands on 17 · Blackjack pays 3:2 · Double on any two cards · Split pairs up to 4 hands<br>Insurance pays 2:1 · Late surrender returns half your bet</p>
 
@@ -78,6 +79,15 @@
     <button id="reset-stats" class="link">Reset stats and history</button>
   </aside>
   </div>
+
+  <dialog id="help" class="help" aria-labelledby="help-title">
+    <div class="help-body">
+      <h2 id="help-title">Keyboard shortcuts</h2>
+      <div id="help-list"></div>
+      <p class="note">Shortcuts only work when that button is available. Esc closes this panel.</p>
+      <button id="help-close" autofocus>Close</button>
+    </div>
+  </dialog>
 
   <script src="blackjack.js"></script>
   <script src="stats.js"></script>

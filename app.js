@@ -38,6 +38,7 @@
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
     hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
+    help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
       accuracy: $('stat-accuracy'), hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
@@ -460,15 +461,65 @@
     renderHistory();
   });
 
-  const SHORTCUTS = {
-    h: els.hit, s: els.stand, d: els.double, p: els.split, r: els.surrender,
-    i: els.insure, n: els.noInsure, m: els.mute, c: els.coachToggle, '?': els.hint, g: els.hint,
-  };
+  // Single source for key bindings and the help panel, so they can't drift.
+  const SHORTCUT_GROUPS = [
+    ['Your turn', [
+      ['h', 'Hit', els.hit], ['s', 'Stand', els.stand], ['d', 'Double down', els.double],
+      ['p', 'Split a pair', els.split], ['r', 'Surrender', els.surrender],
+      ['g', 'Basic-strategy hint', els.hint],
+    ]],
+    ['Insurance', [['i', 'Take insurance', els.insure], ['n', 'No insurance', els.noInsure]]],
+    ['Settings', [
+      ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
+      ['?', 'Show this help', els.helpOpen],
+    ]],
+  ];
+  const SHORTCUTS = Object.fromEntries(
+    SHORTCUT_GROUPS.flatMap(([, keys]) => keys.map(([key, , btn]) => [key, btn]))
+  );
+
+  function shortcutRow(key, label) {
+    const row = document.createElement('div');
+    const dt = document.createElement('dt');
+    const kbd = document.createElement('kbd');
+    kbd.textContent = key;
+    dt.append(kbd);
+    const dd = document.createElement('dd');
+    dd.textContent = label;
+    row.append(dt, dd);
+    return row;
+  }
+
+  function renderHelp() {
+    const sections = SHORTCUT_GROUPS.map(([title, keys]) => {
+      const h = document.createElement('h3');
+      h.textContent = title;
+      const dl = document.createElement('dl');
+      dl.append(...keys.map(([key, label]) => shortcutRow(key.toUpperCase(), label)));
+      if (title === 'Your turn') dl.append(shortcutRow('Enter', 'Deal (in the bet box)'));
+      return [h, dl];
+    });
+    els.helpList.replaceChildren(...sections.flat());
+  }
+
+  els.helpOpen.addEventListener('click', () => {
+    if (!els.help.open) els.help.showModal();
+  });
+  els.helpClose.addEventListener('click', () => els.help.close());
+  // Clicking the backdrop (outside the panel) closes it too.
+  els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
+
   document.addEventListener('keydown', (e) => {
+    if (els.help.open) return; // Escape closes the dialog natively
     if (e.target === els.betInput || e.metaKey || e.ctrlKey || e.altKey) return;
     const btn = SHORTCUTS[e.key.toLowerCase()];
-    if (btn && !btn.disabled && !btn.closest('[hidden]')) btn.click();
+    if (btn && !btn.disabled && !btn.closest('[hidden]')) {
+      e.preventDefault();
+      btn.click();
+    }
   });
+
+  renderHelp();
 
   renderMute();
   render();

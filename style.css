@@ -184,3 +184,36 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
   background: rgba(0, 0, 0, 0.25);
   font-size: 0.95rem;
 }
+
+/* Keyboard shortcuts help */
+.help {
+  width: min(360px, 92vw);
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--felt-dark);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+.help::backdrop { background: rgba(0, 0, 0, 0.55); }
+.help-body { padding: 1.25rem 1.5rem; }
+.help h2 { color: var(--gold); margin-bottom: 0.75rem; }
+.help dl { margin: 0; display: grid; gap: 0.35rem; }
+.help dl > div { display: flex; gap: 0.75rem; align-items: center; }
+.help dt { min-width: 4rem; }
+.help h3 { margin: 0.9rem 0 0.4rem; font-size: 0.8rem; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.05em; }
+.help h3:first-child { margin-top: 0; }
+.help dd { margin: 0; }
+.help kbd {
+  display: inline-block;
+  min-width: 1.8rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  font-size: 0.85rem;
+  opacity: 1;
+  margin: 0;
+  text-align: center;
+}
+.help .note { font-size: 0.8rem; opacity: 0.7; margin: 1rem 0 0.75rem; }
