@@ -57,7 +57,33 @@
     return base;
   }
 
-  const api = { emptyStats, recordRound, winRate, parseStats };
+  const HISTORY_MAX = 20;
+  const OUTCOMES = new Set([...WIN, ...LOSS, 'push']);
+
+  /** Prepend a round summary, keeping only the newest `max` entries. */
+  function addHistory(history, entry, max = HISTORY_MAX) {
+    return [entry, ...history].slice(0, max);
+  }
+
+  const validHand = (h) => h && typeof h === 'object' && OUTCOMES.has(h.outcome) &&
+    Number.isFinite(h.total) && typeof h.cards === 'string';
+  const validEntry = (e) => e && typeof e === 'object' && Number.isFinite(e.round) &&
+    Number.isFinite(e.net) && Number.isFinite(e.dealer) && typeof e.dealerCards === 'string' &&
+    Array.isArray(e.hands) && e.hands.length > 0 && e.hands.every(validHand);
+
+  /** Parse stored history, dropping malformed entries. */
+  function parseHistory(json) {
+    try {
+      const data = JSON.parse(json);
+      return Array.isArray(data) ? data.filter(validEntry).slice(0, HISTORY_MAX) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  const api = {
+    emptyStats, recordRound, winRate, parseStats, HISTORY_MAX, addHistory, parseHistory,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackStats = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

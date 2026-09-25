@@ -4,6 +4,7 @@
 
   const START_BANKROLL = 1000;
   const STATS_KEY = 'blackjack.stats';
+  const HISTORY_KEY = 'blackjack.history';
   const MUTE_KEY = 'blackjack.muted';
   const { Game, handValue } = window.Blackjack;
   const Stats = window.BlackjackStats;
@@ -14,6 +15,7 @@
   let round = 0; // increments per deal
   let recordedRound = 0; // last round folded into stats
   let stats = Stats.parseStats(storage('get', STATS_KEY));
+  let history = Stats.parseHistory(storage('get', HISTORY_KEY));
   Sound.muted = storage('get', MUTE_KEY) === '1';
 
   // Animation bookkeeping: cards already on the table, and whether the
@@ -29,7 +31,7 @@
     betForm: $('bet-form'), betInput: $('bet'), deal: $('deal'),
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
-    reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'),
+    reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
       net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
@@ -187,12 +189,62 @@
     els.stat.rounds.textContent = String(stats.rounds);
   }
 
+  const cardText = (cards) => cards.map((c) => c.rank + c.suit).join(' ');
+  const signed = (n) => (n > 0 ? `+$${n}` : n < 0 ? `-$${-n}` : '$0');
+
+  function historyEntry() {
+    return {
+      round: stats.rounds,
+      net: game.net,
+      insurance: game.insuranceNet,
+      dealer: handValue(game.dealer).total,
+      dealerCards: cardText(game.dealer),
+      hands: game.hands.map((h, i) => ({
+        cards: cardText(h.cards), total: handValue(h.cards).total, outcome: game.results[i].outcome,
+      })),
+    };
+  }
+
+  function renderHistory() {
+    if (!history.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = 'No hands yet.';
+      els.history.replaceChildren(li);
+      return;
+    }
+    els.history.replaceChildren(...history.map((e) => {
+      const li = document.createElement('li');
+      li.dataset.sign = e.net > 0 ? 'up' : e.net < 0 ? 'down' : '';
+      const top = document.createElement('div');
+      top.className = 'row';
+      const label = document.createElement('span');
+      const outcomes = e.hands.map((h) => SHORT[h.outcome]).join(', ');
+      label.textContent = `#${e.round} ${outcomes}`;
+      const net = document.createElement('span');
+      net.className = 'net';
+      net.textContent = signed(e.net);
+      top.append(label, net);
+
+      const detail = document.createElement('div');
+      detail.className = 'detail';
+      const yours = e.hands.map((h) => `${h.cards} (${h.total})`).join(' | ');
+      let text = `${yours} vs ${e.dealerCards} (${e.dealer})`;
+      if (Number.isFinite(e.insurance)) text += e.insurance > 0 ? ' · insurance paid' : ' · insurance lost';
+      detail.textContent = text;
+      li.append(top, detail);
+      return li;
+    }));
+  }
+
   /** Fold a finished round into stats once, and play its outcome cue. */
   function maybeRecord(settleAt) {
     if (game.phase !== 'done' || recordedRound === round) return;
     recordedRound = round;
     stats = Stats.recordRound(stats, game.results, game.net);
     storage('set', STATS_KEY, JSON.stringify(stats));
+    history = Stats.addHistory(history, historyEntry());
+    storage('set', HISTORY_KEY, JSON.stringify(history));
     const outcome = netOutcome();
     const cue = outcome === 'blackjack' ? 'blackjack'
       : outcome === 'win' ? 'win' : outcome === 'push' ? 'push' : 'lose';
@@ -266,6 +318,7 @@
 
     maybeRecord(settleAt);
     renderStats();
+    renderHistory();
   }
 
   function act(fn, cue) {
@@ -309,8 +362,11 @@
   });
   els.resetStats.addEventListener('click', () => {
     stats = Stats.emptyStats();
+    history = [];
     storage('remove', STATS_KEY);
+    storage('remove', HISTORY_KEY);
     renderStats();
+    renderHistory();
   });
 
   const SHORTCUTS = {

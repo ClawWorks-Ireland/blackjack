@@ -65,3 +65,33 @@ test('parseStats recovers from missing or corrupt storage', () => {
   assert.equal(partial.wins, 4);
   assert.equal(partial.losses, 0);
 });
+
+// --- History ---
+
+const entry = (round, net = 10) => ({
+  round, net, dealer: 18, dealerCards: '10♠ 8♥',
+  hands: [{ cards: 'K♠ 9♦', total: 19, outcome: 'win' }],
+});
+
+test('addHistory puts the newest round first without mutating', () => {
+  const h1 = S.addHistory([], entry(1));
+  const h2 = S.addHistory(h1, entry(2));
+  assert.equal(h1.length, 1);
+  assert.deepEqual(h2.map((e) => e.round), [2, 1]);
+});
+
+test('addHistory keeps only the newest entries', () => {
+  let h = [];
+  for (let i = 1; i <= S.HISTORY_MAX + 5; i++) h = S.addHistory(h, entry(i));
+  assert.equal(h.length, S.HISTORY_MAX);
+  assert.equal(h[0].round, S.HISTORY_MAX + 5);
+});
+
+test('parseHistory drops malformed entries and bad storage', () => {
+  assert.deepEqual(S.parseHistory(null), []);
+  assert.deepEqual(S.parseHistory('{"not":"array"}'), []);
+  const bad = { ...entry(2), hands: [{ cards: 'x', total: 5, outcome: 'hacked' }] };
+  const noHands = { ...entry(3), hands: [] };
+  const parsed = S.parseHistory(JSON.stringify([entry(1), bad, noHands, { round: 'x' }]));
+  assert.deepEqual(parsed.map((e) => e.round), [1]);
+});
