@@ -12,6 +12,7 @@
   const Stats = window.BlackjackStats;
   const Sound = window.BlackjackSound;
   const Strategy = window.BlackjackStrategy;
+  const { money, signedMoney } = window.BlackjackFormat;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   let game = loadGame() || new Game({ bankroll: START_BANKROLL });
@@ -48,12 +49,12 @@
   };
 
   const MESSAGES = {
-    blackjack: (net) => `Blackjack! You win $${net}.`,
-    win: (net) => `You win $${net}.`,
+    blackjack: (net) => `Blackjack! You win ${money(net)}.`,
+    win: (net) => `You win ${money(net)}.`,
     lose: () => 'Dealer wins.',
     bust: () => 'Bust. Dealer wins.',
     push: () => 'Push. Your bet is returned.',
-    surrender: (net) => `You surrendered. $${-net} is returned.`,
+    surrender: (net) => `You surrendered. ${money(-net)} is returned.`,
   };
   const SHORT = {
     blackjack: 'Blackjack', win: 'Win', lose: 'Lose', bust: 'Bust', push: 'Push', surrender: 'Surrender',
@@ -109,8 +110,6 @@
     return soft && total < 21 ? `soft ${total}` : `${total}`;
   }
 
-  const money = (n) => (n < 0 ? `-$${-n}` : `$${n}`);
-
   /**
    * Work out which cards are new since the last render and give each a
    * staggered delay in the order a dealer would place them. Returns a Map
@@ -159,7 +158,7 @@
     const label = document.createElement('h2');
     const name = multi ? `Hand ${i + 1}` : 'You';
     let text = `${name} (${formatTotal(hand.cards)})`;
-    if (multi) text += ` · $${hand.bet}`;
+    if (multi) text += ` · ${money(hand.bet)}`;
     if (result && multi) text += ` · ${SHORT[result.outcome]}`;
     label.textContent = text;
     if (isActive && multi) label.setAttribute('aria-current', 'true');
@@ -215,7 +214,6 @@
   }
 
   const cardText = (cards) => cards.map((c) => c.rank + c.suit).join(' ');
-  const signed = (n) => (n > 0 ? `+$${n}` : n < 0 ? `-$${-n}` : '$0');
 
   function historyEntry() {
     return {
@@ -248,7 +246,7 @@
       label.textContent = `#${e.round} ${outcomes}`;
       const net = document.createElement('span');
       net.className = 'net';
-      net.textContent = signed(e.net);
+      net.textContent = signedMoney(e.net);
       top.append(label, net);
 
       const detail = document.createElement('div');
@@ -329,7 +327,7 @@
     els.bankroll.textContent = money(game.bankroll);
     const staked = game.hands.reduce((sum, h) => sum + h.bet, 0);
     const inPlay = staked + game.insurance;
-    els.betDisplay.textContent = live ? `· In play: $${inPlay}` : '';
+    els.betDisplay.textContent = live ? `· In play: ${money(inPlay)}` : '';
 
     els.hit.disabled = !inRound;
     els.stand.disabled = !inRound;
@@ -338,7 +336,7 @@
     els.surrender.disabled = !game.canSurrender();
     els.insurance.hidden = !offering;
     els.insure.disabled = !game.canInsure();
-    els.insure.firstChild.textContent = `Take insurance ($${game.insuranceCost}) `;
+    els.insure.firstChild.textContent = `Take insurance (${money(game.insuranceCost)}) `;
     els.deal.disabled = live;
     els.betInput.disabled = live;
     els.betInput.max = String(game.bankroll);
@@ -353,7 +351,7 @@
       els.message.classList.add('reveal');
     } else if (offering) {
       els.message.textContent = game.canInsure()
-        ? `Dealer shows an ace. Insure for $${game.insuranceCost}?`
+        ? `Dealer shows an ace. Insure for ${money(game.insuranceCost)}?`
         : 'Dealer shows an ace. Not enough chips to insure.';
       delete els.message.dataset.outcome;
       els.message.classList.remove('reveal');
@@ -374,8 +372,8 @@
     const broke = game.isBroke;
     els.reset.hidden = !broke;
     els.reset.textContent = game.bankroll > 0
-      ? `Not enough for the $${game.minBet} minimum bet. Start over with $${START_BANKROLL}`
-      : `Out of chips. Start over with $${START_BANKROLL}`;
+      ? `Not enough for the ${money(game.minBet)} minimum bet. Start over with ${money(START_BANKROLL)}`
+      : `Out of chips. Start over with ${money(START_BANKROLL)}`;
     els.deal.disabled = els.deal.disabled || broke;
 
     maybeRecord(settleAt);
