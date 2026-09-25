@@ -370,8 +370,12 @@
     renderHint();
     renderCoach();
 
-    const broke = !live && game.bankroll <= 0;
+    // Broke means below the minimum bet, not just zero: $0.50 can't be bet.
+    const broke = game.isBroke;
     els.reset.hidden = !broke;
+    els.reset.textContent = game.bankroll > 0
+      ? `Not enough for the $${game.minBet} minimum bet. Start over with $${START_BANKROLL}`
+      : `Out of chips. Start over with $${START_BANKROLL}`;
     els.deal.disabled = els.deal.disabled || broke;
 
     maybeRecord(settleAt);

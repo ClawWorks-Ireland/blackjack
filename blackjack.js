@@ -95,9 +95,10 @@
    * Phases: betting -> [insurance] -> player -> done.
    */
   class Game {
-    constructor({ bankroll = 1000, decks = 6, rng = Math.random } = {}) {
+    constructor({ bankroll = 1000, decks = 6, minBet = 1, rng = Math.random } = {}) {
       this.bankroll = bankroll;
       this.decks = decks;
+      this.minBet = minBet;
       this.rng = rng;
       this.shoe = shuffle(createShoe(decks), rng);
       this.phase = 'betting';
@@ -116,6 +117,11 @@
     /** Total chip change for the finished round, including insurance. */
     get net() {
       return this.results.reduce((sum, r) => sum + r.net, 0) + (this.insuranceNet || 0);
+    }
+
+    /** Between rounds with less than the minimum bet left: time to start over. */
+    get isBroke() {
+      return this.phase !== 'player' && this.phase !== 'insurance' && this.bankroll < this.minBet;
     }
 
     get insuranceCost() {
@@ -152,6 +158,7 @@
     deal(bet) {
       if (this.phase === 'player' || this.phase === 'insurance') throw new Error('Round in progress');
       if (!Number.isFinite(bet) || bet <= 0) throw new Error('Bet must be positive');
+      if (bet < this.minBet) throw new Error(`Minimum bet is $${this.minBet}`);
       if (bet > this.bankroll) throw new Error('Bet exceeds bankroll');
       this.bankroll -= bet;
       this.results = [];

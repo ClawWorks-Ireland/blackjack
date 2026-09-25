@@ -381,3 +381,25 @@ test('corrupt or inconsistent saves are rejected', () => {
   ];
   for (const d of bad) assert.equal(BJ.Game.fromJSON(d), null, JSON.stringify(d).slice(0, 60));
 });
+
+// --- Running out of chips ---
+
+test('a bankroll below the minimum bet counts as broke', () => {
+  const g = new BJ.Game({ bankroll: 0.5 });
+  assert.equal(g.minBet, 1);
+  assert.ok(g.isBroke);
+  assert.throws(() => g.deal(1), /exceeds bankroll/);
+  assert.throws(() => g.deal(0.5), /Minimum bet is \$1/);
+  assert.ok(!new BJ.Game({ bankroll: 1 }).isBroke);
+  assert.ok(new BJ.Game({ bankroll: 0 }).isBroke);
+});
+
+test('surrendering the last $1 leaves you broke', () => {
+  const g = riggedGame([c('10'), c('6'), c('10'), c('7')], 1);
+  g.deal(1);
+  assert.equal(g.bankroll, 0);
+  assert.ok(!g.isBroke, 'not broke while the round is still live');
+  g.surrender();
+  assert.equal(g.bankroll, 0.5);
+  assert.ok(g.isBroke);
+});
