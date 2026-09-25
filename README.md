@@ -26,6 +26,13 @@ runner.
 
 ## Table rules
 
+These are the defaults. **Table rules (T)** lets you change the deck
+count (1, 2, 6 or 8), whether the dealer hits or stands on soft 17,
+3:2 or 6:5 blackjack, double after split, and late surrender. It shows
+the house edge for your choice, and the coach switches to the matching
+basic strategy. Rules change between hands only, with a fresh shoe;
+your bankroll and stats carry over. The choice is saved.
+
 - 6-deck shoe with a cut card three quarters of the way in. Once it
   comes out, the round finishes from the same shoe and a new one is
   shuffled before the next deal, never mid-round
@@ -52,8 +59,8 @@ button starts you over with $1,000.
   chips (Clear bet empties the box). Chips that would take you past the
   table maximum or your bankroll are disabled. After a round, Rebet
   (or Enter) deals the same bet again and Rebet ×2 (X) doubles it
-- **Hint (G):** shows the basic-strategy move for these rules (dealer
-  stands on soft 17) and why, for example
+- **Hint (G):** shows the basic-strategy move for the table's current
+  rules and why, for example
   "Hard 16 vs dealer ace: Surrender", and highlights the button
 - **Coach notes (C to toggle):** after an off-chart move, a note says
   what the chart recommends. Moves are still scored when notes are off
@@ -89,6 +96,7 @@ and history; it doesn't touch the bankroll.
 | I / N | Take / decline insurance (or even money) |
 | M | Sound on/off |
 | C | Coach notes on/off |
+| T | Table rules |
 | ? | Show shortcuts |
 | Enter | Deal, or deal again with the same bet |
 | X | Rebet ×2 after a round |
@@ -102,16 +110,35 @@ and history; it doesn't touch the bankroll.
 | `stats.js` | Stats, history and saved-data parsing. No DOM code |
 | `format.js` | Money formatting ($1,002.50). No DOM code |
 | `betting.js` | Bet checks, chips and rebet amounts. No DOM code |
+| `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
-| `*.test.js` | Tests for the five DOM-free modules |
+| `*.test.js` | Tests for the six DOM-free modules |
+| `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
-The five DOM-free modules work in both the browser (as
+The six DOM-free modules work in both the browser (as
 `window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
-`window.BlackjackFormat` and `window.BlackjackBetting`) and Node (via `module.exports`). That's
+`window.BlackjackFormat`, `window.BlackjackBetting` and
+`window.BlackjackRules`) and Node (via `module.exports`). That's
 why they can be tested without a browser.
 
 ## Not included
 
 No card counting aids or side bets.
+
+## How the strategy chart was made
+
+`tools/solver.js` computes the expected value of every play for every
+starting hand, removing cards from the shoe as they're dealt and
+handling the dealer's unseen hole card exactly. A chart cell is the best
+play averaged over every two-card hand with that total. For 4 to 8 decks
+this reproduces Wizard of Odds' published S17 and H17 charts cell for
+cell. `tools/make_charts.js` writes `tools/charts.json` for all 16 rule
+combinations, and `strategy.test.js` checks `strategy.js` against every
+cell. Splits are valued without resplitting, a small approximation.
+
+The house edge uses Wizard of Odds' published figures for these rules
+without surrender, plus late-surrender and 6:5 adjustments from
+`tools/house_edge.js`. It assumes basic strategy and ignores cut-card
+effects.

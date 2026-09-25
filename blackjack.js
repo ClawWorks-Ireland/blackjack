@@ -2,11 +2,14 @@
  * Blackjack core rules. Pure and DOM-free so it runs in the browser
  * (as window.Blackjack) and under Node for tests (via module.exports).
  *
- * House rules: 6-deck shoe with a cut card at 75% (reshuffled only
+ * Default rules: 6-deck shoe with a cut card at 75% (reshuffled only
  * between rounds), dealer stands on all 17s, blackjack pays 3:2,
  * double down on any first two cards (including after a split), split
  * same-rank pairs up to 4 hands, split aces get one card each, a 21 on a
- * split hand pays 1:1 (not blackjack).
+ * split hand pays 1:1 (not blackjack), late surrender.
+ *
+ * Configurable (see Game constructor): decks, h17 (dealer hits soft 17),
+ * payout (1.5 for 3:2, 1.2 for 6:5), das (double after split), lateSurrender.
  *
  * Insurance: offered when the dealer shows an ace, costs half the bet and
  * pays 2:1 if the dealer has blackjack. With a blackjack of your own it is
@@ -69,19 +72,24 @@
 
   const isBlackjack = (hand) => hand.length === 2 && handValue(hand).total === 21;
   const isBust = (hand) => handValue(hand).total > 21;
-  const dealerShouldHit = (hand) => handValue(hand).total < DEALER_STAND;
+  /** Dealer draws below 17, and on soft 17 when the table uses H17. */
+  function dealerShouldHit(hand, h17 = false) {
+    const { total, soft } = handValue(hand);
+    return total < DEALER_STAND || (h17 && total === DEALER_STAND && soft);
+  }
+  const PAYOUTS = [1.5, 1.2]; // 3:2 and 6:5
 
   /**
    * Settle one finished hand against the dealer. Returns the outcome and the
    * net chip change relative to that hand's (possibly doubled) bet.
    * A two-card 21 on a split hand is an ordinary 21, not a blackjack.
    */
-  function settle(playerHand, dealerHand, bet, { fromSplit = false, surrendered = false } = {}) {
+  function settle(playerHand, dealerHand, bet, { fromSplit = false, surrendered = false, payout = 1.5 } = {}) {
     if (surrendered) return { outcome: 'surrender', net: -bet / 2 };
     const pBJ = !fromSplit && isBlackjack(playerHand);
     const dBJ = isBlackjack(dealerHand);
     if (pBJ && dBJ) return { outcome: 'push', net: 0 };
-    if (pBJ) return { outcome: 'blackjack', net: bet * 1.5 };
+    if (pBJ) return { outcome: 'blackjack', net: bet * payout };
     if (isBust(playerHand)) return { outcome: 'bust', net: -bet };
     if (dBJ) return { outcome: 'lose', net: -bet };
     if (isBust(dealerHand)) return { outcome: 'win', net: bet };
@@ -100,9 +108,14 @@
   class Game {
     constructor({
       bankroll = 1000, decks = 6, minBet = 1, maxBet = Infinity, penetration = PENETRATION, rng = Math.random,
+      h17 = false, payout = 1.5, das = true, lateSurrender = true,
     } = {}) {
       this.bankroll = bankroll;
       this.decks = decks;
+      this.h17 = h17;
+      this.payout = payout;
+      this.das = das;
+      this.lateSurrender = lateSurrender;
       this.minBet = minBet;
       this.maxBet = maxBet; // table limit
       this.penetration = penetration;
@@ -118,6 +131,13 @@
       this.insurance = 0; // side-bet stake
       this.insuranceNet = null; // null until insurance is settled
       this.tookEvenMoney = false;
+    }
+
+    /** The table rules, in the shape the settings panel and strategy use. */
+    get rules() {
+      return {
+        decks: this.decks, h17: this.h17, payout: this.payout, das: this.das, lateSurrender: this.lateSurrender,
+      };
     }
 
     get currentHand() {
@@ -168,9 +188,13 @@
       this.emergencyShuffles++;
     }
 
-    /** Insurance offered while you hold blackjack is called even money. */
+    /**
+     * Insurance offered while you hold blackjack is called even money. It
+     * only works out to a flat 1:1 when blackjack pays 3:2; at 6:5 it is
+     * ordinary insurance.
+     */
     get evenMoneyOffered() {
-      return this.phase === 'insurance' && isBlackjack(this.hands[0].cards);
+      return this.phase === 'insurance' && this.payout === 1.5 && isBlackjack(this.hands[0].cards);
     }
 
     canInsure() {
@@ -179,7 +203,7 @@
 
     canDouble() {
       const h = this.currentHand;
-      return !!h && h.cards.length === 2 && this.bankroll >= h.bet;
+      return !!h && h.cards.length === 2 && (this.das || !h.fromSplit) && this.bankroll >= h.bet;
     }
 
     canSplit() {
@@ -190,7 +214,7 @@
 
     canSurrender() {
       const h = this.currentHand;
-      return !!h && !h.fromSplit && h.cards.length === 2;
+      return this.lateSurrender && !!h && !h.fromSplit && h.cards.length === 2;
     }
 
     deal(bet) {
@@ -308,13 +332,13 @@
       if (this.active < this.hands.length) return;
       // Dealer only draws if at least one player hand is still live.
       if (this.hands.some((h) => !h.surrendered && !isBust(h.cards))) {
-        while (dealerShouldHit(this.dealer)) this.dealer.push(this.draw());
+        while (dealerShouldHit(this.dealer, this.h17)) this.dealer.push(this.draw());
       }
       this.finish();
     }
 
     finish() {
-      this.results = this.hands.map((h) => settle(h.cards, this.dealer, h.bet, h));
+      this.results = this.hands.map((h) => settle(h.cards, this.dealer, h.bet, { ...h, payout: this.payout }));
       // Stakes were removed when placed, so return stake + net per hand.
       this.hands.forEach((h, i) => { this.bankroll += h.bet + this.results[i].net; });
       this.phase = 'done';
@@ -324,7 +348,9 @@
     toJSON() {
       return {
         bankroll: this.bankroll, decks: this.decks, minBet: this.minBet,
-        maxBet: Number.isFinite(this.maxBet) ? this.maxBet : null, shoe: this.shoe, phase: this.phase,
+        maxBet: Number.isFinite(this.maxBet) ? this.maxBet : null,
+        h17: this.h17, payout: this.payout, das: this.das, lateSurrender: this.lateSurrender,
+        shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
         insurance: this.insurance, insuranceNet: this.insuranceNet, tookEvenMoney: this.tookEvenMoney,
       };
@@ -340,6 +366,8 @@
       const g = new Game({
         bankroll: data.bankroll, decks: data.decks, rng,
         minBet: data.minBet ?? 1, maxBet: data.maxBet ?? Infinity,
+        h17: data.h17 ?? false, payout: data.payout ?? 1.5, das: data.das ?? true,
+        lateSurrender: data.lateSurrender ?? true,
       });
       const copy = (cards) => cards.map(({ rank, suit }) => ({ rank, suit }));
       g.shoe = copy(data.shoe);
@@ -376,6 +404,8 @@
     // Limits were added later: older saves have neither and load with the defaults.
     if (d.minBet !== undefined && !(Number.isFinite(d.minBet) && d.minBet > 0)) return false;
     if (d.maxBet !== undefined && d.maxBet !== null && !(Number.isFinite(d.maxBet) && d.maxBet > 0)) return false;
+    for (const k of ['h17', 'das', 'lateSurrender']) if (d[k] !== undefined && !isBool(d[k])) return false;
+    if (d.payout !== undefined && !PAYOUTS.includes(d.payout)) return false;
     if (!validCards(d.shoe) || !validCards(d.dealer)) return false;
     if (!Array.isArray(d.hands) || !d.hands.every(validHand) || d.hands.length > MAX_HANDS) return false;
     if (!Array.isArray(d.results) || !d.results.every(validResult)) return false;
@@ -389,7 +419,7 @@
   }
 
   const api = {
-    SUITS, RANKS, MAX_HANDS, createShoe, shuffle, cardValue, handValue,
+    SUITS, RANKS, MAX_HANDS, PAYOUTS, createShoe, shuffle, cardValue, handValue,
     isBlackjack, isBust, dealerShouldHit, settle, Game,
   };
 

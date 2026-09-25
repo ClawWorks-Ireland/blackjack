@@ -13,9 +13,10 @@
       <h1>Blackjack</h1>
       <button id="mute" class="toggle" aria-pressed="false">🔊 Sound on <kbd>M</kbd></button>
       <button id="coach-toggle" class="toggle" aria-pressed="true">Coach notes on <kbd>C</kbd></button>
+      <button id="rules-open" class="toggle" aria-haspopup="dialog">Table rules <kbd>T</kbd></button>
       <button id="help-open" class="toggle" aria-haspopup="dialog">Shortcuts <kbd>?</kbd></button>
     </header>
-    <p class="rules">Dealer stands on 17 · Blackjack pays 3:2 · Double on any two cards · Split pairs up to 4 hands<br>Insurance pays 2:1 · Late surrender returns half your bet</p>
+    <p id="rules-text" class="rules"></p>
 
     <section class="hand" aria-labelledby="dealer-label">
       <h2 id="dealer-label">Dealer <span id="dealer-total" class="total"></span></h2>
@@ -102,12 +103,53 @@
     </div>
   </dialog>
 
+  <dialog id="settings" class="help settings" aria-labelledby="settings-title">
+    <form id="settings-form" class="help-body">
+      <h2 id="settings-title">Table rules</h2>
+
+      <label class="row" for="set-decks">Decks
+        <select id="set-decks">
+          <option value="1">1 (single deck)</option>
+          <option value="2">2</option>
+          <option value="6">6</option>
+          <option value="8">8</option>
+        </select>
+      </label>
+
+      <fieldset>
+        <legend>Dealer on soft 17</legend>
+        <label><input type="radio" name="soft17" value="s17"> Stands (S17)</label>
+        <label><input type="radio" name="soft17" value="h17"> Hits (H17)</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Blackjack pays</legend>
+        <label><input type="radio" name="payout" value="1.5"> 3:2</label>
+        <label><input type="radio" name="payout" value="1.2"> 6:5</label>
+      </fieldset>
+
+      <label class="check"><input type="checkbox" id="set-das"> Double after a split</label>
+      <label class="check"><input type="checkbox" id="set-ls"> Late surrender</label>
+
+      <p id="set-edge" class="edge" aria-live="polite"></p>
+      <p id="set-note" class="note" hidden>Finish this hand to change the rules.</p>
+      <p class="note">Changing the rules shuffles a new shoe. Your bankroll and stats carry over, and the coach follows the new rules.</p>
+
+      <div class="dialog-actions">
+        <button type="submit" id="set-apply">Apply</button>
+        <button type="button" id="set-cancel" class="toggle">Cancel</button>
+        <button type="button" id="set-default" class="link">Default rules</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="format.js"></script>
   <script src="betting.js"></script>
   <script src="blackjack.js"></script>
   <script src="stats.js"></script>
   <script src="sound.js"></script>
   <script src="strategy.js"></script>
+  <script src="rules.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

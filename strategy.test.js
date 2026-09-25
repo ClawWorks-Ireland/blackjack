@@ -87,3 +87,74 @@ test('basic strategy declines even money too', () => {
   assert.equal(r.action, 'no-insurance');
   assert.equal(r.label, 'No even money');
 });
+
+// --- Every rule set, checked against the solver's chart ---
+
+const CHARTS = require('./tools/charts.json');
+const UPS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'A'];
+
+/** Representative two-card hand for a chart row. */
+function handFor(row) {
+  const [kind, n] = [row.split(' ')[0], Number(row.split(' ')[1])];
+  const r = (v) => (v === 1 || v === 11 ? 'A' : v === 10 ? '10' : String(v));
+  if (kind === 'pair') return [r(n), r(n)];
+  if (kind === 'soft') return ['A', r(n - 11)];
+  if (n === 20) return ['K', 'Q']; // two tens of different rank: not a pair
+  const lo = n <= 11 ? (n - 2 === 2 ? 3 : 2) : n - 10;
+  return [r(lo), r(n - lo)];
+}
+
+const EXPECT = {
+  H: 'hit', S: 'stand', Dh: 'double', Ds: 'double', P: 'split', Rh: 'surrender', Rs: 'surrender', Rp: 'surrender',
+};
+const NO_SURRENDER = { Rh: 'hit', Rs: 'stand', Rp: 'split' };
+
+for (const [key, rows] of Object.entries(CHARTS)) {
+  const [d, soft17, dbl] = key.split('-');
+  const rules = { decks: Number(d), h17: soft17 === 'h17', das: dbl === 'das' };
+  test(`chart ${key}: every cell matches the solver`, () => {
+    const wrong = [];
+    for (const [row, codes] of Object.entries(rows)) {
+      const cards = handFor(row).map(c);
+      if (row.startsWith('hard') && Number(row.split(' ')[1]) < 5) continue;
+      codes.forEach((code, i) => {
+        for (const canSurrender of [true, false]) {
+          const want = canSurrender ? EXPECT[code] : (NO_SURRENDER[code] || EXPECT[code]);
+          const got = recommend(cards, c(UPS[i]), { canDouble: true, canSplit: true, canSurrender }, rules).action;
+          if (got !== want) wrong.push(`${row} vs ${UPS[i]}${canSurrender ? '' : ' (no LS)'}: ${got}, chart ${code}`);
+        }
+      });
+    }
+    assert.deepEqual(wrong, []);
+  });
+}
+
+test('soft 18 vs 2: Double under H17 and Stand under S17 (6 decks)', () => {
+  const soft18 = [c('A'), c('7')];
+  const all = { canDouble: true, canSplit: true, canSurrender: true };
+  assert.equal(recommend(soft18, c('2'), all, { decks: 6, h17: true, das: true }).action, 'double');
+  assert.equal(recommend(soft18, c('2'), all, { decks: 6, h17: false, das: true }).action, 'stand');
+  // Can't double (3 cards): H17 soft 18 vs 2 stands.
+  assert.equal(recommend([c('A'), c('4'), c('3')], c('2'), {}, { decks: 6, h17: true, das: true }).action, 'stand');
+});
+
+test('double after split off: 4s play as hard 8 and small pairs split less', () => {
+  const all = { canDouble: true, canSplit: true, canSurrender: true };
+  const noDas = { decks: 6, h17: false, das: false };
+  assert.equal(recommend([c('4'), c('4')], c('5'), all, noDas).action, 'hit');
+  assert.equal(recommend([c('2'), c('2')], c('3'), all, noDas).action, 'hit');
+  assert.equal(recommend([c('6'), c('6')], c('2'), all, noDas).action, 'hit');
+  assert.equal(recommend([c('4'), c('4')], c('5'), all, { ...noDas, das: true }).action, 'split');
+});
+
+test('the coach reads the live table rules from Game.rules', () => {
+  const BJ = require('./blackjack.js');
+  const all = { canDouble: true, canSplit: true, canSurrender: true };
+  const soft18 = [c('A'), c('7')];
+  const h17 = new BJ.Game({ h17: true });
+  const s17 = new BJ.Game({ h17: false });
+  assert.equal(recommend(soft18, c('2'), all, h17.rules).action, 'double');
+  assert.equal(recommend(soft18, c('2'), all, s17.rules).action, 'stand');
+  const oneDeck = new BJ.Game({ decks: 1 });
+  assert.equal(recommend([c('5'), c('3')], c('6'), all, oneDeck.rules).action, 'double');
+});

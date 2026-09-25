@@ -508,3 +508,66 @@ test('saved games keep table limits; older saves load with defaults', () => {
   assert.equal(legacy.maxBet, Infinity);
   assert.equal(BJ.Game.fromJSON({ ...old, maxBet: -3 }), null);
 });
+
+// --- Rule settings ---
+
+test('H17: the dealer hits soft 17; S17 stands', () => {
+  assert.ok(!BJ.dealerShouldHit([c('A'), c('6')]));
+  assert.ok(BJ.dealerShouldHit([c('A'), c('6')], true));
+  assert.ok(!BJ.dealerShouldHit([c('10'), c('7')], true)); // hard 17 always stands
+  // Player 18 vs dealer A,6: under H17 the dealer draws a 3 and makes 20.
+  const g = riggedGame([c('10'), c('8'), c('A'), c('6'), c('3')]);
+  g.h17 = true;
+  g.deal(10);
+  g.declineInsurance();
+  g.stand();
+  assert.equal(BJ.handValue(g.dealer).total, 20);
+  assert.equal(g.results[0].outcome, 'lose');
+});
+
+test('6:5 blackjack pays 1.2x the bet', () => {
+  assert.deepEqual(BJ.settle([c('A'), c('K')], [c('10'), c('9')], 10, { payout: 1.2 }), { outcome: 'blackjack', net: 12 });
+  const g = riggedGame([c('A'), c('K'), c('10'), c('9')]);
+  g.payout = 1.2;
+  g.deal(100);
+  assert.equal(g.bankroll, 1120);
+});
+
+test('6:5: insuring a blackjack is plain insurance, not even money', () => {
+  const g = riggedGame([c('A'), c('K'), c('A'), c('7')]);
+  g.payout = 1.2;
+  g.deal(100);
+  assert.equal(g.phase, 'insurance');
+  assert.ok(!g.evenMoneyOffered);
+  g.takeInsurance(); // dealer has no blackjack: lose 50 insurance, win 120
+  assert.equal(g.net, 70);
+});
+
+test('no double after split when DAS is off', () => {
+  const g = riggedGame([c('5'), c('5'), c('10'), c('7'), c('6'), c('10'), c('9')]);
+  g.das = false;
+  g.deal(100);
+  assert.ok(g.canDouble(), 'can still double the original two cards');
+  g.split();
+  assert.ok(!g.canDouble());
+  assert.throws(() => g.double());
+});
+
+test('surrender can be turned off', () => {
+  const g = riggedGame([c('10'), c('6'), c('10'), c('6')]);
+  g.lateSurrender = false;
+  g.deal(100);
+  assert.ok(!g.canSurrender());
+  assert.throws(() => g.surrender());
+});
+
+test('rules are saved with the game; older saves load with the defaults', () => {
+  const g = new BJ.Game({ decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false });
+  const back = BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
+  assert.deepEqual(back.rules, { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false });
+  const old = JSON.parse(JSON.stringify(new BJ.Game()));
+  for (const k of ['h17', 'payout', 'das', 'lateSurrender']) delete old[k];
+  assert.deepEqual(BJ.Game.fromJSON(old).rules, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true });
+  assert.equal(BJ.Game.fromJSON({ ...old, payout: 2 }), null);
+  assert.equal(BJ.Game.fromJSON({ ...old, h17: 'yes' }), null);
+});

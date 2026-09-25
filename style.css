@@ -262,3 +262,16 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
 .chip[data-chip="500"] { background: #6a3d9a; }
 .chip:not(:disabled):hover { transform: translateY(-2px); }
 .chips .link { padding: 0.5rem; min-height: 44px; }
+
+/* Table rules settings */
+.settings { width: min(420px, 94vw); }
+.settings form { display: grid; gap: 0.85rem; text-align: left; }
+.settings .row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.settings select { font: inherit; padding: 0.4rem; border-radius: 6px; min-height: 44px; }
+.settings fieldset { border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; padding: 0.4rem 0.75rem 0.6rem; margin: 0; display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.settings legend { padding: 0 0.3rem; opacity: 0.85; }
+.settings label { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 44px; }
+.settings input[type="radio"], .settings input[type="checkbox"] { width: 1.2rem; height: 1.2rem; accent-color: var(--gold); }
+.settings .edge { margin: 0; font-weight: 600; color: var(--gold); }
+.settings .note { margin: 0; }
+.dialog-actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }

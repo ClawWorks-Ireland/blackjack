@@ -6,6 +6,7 @@
   const TABLE_MIN = 1;
   const TABLE_MAX = 500;
   const LAST_BET_KEY = 'blackjack.lastBet';
+  const RULES_KEY = 'blackjack.rules';
   const STATS_KEY = 'blackjack.stats';
   const HISTORY_KEY = 'blackjack.history';
   const MUTE_KEY = 'blackjack.muted';
@@ -17,10 +18,13 @@
   const Strategy = window.BlackjackStrategy;
   const { money, signedMoney } = window.BlackjackFormat;
   const Betting = window.BlackjackBetting;
+  const Rules = window.BlackjackRules;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  const newGame = (bankroll) => new Game({ bankroll, minBet: TABLE_MIN, maxBet: TABLE_MAX });
-  let game = loadGame() || newGame(START_BANKROLL);
+  const newGame = (bankroll, rules) =>
+    new Game({ bankroll, minBet: TABLE_MIN, maxBet: TABLE_MAX, ...Rules.normalizeRules(rules) });
+  // A saved game carries its own rules; otherwise use the saved settings.
+  let game = loadGame() || newGame(START_BANKROLL, Rules.normalizeRules(parseJSON(storage('get', RULES_KEY))));
   // Saves from before table limits load without them; apply today's limits.
   game.minBet = TABLE_MIN;
   game.maxBet = TABLE_MAX;
@@ -54,6 +58,10 @@
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
     hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
+    rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
+    settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
+    setEdge: $('set-edge'), setNote: $('set-note'), setApply: $('set-apply'), setCancel: $('set-cancel'),
+    setDefault: $('set-default'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
       accuracy: $('stat-accuracy'), hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
@@ -82,6 +90,14 @@
       if (op === 'remove') window.localStorage.removeItem(key);
     } catch (_) { /* storage unavailable: session-only */ }
     return null;
+  }
+
+  function parseJSON(text) {
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
   }
 
   function loadGame() {
@@ -290,7 +306,7 @@
     if (!h) return null;
     return Strategy.recommend(h.cards, game.dealer[0], {
       canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(),
-    });
+    }, game.rules);
   }
 
   const ADVICE_BUTTON = {
@@ -364,6 +380,7 @@
     const offering = game.phase === 'insurance';
     const live = inRound || offering;
     const { plan, settleAt } = planAnimations(live);
+    renderRulesText();
     inFlight = plan.size > 0 && stepMs() > 0;
 
     els.dealerCards.replaceChildren(
@@ -569,7 +586,7 @@
   els.insure.addEventListener('click', () => act(() => game.takeInsurance(), 'chip', 'insurance'));
   els.noInsure.addEventListener('click', () => act(() => game.declineInsurance(), null, 'no-insurance'));
   els.reset.addEventListener('click', () => {
-    game = newGame(START_BANKROLL);
+    game = newGame(START_BANKROLL, game.rules);
     shown = new WeakSet();
     els.message.textContent = 'Place your bet to start.';
     delete els.message.dataset.outcome;
@@ -598,6 +615,72 @@
     renderHistory();
   });
 
+  // --- Table rules settings ---
+
+  function renderRulesText() {
+    const [one, two] = Rules.describe(game.rules);
+    els.rulesText.replaceChildren(one, document.createElement('br'), two);
+  }
+
+  const radio = (name) => els.settingsForm.querySelector(`input[name="${name}"]:checked`);
+
+  function readSettings() {
+    return Rules.normalizeRules({
+      decks: Number(els.setDecks.value),
+      h17: radio('soft17').value === 'h17',
+      payout: Number(radio('payout').value),
+      das: els.setDas.checked,
+      lateSurrender: els.setLs.checked,
+    });
+  }
+
+  function fillSettings(rules) {
+    els.setDecks.value = String(rules.decks);
+    els.settingsForm.querySelector(`input[name="soft17"][value="${rules.h17 ? 'h17' : 's17'}"]`).checked = true;
+    els.settingsForm.querySelector(`input[name="payout"][value="${rules.payout}"]`).checked = true;
+    els.setDas.checked = rules.das;
+    els.setLs.checked = rules.lateSurrender;
+    renderSettingsPreview();
+  }
+
+  /** Live house edge for what's selected, and whether it can be applied now. */
+  function renderSettingsPreview() {
+    const chosen = readSettings();
+    const edge = Rules.edgeText(chosen);
+    const now = Rules.edgeText(game.rules);
+    els.setEdge.textContent = Rules.sameRules(chosen, game.rules)
+      ? `${edge} with basic strategy (current rules).`
+      : `${edge} with basic strategy (now ${now.replace(/^(House|Player) edge /, '')}).`;
+    const midRound = game.phase === 'player' || game.phase === 'insurance' || inFlight;
+    els.setApply.disabled = midRound;
+    els.setNote.hidden = !midRound;
+  }
+
+  els.rulesOpen.addEventListener('click', () => {
+    if (els.settings.open) return;
+    fillSettings(game.rules);
+    els.settings.showModal();
+  });
+  els.settingsForm.addEventListener('change', renderSettingsPreview);
+  els.setDefault.addEventListener('click', () => fillSettings({ ...Rules.DEFAULT_RULES }));
+  els.setCancel.addEventListener('click', () => els.settings.close());
+  els.settings.addEventListener('click', (e) => { if (e.target === els.settings) els.settings.close(); });
+  els.settingsForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (els.setApply.disabled) return;
+    const chosen = readSettings();
+    storage('set', RULES_KEY, JSON.stringify(chosen));
+    els.settings.close();
+    if (Rules.sameRules(chosen, game.rules)) return;
+    // New rules mean a new table: same bankroll, fresh shoe, empty felt.
+    game = newGame(game.bankroll, chosen);
+    shown = new WeakSet();
+    hintFor = null;
+    coachNote = null;
+    render();
+    els.message.textContent = 'New rules are in effect with a fresh shoe. Place your bet.';
+  });
+
   // Single source for key bindings and the help panel, so they can't drift.
   const SHORTCUT_GROUPS = [
     ['Your turn', [
@@ -609,6 +692,7 @@
     ['Insurance', [['i', 'Take insurance (even money)', els.insure], ['n', 'No insurance', els.noInsure]]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
+      ['t', 'Table rules', els.rulesOpen],
       ['?', 'Show this help', els.helpOpen],
     ]],
   ];
@@ -648,7 +732,7 @@
   els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
 
   document.addEventListener('keydown', (e) => {
-    if (els.help.open) return; // Escape closes the dialog natively
+    if (els.help.open || els.settings.open) return; // Escape closes dialogs natively
     if (e.target === els.betInput || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).
     // Buttons handle their own Enter, so leave those alone.
