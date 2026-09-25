@@ -24,6 +24,7 @@
   let shown = new WeakSet();
   let holeWasHidden = false;
   let hintFor = null; // decision point the hint was requested for
+  let coachNote = null; // feedback on your last off-chart move
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -34,7 +35,7 @@
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
-    hint: $('hint'), hintText: $('hint-text'),
+    hint: $('hint'), hintText: $('hint-text'), coach: $('coach'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
       accuracy: $('stat-accuracy'), hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
@@ -352,6 +353,7 @@
 
     els.hint.disabled = !live;
     renderHint();
+    renderCoach();
 
     const broke = !live && game.bankroll <= 0;
     els.reset.hidden = !broke;
@@ -362,18 +364,34 @@
     renderHistory();
   }
 
+  const MOVE_LABEL = {
+    hit: 'Hit', stand: 'Stand', double: 'Double', split: 'Split', surrender: 'Surrender',
+    insurance: 'Take insurance', 'no-insurance': 'No insurance',
+  };
+
+  function renderCoach() {
+    els.coach.hidden = !coachNote;
+    els.coach.textContent = coachNote || '';
+  }
+
   /**
    * Score `move` against basic strategy, and against the hint if one is
    * showing. Runs before the move so the advice reflects the state you
    * acted on.
    */
   function scoreMove(move) {
+    coachNote = null;
     if (!move) return;
     const advice = currentAdvice();
     const hinted = hintFor === decisionKey();
     hintFor = null;
     if (!advice) return;
     const correct = advice.action === move;
+    if (!correct) {
+      const why = advice.reason.charAt(0).toLowerCase() + advice.reason.slice(1);
+      coachNote = `Off chart: you chose ${MOVE_LABEL[move]}. ` +
+        `Basic strategy says ${advice.label} (${why}).`;
+    }
     stats = Stats.recordMove(stats, correct);
     if (hinted) stats = Stats.recordHint(stats, correct);
     storage('set', STATS_KEY, JSON.stringify(stats));
@@ -398,7 +416,7 @@
   els.betForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const bet = Math.floor(Number(els.betInput.value));
-    act(() => { game.deal(bet); round++; }, 'chip');
+    act(() => { game.deal(bet); round++; coachNote = null; }, 'chip');
   });
   els.hit.addEventListener('click', () => act(() => game.hit(), null, 'hit'));
   els.stand.addEventListener('click', () => act(() => game.stand(), null, 'stand'));
