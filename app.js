@@ -7,15 +7,17 @@
   const HISTORY_KEY = 'blackjack.history';
   const MUTE_KEY = 'blackjack.muted';
   const COACH_KEY = 'blackjack.coach';
+  const GAME_KEY = 'blackjack.game'; // bankroll, shoe and any round in progress
   const { Game, handValue } = window.Blackjack;
   const Stats = window.BlackjackStats;
   const Sound = window.BlackjackSound;
   const Strategy = window.BlackjackStrategy;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  let game = new Game({ bankroll: START_BANKROLL });
-  let round = 0; // increments per deal
-  let recordedRound = 0; // last round folded into stats
+  let game = loadGame() || new Game({ bankroll: START_BANKROLL });
+  // A restored round counts as round 1; a finished one is already in stats.
+  let round = game.phase === 'betting' ? 0 : 1; // increments per deal
+  let recordedRound = game.phase === 'done' ? round : 0; // last round folded into stats
   let stats = Stats.parseStats(storage('get', STATS_KEY));
   let history = Stats.parseHistory(storage('get', HISTORY_KEY));
   Sound.muted = storage('get', MUTE_KEY) === '1';
@@ -68,6 +70,16 @@
     } catch (_) { /* storage unavailable: session-only */ }
     return null;
   }
+
+  function loadGame() {
+    try {
+      return Game.fromJSON(JSON.parse(storage('get', GAME_KEY)));
+    } catch (_) {
+      return null; // corrupt save: start fresh
+    }
+  }
+
+  const saveGame = () => storage('set', GAME_KEY, JSON.stringify(game));
 
   const stepMs = () => (reducedMotion.matches ? 0 : 180);
 
@@ -363,6 +375,7 @@
     els.deal.disabled = els.deal.disabled || broke;
 
     maybeRecord(settleAt);
+    saveGame();
     renderStats();
     renderHistory();
   }

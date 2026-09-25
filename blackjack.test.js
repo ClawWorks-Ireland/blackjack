@@ -326,3 +326,58 @@ test('surrender is not offered until insurance is resolved', () => {
   g.declineInsurance();
   assert.ok(g.canSurrender());
 });
+
+// --- Saving and restoring (bankroll survives a reload) ---
+
+const roundTrip = (g) => BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
+
+test('saved game keeps the bankroll between rounds', () => {
+  const g = riggedGame([c('10'), c('9'), c('10'), c('7')]);
+  g.deal(100);
+  g.stand(); // 19 beats 17
+  assert.equal(g.bankroll, 1100);
+  const back = roundTrip(g);
+  assert.equal(back.bankroll, 1100);
+  assert.equal(back.phase, 'done');
+  assert.deepEqual(back.results, g.results);
+  assert.equal(back.shoe.length, g.shoe.length);
+});
+
+test('saved game resumes a round in progress with the stake still on the table', () => {
+  // Player 10,6 vs dealer 10,7; hit draws a 4 (20).
+  const g = riggedGame([c('10'), c('6'), c('10'), c('7'), c('4')]);
+  g.deal(100);
+  assert.equal(g.bankroll, 900);
+  const back = roundTrip(g);
+  assert.equal(back.phase, 'player');
+  assert.equal(back.bankroll, 900, 'reload neither refunds nor forfeits the bet');
+  back.hit();
+  back.stand();
+  assert.equal(back.results[0].outcome, 'win');
+  assert.equal(back.bankroll, 1100);
+});
+
+test('saved game resumes an insurance offer', () => {
+  const g = riggedGame([c('10'), c('9'), c('A'), c('K')]);
+  g.deal(100);
+  const back = roundTrip(g);
+  assert.equal(back.phase, 'insurance');
+  back.takeInsurance();
+  assert.equal(back.bankroll, 1000);
+});
+
+test('corrupt or inconsistent saves are rejected', () => {
+  const good = JSON.parse(JSON.stringify(new BJ.Game({ bankroll: 500 })));
+  assert.ok(BJ.Game.fromJSON(good));
+  const bad = [
+    null, 'text', 42, {},
+    { ...good, bankroll: -1 },
+    { ...good, bankroll: 'lots' },
+    { ...good, phase: 'dancing' },
+    { ...good, decks: 0 },
+    { ...good, shoe: [{ rank: 'Z', suit: '♠' }] },
+    { ...good, phase: 'player', hands: [] },
+    { ...good, phase: 'done', hands: [{ cards: [c('A'), c('K')], bet: 10, fromSplit: false, splitAces: false, surrendered: false, done: true }], results: [] },
+  ];
+  for (const d of bad) assert.equal(BJ.Game.fromJSON(d), null, JSON.stringify(d).slice(0, 60));
+});

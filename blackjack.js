@@ -265,6 +265,65 @@
       this.hands.forEach((h, i) => { this.bankroll += h.bet + this.results[i].net; });
       this.phase = 'done';
     }
+
+    /** Plain-data snapshot for saving. Restore it with Game.fromJSON. */
+    toJSON() {
+      return {
+        bankroll: this.bankroll, decks: this.decks, shoe: this.shoe, phase: this.phase,
+        hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
+        insurance: this.insurance, insuranceNet: this.insuranceNet,
+      };
+    }
+
+    /**
+     * Rebuild a game from toJSON() output, including a round in progress,
+     * so a reload neither refunds nor forfeits the chips on the table.
+     * Returns null when the data is missing or inconsistent.
+     */
+    static fromJSON(data, { rng = Math.random } = {}) {
+      if (!validSave(data)) return null;
+      const g = new Game({ bankroll: data.bankroll, decks: data.decks, rng });
+      const copy = (cards) => cards.map(({ rank, suit }) => ({ rank, suit }));
+      g.shoe = copy(data.shoe);
+      g.phase = data.phase;
+      g.hands = data.hands.map((h) => ({
+        cards: copy(h.cards), bet: h.bet, fromSplit: h.fromSplit, splitAces: h.splitAces,
+        surrendered: h.surrendered, done: h.done,
+      }));
+      g.active = data.active;
+      g.dealer = copy(data.dealer);
+      g.results = data.results.map(({ outcome, net }) => ({ outcome, net }));
+      g.insurance = data.insurance;
+      g.insuranceNet = data.insuranceNet;
+      return g;
+    }
+  }
+
+  const PHASES = ['betting', 'insurance', 'player', 'done'];
+  const OUTCOMES = ['win', 'blackjack', 'lose', 'bust', 'push', 'surrender'];
+  const isObj = (x) => !!x && typeof x === 'object';
+  const isBool = (x) => typeof x === 'boolean';
+  const isMoney = (x) => Number.isFinite(x) && x >= 0;
+  const validCard = (c) => isObj(c) && RANKS.includes(c.rank) && SUITS.includes(c.suit);
+  const validCards = (a) => Array.isArray(a) && a.every(validCard);
+  const validHand = (h) => isObj(h) && validCards(h.cards) && h.cards.length > 0 &&
+    Number.isFinite(h.bet) && h.bet > 0 && isBool(h.fromSplit) && isBool(h.splitAces) &&
+    isBool(h.surrendered) && isBool(h.done);
+  const validResult = (r) => isObj(r) && OUTCOMES.includes(r.outcome) && Number.isFinite(r.net);
+
+  function validSave(d) {
+    if (!isObj(d) || !isMoney(d.bankroll) || !PHASES.includes(d.phase)) return false;
+    if (!Number.isInteger(d.decks) || d.decks < 1 || d.decks > 8) return false;
+    if (!validCards(d.shoe) || !validCards(d.dealer)) return false;
+    if (!Array.isArray(d.hands) || !d.hands.every(validHand) || d.hands.length > MAX_HANDS) return false;
+    if (!Array.isArray(d.results) || !d.results.every(validResult)) return false;
+    if (!isMoney(d.insurance) || !(d.insuranceNet === null || Number.isFinite(d.insuranceNet))) return false;
+    if (!Number.isInteger(d.active) || d.active < 0) return false;
+    const live = d.phase === 'player' || d.phase === 'insurance';
+    if (live && (!d.hands.length || d.active >= d.hands.length || d.dealer.length < 2)) return false;
+    if (d.phase === 'insurance' && d.hands.length !== 1) return false;
+    if (d.phase === 'done' && d.results.length !== d.hands.length) return false;
+    return true;
   }
 
   const api = {
