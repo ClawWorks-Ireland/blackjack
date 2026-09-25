@@ -9,6 +9,7 @@
   const { Game, handValue } = window.Blackjack;
   const Stats = window.BlackjackStats;
   const Sound = window.BlackjackSound;
+  const Strategy = window.BlackjackStrategy;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   let game = new Game({ bankroll: START_BANKROLL });
@@ -22,6 +23,7 @@
   // dealer's hole card was face-down on the previous render.
   let shown = new WeakSet();
   let holeWasHidden = false;
+  let hintFor = null; // decision point the hint was requested for
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -32,6 +34,7 @@
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
+    hint: $('hint'), hintText: $('hint-text'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
       net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
@@ -237,6 +240,35 @@
     }));
   }
 
+  /** Identifies the current decision, so a hint expires once you act. */
+  function decisionKey() {
+    const h = game.currentHand;
+    return `${round}:${game.phase}:${game.active}:${h ? h.cards.length : 0}`;
+  }
+
+  function currentAdvice() {
+    if (game.phase === 'insurance') return Strategy.insuranceAdvice();
+    const h = game.currentHand;
+    if (!h) return null;
+    return Strategy.recommend(h.cards, game.dealer[0], {
+      canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(),
+    });
+  }
+
+  const ADVICE_BUTTON = {
+    hit: 'hit', stand: 'stand', double: 'double', split: 'split', surrender: 'surrender',
+    'no-insurance': 'noInsure',
+  };
+
+  function renderHint() {
+    const advice = hintFor === decisionKey() ? currentAdvice() : null;
+    Object.values(ADVICE_BUTTON).forEach((k) => els[k].classList.remove('suggested'));
+    els.hintText.hidden = !advice;
+    if (!advice) return;
+    els.hintText.textContent = `Basic strategy: ${advice.label}. ${advice.reason}.`;
+    els[ADVICE_BUTTON[advice.action]].classList.add('suggested');
+  }
+
   /** Fold a finished round into stats once, and play its outcome cue. */
   function maybeRecord(settleAt) {
     if (game.phase !== 'done' || recordedRound === round) return;
@@ -312,6 +344,9 @@
       els.message.classList.remove('reveal');
     }
 
+    els.hint.disabled = !live;
+    renderHint();
+
     const broke = !live && game.bankroll <= 0;
     els.reset.hidden = !broke;
     els.deal.disabled = els.deal.disabled || broke;
@@ -355,6 +390,10 @@
     delete els.message.dataset.outcome;
     render();
   });
+  els.hint.addEventListener('click', () => {
+    hintFor = decisionKey();
+    renderHint();
+  });
   els.mute.addEventListener('click', () => {
     Sound.muted = !Sound.muted;
     storage('set', MUTE_KEY, Sound.muted ? '1' : '0');
@@ -371,7 +410,7 @@
 
   const SHORTCUTS = {
     h: els.hit, s: els.stand, d: els.double, p: els.split, r: els.surrender,
-    i: els.insure, n: els.noInsure, m: els.mute,
+    i: els.insure, n: els.noInsure, m: els.mute, '?': els.hint, g: els.hint,
   };
   document.addEventListener('keydown', (e) => {
     if (e.target === els.betInput || e.metaKey || e.ctrlKey || e.altKey) return;

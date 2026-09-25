@@ -165,3 +165,11 @@ button.toggle[aria-pressed="true"] { opacity: 0.7; }
 .history li[data-sign="down"] .net { color: #ffb3b3; }
 .history .detail { opacity: 0.8; margin-top: 0.15rem; }
 .history:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+/* Basic-strategy hint */
+.hint { margin: 0; font-size: 0.95rem; color: var(--gold); }
+button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
+@media (prefers-reduced-motion: no-preference) {
+  button.suggested { animation: pulse 1.2s ease-in-out infinite; }
+}
+@keyframes pulse { 50% { box-shadow: 0 0 0 3px #fff, 0 0 4px 1px var(--gold); } }

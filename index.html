@@ -44,7 +44,9 @@
         <button id="double" disabled>Double <kbd>D</kbd></button>
         <button id="split" disabled>Split <kbd>P</kbd></button>
         <button id="surrender" disabled>Surrender <kbd>R</kbd></button>
+        <button id="hint" class="toggle" disabled>Hint <kbd>G</kbd></button>
       </div>
+      <p id="hint-text" class="hint" role="status" hidden></p>
 
       <div id="insurance" class="actions" hidden>
         <button id="insure">Take insurance <kbd>I</kbd></button>
@@ -76,6 +78,7 @@
   <script src="blackjack.js"></script>
   <script src="stats.js"></script>
   <script src="sound.js"></script>
+  <script src="strategy.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
