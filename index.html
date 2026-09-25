@@ -37,8 +37,21 @@
       <form id="bet-form" class="bet-form" novalidate>
         <label for="bet">Bet</label>
         <input id="bet" type="number" min="1" step="1" value="50" required>
-        <button type="submit" id="deal">Deal</button>
+        <button type="submit" id="deal">Deal <kbd>Enter</kbd></button>
       </form>
+      <p id="limits" class="limits">Table limits $1–$500</p>
+      <div id="chips" class="chips" role="group" aria-label="Add chips to your bet">
+        <button type="button" class="chip" data-chip="1" aria-label="Add $1">1</button>
+        <button type="button" class="chip" data-chip="5" aria-label="Add $5">5</button>
+        <button type="button" class="chip" data-chip="25" aria-label="Add $25">25</button>
+        <button type="button" class="chip" data-chip="100" aria-label="Add $100">100</button>
+        <button type="button" class="chip" data-chip="500" aria-label="Add $500">500</button>
+        <button type="button" id="clear-bet" class="link">Clear bet</button>
+      </div>
+      <div id="rebet" class="actions" hidden>
+        <button type="button" id="rebet-1">Rebet $50 <kbd>Enter</kbd></button>
+        <button type="button" id="rebet-2">Rebet ×2 $100 <kbd>X</kbd></button>
+      </div>
 
       <div class="actions">
         <button id="hit" disabled>Hit <kbd>H</kbd></button>

@@ -42,11 +42,16 @@ runner.
 - The dealer checks for blackjack before you play. If every one of your
   hands busts or is surrendered, the dealer doesn't draw
 
-You start with $1,000. The minimum bet is $1. When you have less than
-that left between rounds, a button starts you over with $1,000.
+You start with $1,000. Table limits are $1 to $500 per hand, in whole
+dollars. When you have less than the minimum left between rounds, a
+button starts you over with $1,000.
 
 ## Features
 
+- **Betting:** type a bet or build one with $1, $5, $25, $100 and $500
+  chips (Clear bet empties the box). Chips that would take you past the
+  table maximum or your bankroll are disabled. After a round, Rebet
+  (or Enter) deals the same bet again and Rebet ×2 (X) doubles it
 - **Hint (G):** shows the basic-strategy move for these rules (dealer
   stands on soft 17) and why, for example
   "Hard 16 vs dealer ace: Surrender", and highlights the button
@@ -85,7 +90,8 @@ and history; it doesn't touch the bankroll.
 | M | Sound on/off |
 | C | Coach notes on/off |
 | ? | Show shortcuts |
-| Enter | Deal (in the bet box) |
+| Enter | Deal, or deal again with the same bet |
+| X | Rebet ×2 after a round |
 
 ## Project layout
 
@@ -95,14 +101,15 @@ and history; it doesn't touch the bankroll.
 | `strategy.js` | Basic-strategy chart for these table rules. No DOM code |
 | `stats.js` | Stats, history and saved-data parsing. No DOM code |
 | `format.js` | Money formatting ($1,002.50). No DOM code |
+| `betting.js` | Bet checks, chips and rebet amounts. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
-| `*.test.js` | Tests for the four DOM-free modules |
+| `*.test.js` | Tests for the five DOM-free modules |
 
-The four DOM-free modules work in both the browser (as
-`window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`
-and `window.BlackjackFormat`) and Node (via `module.exports`). That's
+The five DOM-free modules work in both the browser (as
+`window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
+`window.BlackjackFormat` and `window.BlackjackBetting`) and Node (via `module.exports`). That's
 why they can be tested without a browser.
 
 ## Not included

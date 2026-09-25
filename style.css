@@ -240,3 +240,25 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
 @media (hover: none) and (pointer: coarse) {
   button kbd { display: none; }
 }
+
+/* Chips, limits and rebet */
+.limits { margin: -0.4rem 0 0; font-size: 0.85rem; opacity: 0.8; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; align-items: center; }
+.chip {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  border: 4px dashed rgba(255, 255, 255, 0.85);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+.chip[data-chip="1"] { background: #6c757d; }
+.chip[data-chip="5"] { background: #c1121f; }
+.chip[data-chip="25"] { background: #2d6a4f; }
+.chip[data-chip="100"] { background: #111; }
+.chip[data-chip="500"] { background: #6a3d9a; }
+.chip:not(:disabled):hover { transform: translateY(-2px); }
+.chips .link { padding: 0.5rem; min-height: 44px; }

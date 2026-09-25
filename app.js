@@ -3,6 +3,9 @@
   'use strict';
 
   const START_BANKROLL = 1000;
+  const TABLE_MIN = 1;
+  const TABLE_MAX = 500;
+  const LAST_BET_KEY = 'blackjack.lastBet';
   const STATS_KEY = 'blackjack.stats';
   const HISTORY_KEY = 'blackjack.history';
   const MUTE_KEY = 'blackjack.muted';
@@ -16,7 +19,12 @@
   const Betting = window.BlackjackBetting;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  let game = loadGame() || new Game({ bankroll: START_BANKROLL });
+  const newGame = (bankroll) => new Game({ bankroll, minBet: TABLE_MIN, maxBet: TABLE_MAX });
+  let game = loadGame() || newGame(START_BANKROLL);
+  // Saves from before table limits load without them; apply today's limits.
+  game.minBet = TABLE_MIN;
+  game.maxBet = TABLE_MAX;
+  let lastBet = Betting.parseBet(storage('get', LAST_BET_KEY)); // initial bet of the last round
   // A restored round counts as round 1; a finished one is already in stats.
   let round = game.phase === 'betting' ? 0 : 1; // increments per deal
   let recordedRound = game.phase === 'done' ? round : 0; // last round folded into stats
@@ -39,7 +47,8 @@
     dealerCards: $('dealer-cards'), dealerTotal: $('dealer-total'),
     playerHands: $('player-hands'),
     message: $('message'), bankroll: $('bankroll'), betDisplay: $('bet-display'),
-    betForm: $('bet-form'), betInput: $('bet'), deal: $('deal'),
+    betForm: $('bet-form'), betInput: $('bet'), deal: $('deal'), limits: $('limits'),
+    chips: $('chips'), clearBet: $('clear-bet'), rebetRow: $('rebet'), rebet: $('rebet-1'), rebet2: $('rebet-2'),
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
@@ -319,7 +328,29 @@
     return hands + (game.insuranceNet > 0 ? game.insurance + game.insuranceNet : 0);
   }
 
-  const ACTION_BUTTONS = ['hit', 'stand', 'double', 'split', 'surrender', 'insure', 'noInsure', 'hint', 'deal'];
+  const ACTION_BUTTONS = [
+    'hit', 'stand', 'double', 'split', 'surrender', 'insure', 'noInsure', 'hint', 'deal',
+    'clearBet', 'rebet', 'rebet2',
+  ];
+
+  const limits = () => ({ bankroll: game.bankroll, min: game.minBet, max: game.maxBet });
+
+  /** Chip, clear and rebet controls, which only work between rounds. */
+  function renderBetControls() {
+    const open = !(game.phase === 'player' || game.phase === 'insurance') && !inFlight && !game.isBroke;
+    for (const btn of els.chips.querySelectorAll('[data-chip]')) {
+      const chip = Number(btn.dataset.chip);
+      btn.disabled = !open || Betting.addChip(els.betInput.value, chip, limits()) === null;
+    }
+    els.clearBet.disabled = !open || !els.betInput.value;
+    const one = Betting.rebetAmount(lastBet, 1, limits());
+    const two = Betting.rebetAmount(lastBet, 2, limits());
+    els.rebetRow.hidden = !(open && game.phase === 'done' && lastBet > 0);
+    els.rebet.disabled = one === null;
+    els.rebet2.disabled = two === null;
+    els.rebet.firstChild.textContent = `Rebet ${money(lastBet)} `;
+    els.rebet2.firstChild.textContent = `Rebet ×2 ${money(lastBet * 2)} `;
+  }
 
   /**
    * Two passes per change. While newly dealt cards are still in flight,
@@ -364,6 +395,8 @@
       els.hintText.hidden = true;
       els.coach.hidden = true;
       els.reset.hidden = true;
+      els.rebetRow.hidden = true;
+      els.chips.querySelectorAll('[data-chip]').forEach((b) => { b.disabled = true; });
       revealTimer = setTimeout(render, settleAt + LAND_MS);
       return;
     }
@@ -387,7 +420,9 @@
     els.noInsure.firstChild.textContent = evenMoney ? 'No even money ' : 'No insurance ';
     els.deal.disabled = live;
     els.betInput.disabled = live;
-    els.betInput.max = String(Betting.maxBet(game.bankroll));
+    els.betInput.max = String(Betting.maxBet(game.bankroll, game.maxBet));
+    els.betInput.min = String(game.minBet);
+    els.limits.textContent = `Table limits ${money(game.minBet)}–${money(game.maxBet)}`;
 
     if (game.phase === 'done' && game.results.length) {
       els.message.textContent = resultMessage();
@@ -423,6 +458,7 @@
       ? `Not enough for the ${money(game.minBet)} minimum bet. Start over with ${money(START_BANKROLL)}`
       : `Out of chips. Start over with ${money(START_BANKROLL)}`;
     els.deal.disabled = els.deal.disabled || broke;
+    renderBetControls();
 
     renderStats();
     renderHistory();
@@ -486,14 +522,45 @@
   els.betForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const bet = Number(els.betInput.value);
-    const error = Betting.betError(bet, { bankroll: game.bankroll, min: game.minBet });
+    const error = Betting.betError(bet, limits());
     if (error) {
       els.message.textContent = error;
       delete els.message.dataset.outcome;
       return;
     }
-    act(() => { game.deal(bet); round++; coachNote = null; }, 'chip');
+    act(() => {
+      game.deal(bet);
+      round++;
+      coachNote = null;
+      lastBet = bet;
+      storage('set', LAST_BET_KEY, String(bet));
+    }, 'chip');
   });
+
+  /** Put an amount in the bet box and deal it. */
+  function dealAmount(amount) {
+    if (amount === null) return;
+    els.betInput.value = String(amount);
+    els.betForm.requestSubmit();
+  }
+
+  els.chips.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-chip]');
+    if (!btn || btn.disabled) return;
+    const next = Betting.addChip(els.betInput.value, Number(btn.dataset.chip), limits());
+    if (next === null) return;
+    els.betInput.value = String(next);
+    Sound.play('chip');
+    renderBetControls();
+  });
+  els.clearBet.addEventListener('click', () => {
+    els.betInput.value = '';
+    renderBetControls();
+    els.betInput.focus();
+  });
+  els.betInput.addEventListener('input', renderBetControls);
+  els.rebet.addEventListener('click', () => dealAmount(Betting.rebetAmount(lastBet, 1, limits())));
+  els.rebet2.addEventListener('click', () => dealAmount(Betting.rebetAmount(lastBet, 2, limits())));
   els.hit.addEventListener('click', () => act(() => game.hit(), null, 'hit'));
   els.stand.addEventListener('click', () => act(() => game.stand(), null, 'stand'));
   els.double.addEventListener('click', () => act(() => game.double(), 'chip', 'double'));
@@ -502,7 +569,7 @@
   els.insure.addEventListener('click', () => act(() => game.takeInsurance(), 'chip', 'insurance'));
   els.noInsure.addEventListener('click', () => act(() => game.declineInsurance(), null, 'no-insurance'));
   els.reset.addEventListener('click', () => {
-    game = new Game({ bankroll: START_BANKROLL });
+    game = newGame(START_BANKROLL);
     shown = new WeakSet();
     els.message.textContent = 'Place your bet to start.';
     delete els.message.dataset.outcome;
@@ -538,6 +605,7 @@
       ['p', 'Split a pair', els.split], ['r', 'Surrender', els.surrender],
       ['g', 'Basic-strategy hint', els.hint],
     ]],
+    ['Betting', [['x', 'Rebet ×2 after a round', els.rebet2]]],
     ['Insurance', [['i', 'Take insurance (even money)', els.insure], ['n', 'No insurance', els.noInsure]]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
@@ -566,7 +634,7 @@
       h.textContent = title;
       const dl = document.createElement('dl');
       dl.append(...keys.map(([key, label]) => shortcutRow(key.toUpperCase(), label)));
-      if (title === 'Your turn') dl.append(shortcutRow('Enter', 'Deal (in the bet box)'));
+      if (title === 'Betting') dl.prepend(shortcutRow('Enter', 'Deal, or deal again with the same bet'));
       return [h, dl];
     });
     els.helpList.replaceChildren(...sections.flat());
@@ -582,6 +650,16 @@
   document.addEventListener('keydown', (e) => {
     if (els.help.open) return; // Escape closes the dialog natively
     if (e.target === els.betInput || e.metaKey || e.ctrlKey || e.altKey) return;
+    // Enter between rounds deals again with the bet in the box (the last bet).
+    // Buttons handle their own Enter, so leave those alone.
+    if (e.key === 'Enter') {
+      if (e.target.closest && e.target.closest('button, input, select, textarea')) return;
+      if (!els.deal.disabled) {
+        e.preventDefault();
+        els.betForm.requestSubmit();
+      }
+      return;
+    }
     const btn = SHORTCUTS[e.key.toLowerCase()];
     if (btn && !btn.disabled && !btn.closest('[hidden]')) {
       e.preventDefault();

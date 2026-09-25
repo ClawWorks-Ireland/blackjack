@@ -98,10 +98,13 @@
    * Phases: betting -> [insurance] -> player -> done.
    */
   class Game {
-    constructor({ bankroll = 1000, decks = 6, minBet = 1, penetration = PENETRATION, rng = Math.random } = {}) {
+    constructor({
+      bankroll = 1000, decks = 6, minBet = 1, maxBet = Infinity, penetration = PENETRATION, rng = Math.random,
+    } = {}) {
       this.bankroll = bankroll;
       this.decks = decks;
       this.minBet = minBet;
+      this.maxBet = maxBet; // table limit
       this.penetration = penetration;
       this.rng = rng;
       this.shoe = shuffle(createShoe(decks), rng);
@@ -194,6 +197,7 @@
       if (this.phase === 'player' || this.phase === 'insurance') throw new Error('Round in progress');
       if (!Number.isFinite(bet) || bet <= 0) throw new Error('Bet must be positive');
       if (bet < this.minBet) throw new Error(`Minimum bet is $${this.minBet}`);
+      if (bet > this.maxBet) throw new Error(`Maximum bet is $${this.maxBet}`);
       if (bet > this.bankroll) throw new Error('Bet exceeds bankroll');
       // Between rounds is the only time the shoe is replaced.
       this.newShoe = this.cutCardReached;
@@ -319,7 +323,8 @@
     /** Plain-data snapshot for saving. Restore it with Game.fromJSON. */
     toJSON() {
       return {
-        bankroll: this.bankroll, decks: this.decks, shoe: this.shoe, phase: this.phase,
+        bankroll: this.bankroll, decks: this.decks, minBet: this.minBet,
+        maxBet: Number.isFinite(this.maxBet) ? this.maxBet : null, shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
         insurance: this.insurance, insuranceNet: this.insuranceNet, tookEvenMoney: this.tookEvenMoney,
       };
@@ -332,7 +337,10 @@
      */
     static fromJSON(data, { rng = Math.random } = {}) {
       if (!validSave(data)) return null;
-      const g = new Game({ bankroll: data.bankroll, decks: data.decks, rng });
+      const g = new Game({
+        bankroll: data.bankroll, decks: data.decks, rng,
+        minBet: data.minBet ?? 1, maxBet: data.maxBet ?? Infinity,
+      });
       const copy = (cards) => cards.map(({ rank, suit }) => ({ rank, suit }));
       g.shoe = copy(data.shoe);
       g.phase = data.phase;
@@ -365,6 +373,9 @@
   function validSave(d) {
     if (!isObj(d) || !isMoney(d.bankroll) || !PHASES.includes(d.phase)) return false;
     if (!Number.isInteger(d.decks) || d.decks < 1 || d.decks > 8) return false;
+    // Limits were added later: older saves have neither and load with the defaults.
+    if (d.minBet !== undefined && !(Number.isFinite(d.minBet) && d.minBet > 0)) return false;
+    if (d.maxBet !== undefined && d.maxBet !== null && !(Number.isFinite(d.maxBet) && d.maxBet > 0)) return false;
     if (!validCards(d.shoe) || !validCards(d.dealer)) return false;
     if (!Array.isArray(d.hands) || !d.hands.every(validHand) || d.hands.length > MAX_HANDS) return false;
     if (!Array.isArray(d.results) || !d.results.every(validResult)) return false;

@@ -484,3 +484,27 @@ test('even money needs no spare chips', () => {
   assert.equal(g.bankroll, 200);
   assert.equal(g.net, 100);
 });
+
+// --- Table limits ---
+
+test('deal enforces the table maximum', () => {
+  const g = riggedGame([c('10'), c('9'), c('10'), c('7')]);
+  g.maxBet = 500;
+  assert.throws(() => g.deal(501), /Maximum bet is \$500/);
+  g.deal(500);
+  assert.equal(g.hands[0].bet, 500);
+});
+
+test('saved games keep table limits; older saves load with defaults', () => {
+  const g = new BJ.Game({ bankroll: 900, minBet: 5, maxBet: 500 });
+  const back = BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
+  assert.equal(back.minBet, 5);
+  assert.equal(back.maxBet, 500);
+  const old = JSON.parse(JSON.stringify(g));
+  delete old.minBet;
+  delete old.maxBet;
+  const legacy = BJ.Game.fromJSON(old);
+  assert.equal(legacy.minBet, 1);
+  assert.equal(legacy.maxBet, Infinity);
+  assert.equal(BJ.Game.fromJSON({ ...old, maxBet: -3 }), null);
+});

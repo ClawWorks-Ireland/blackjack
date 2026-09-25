@@ -31,3 +31,33 @@ test('bet errors for empty, fractional and out-of-limit bets', () => {
   assert.equal(betError(600, { bankroll: 1000, max: 500 }), 'The table maximum is $500.');
   assert.equal(betError(5, { bankroll: 100, min: 5, max: 500 }), null);
 });
+
+const { CHIPS, parseBet, addChip, rebetAmount } = require('./betting.js');
+
+test('chip denominations', () => {
+  assert.deepEqual(CHIPS, [1, 5, 25, 100, 500]);
+});
+
+test('parseBet treats empty or bad input as zero', () => {
+  assert.equal(parseBet(''), 0);
+  assert.equal(parseBet('abc'), 0);
+  assert.equal(parseBet('-5'), 0);
+  assert.equal(parseBet('25'), 25);
+});
+
+test('chips add to the bet up to the bankroll and table maximum', () => {
+  assert.equal(addChip('', 25, { bankroll: 1000, max: 500 }), 25);
+  assert.equal(addChip('25', 100, { bankroll: 1000, max: 500 }), 125);
+  assert.equal(addChip('450', 100, { bankroll: 1000, max: 500 }), null);
+  assert.equal(addChip('400', 100, { bankroll: 1000, max: 500 }), 500);
+  assert.equal(addChip('', 5, { bankroll: 4.5, max: 500 }), null);
+});
+
+test('rebet and rebet x2 respect the bankroll and limits', () => {
+  const limits = { bankroll: 300, min: 1, max: 500 };
+  assert.equal(rebetAmount(100, 1, limits), 100);
+  assert.equal(rebetAmount(100, 2, limits), 200);
+  assert.equal(rebetAmount(200, 2, limits), null); // 400 > bankroll
+  assert.equal(rebetAmount(300, 2, { ...limits, bankroll: 1000 }), null); // 600 > table max
+  assert.equal(rebetAmount(0, 1, limits), null);
+});
