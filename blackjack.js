@@ -9,7 +9,9 @@
  * split hand pays 1:1 (not blackjack).
  *
  * Insurance: offered when the dealer shows an ace, costs half the bet and
- * pays 2:1 if the dealer has blackjack. The dealer peeks for blackjack
+ * pays 2:1 if the dealer has blackjack. With a blackjack of your own it is
+ * called even money: taking it pays 1:1 whatever the dealer holds, and it
+ * needs no spare chips because it can't lose. The dealer peeks for blackjack
  * after insurance is settled (and immediately when showing a ten).
  *
  * Surrender (late): on the first two cards of an unsplit hand, after the
@@ -112,6 +114,7 @@
       this.results = [];
       this.insurance = 0; // side-bet stake
       this.insuranceNet = null; // null until insurance is settled
+      this.tookEvenMoney = false;
     }
 
     get currentHand() {
@@ -162,8 +165,13 @@
       this.emergencyShuffles++;
     }
 
+    /** Insurance offered while you hold blackjack is called even money. */
+    get evenMoneyOffered() {
+      return this.phase === 'insurance' && isBlackjack(this.hands[0].cards);
+    }
+
     canInsure() {
-      return this.phase === 'insurance' && this.bankroll >= this.insuranceCost;
+      return this.phase === 'insurance' && (this.evenMoneyOffered || this.bankroll >= this.insuranceCost);
     }
 
     canDouble() {
@@ -197,6 +205,7 @@
       this.results = [];
       this.insurance = 0;
       this.insuranceNet = null;
+      this.tookEvenMoney = false;
       const cards = [this.draw(), this.draw()];
       this.dealer = [this.draw(), this.draw()];
       this.hands = [{ cards, bet, fromSplit: false, splitAces: false, surrendered: false, done: false }];
@@ -207,6 +216,7 @@
 
     takeInsurance() {
       if (!this.canInsure()) throw new Error('Cannot take insurance now');
+      this.tookEvenMoney = this.evenMoneyOffered;
       this.insurance = this.insuranceCost;
       this.bankroll -= this.insurance;
       this.peek();
@@ -311,7 +321,7 @@
       return {
         bankroll: this.bankroll, decks: this.decks, shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
-        insurance: this.insurance, insuranceNet: this.insuranceNet,
+        insurance: this.insurance, insuranceNet: this.insuranceNet, tookEvenMoney: this.tookEvenMoney,
       };
     }
 
@@ -335,6 +345,7 @@
       g.results = data.results.map(({ outcome, net }) => ({ outcome, net }));
       g.insurance = data.insurance;
       g.insuranceNet = data.insuranceNet;
+      g.tookEvenMoney = data.tookEvenMoney === true;
       return g;
     }
   }

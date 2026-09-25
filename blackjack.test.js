@@ -452,3 +452,35 @@ test('surrendering the last $1 leaves you broke', () => {
   assert.equal(g.bankroll, 0.5);
   assert.ok(g.isBroke);
 });
+
+// --- Even money ---
+
+test('even money is offered only when you hold blackjack against an ace', () => {
+  const bj = riggedGame([c('A'), c('K'), c('A'), c('7')]);
+  bj.deal(100);
+  assert.ok(bj.evenMoneyOffered);
+  const plain = riggedGame([c('10'), c('9'), c('A'), c('7')]);
+  plain.deal(100);
+  assert.equal(plain.phase, 'insurance');
+  assert.ok(!plain.evenMoneyOffered);
+});
+
+test('even money pays 1:1 when the dealer has no blackjack', () => {
+  const g = riggedGame([c('A'), c('K'), c('A'), c('7')]);
+  g.deal(100);
+  g.takeInsurance();
+  assert.ok(g.tookEvenMoney);
+  assert.equal(g.phase, 'done');
+  assert.equal(g.net, 100);
+  assert.equal(g.bankroll, 1100);
+});
+
+test('even money needs no spare chips', () => {
+  const g = riggedGame([c('A'), c('K'), c('A'), c('Q')], 100);
+  g.deal(100);
+  assert.equal(g.bankroll, 0);
+  assert.ok(g.canInsure());
+  g.takeInsurance();
+  assert.equal(g.bankroll, 200);
+  assert.equal(g.net, 100);
+});

@@ -81,3 +81,9 @@ test('reason names the hand and dealer card', () => {
 test('basic strategy declines insurance', () => {
   assert.equal(insuranceAdvice().action, 'no-insurance');
 });
+
+test('basic strategy declines even money too', () => {
+  const r = insuranceAdvice(true);
+  assert.equal(r.action, 'no-insurance');
+  assert.equal(r.label, 'No even money');
+});

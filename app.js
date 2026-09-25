@@ -176,6 +176,7 @@
   }
 
   function resultMessage() {
+    if (game.tookEvenMoney) return `Even money. You win ${money(game.net)}.`;
     let text;
     if (game.results.length === 1) {
       const r = game.results[0];
@@ -192,6 +193,7 @@
   }
 
   function netOutcome() {
+    if (game.tookEvenMoney) return 'win';
     if (game.results.length === 1 && game.insuranceNet === null) {
       return game.results[0].outcome === 'surrender' ? 'lose' : game.results[0].outcome;
     }
@@ -224,6 +226,7 @@
       round: stats.rounds,
       net: game.net,
       insurance: game.insuranceNet,
+      evenMoney: game.tookEvenMoney,
       dealer: handValue(game.dealer).total,
       dealerCards: cardText(game.dealer),
       hands: game.hands.map((h, i) => ({
@@ -257,7 +260,8 @@
       detail.className = 'detail';
       const yours = e.hands.map((h) => `${h.cards} (${h.total})`).join(' | ');
       let text = `${yours} vs ${e.dealerCards} (${e.dealer})`;
-      if (Number.isFinite(e.insurance)) text += e.insurance > 0 ? ' · insurance paid' : ' · insurance lost';
+      if (e.evenMoney) text += ' · even money';
+      else if (Number.isFinite(e.insurance)) text += e.insurance > 0 ? ' · insurance paid' : ' · insurance lost';
       detail.textContent = text;
       li.append(top, detail);
       return li;
@@ -271,7 +275,7 @@
   }
 
   function currentAdvice() {
-    if (game.phase === 'insurance') return Strategy.insuranceAdvice();
+    if (game.phase === 'insurance') return Strategy.insuranceAdvice(game.evenMoneyOffered);
     const h = game.currentHand;
     if (!h) return null;
     return Strategy.recommend(h.cards, game.dealer[0], {
@@ -376,7 +380,10 @@
     els.insurance.hidden = !offering;
     els.insure.disabled = !game.canInsure();
     els.noInsure.disabled = !offering;
-    els.insure.firstChild.textContent = `Take insurance (${money(game.insuranceCost)}) `;
+    const evenMoney = game.evenMoneyOffered;
+    els.insure.firstChild.textContent = evenMoney ? 'Even money '
+      : `Take insurance (${money(game.insuranceCost)}) `;
+    els.noInsure.firstChild.textContent = evenMoney ? 'No even money ' : 'No insurance ';
     els.deal.disabled = live;
     els.betInput.disabled = live;
     els.betInput.max = String(game.bankroll);
@@ -388,7 +395,9 @@
       void els.message.offsetWidth; // restart the animation
       els.message.classList.add('reveal');
     } else if (offering) {
-      els.message.textContent = game.canInsure()
+      els.message.textContent = evenMoney
+        ? `Blackjack! Dealer shows an ace. Take even money (${money(game.hands[0].bet)} now)?`
+        : game.canInsure()
         ? `Dealer shows an ace. Insure for ${money(game.insuranceCost)}?`
         : 'Dealer shows an ace. Not enough chips to insure.';
       delete els.message.dataset.outcome;
@@ -422,6 +431,7 @@
     hit: 'Hit', stand: 'Stand', double: 'Double', split: 'Split', surrender: 'Surrender',
     insurance: 'Take insurance', 'no-insurance': 'No insurance',
   };
+  const EVEN_MONEY_LABEL = { insurance: 'Even money', 'no-insurance': 'No even money' };
 
   function renderCoach() {
     const show = coachOn && !!coachNote;
@@ -446,7 +456,8 @@
     const correct = advice.action === move;
     if (!correct) {
       const why = advice.reason.charAt(0).toLowerCase() + advice.reason.slice(1);
-      coachNote = `Off chart: you chose ${MOVE_LABEL[move]}. ` +
+      const chose = (game.evenMoneyOffered && EVEN_MONEY_LABEL[move]) || MOVE_LABEL[move];
+      coachNote = `Off chart: you chose ${chose}. ` +
         `Basic strategy says ${advice.label} (${why}).`;
     }
     stats = Stats.recordMove(stats, correct);
@@ -520,7 +531,7 @@
       ['p', 'Split a pair', els.split], ['r', 'Surrender', els.surrender],
       ['g', 'Basic-strategy hint', els.hint],
     ]],
-    ['Insurance', [['i', 'Take insurance', els.insure], ['n', 'No insurance', els.noInsure]]],
+    ['Insurance', [['i', 'Take insurance (even money)', els.insure], ['n', 'No insurance', els.noInsure]]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
       ['?', 'Show this help', els.helpOpen],

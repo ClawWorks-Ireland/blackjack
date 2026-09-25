@@ -90,8 +90,12 @@
     return done(move, desc);
   }
 
-  /** Basic strategy never takes insurance. */
-  const insuranceAdvice = () => ({
+  /** Basic strategy never takes insurance, including even money. */
+  const insuranceAdvice = (evenMoney = false) => (evenMoney ? {
+    action: 'no-insurance',
+    label: 'No even money',
+    reason: 'Even money is insurance on your blackjack: 3:2 is worth more on average',
+  } : {
     action: 'no-insurance',
     label: 'No insurance',
     reason: 'Insurance loses money over time unless you count cards',
