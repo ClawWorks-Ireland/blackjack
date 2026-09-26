@@ -606,3 +606,16 @@ test('side bets survive save and restore; old saves have none', () => {
   assert.equal(BJ.Game.fromJSON(old).sideNet, 0);
   assert.equal(BJ.Game.fromJSON({ ...old, sideBets: [{ bet: 'pairs', stake: -1, win: null, odds: 0, net: 1 }] }), null);
 });
+
+test('R1: wagered counts doubles, splits, insurance and side bets', () => {
+  const g = riggedGame([c('5'), c('5'), c('10'), c('7'), c('6'), c('10'), c('9')]);
+  g.deal(10, { pairs: 5 });
+  g.split();
+  g.double();
+  g.stand();
+  assert.equal(g.wagered, 20 + 10 + 5);
+  const ins = riggedGame([c('10'), c('9'), c('A'), c('7')]);
+  ins.deal(100);
+  ins.takeInsurance();
+  assert.equal(ins.wagered, 150);
+});

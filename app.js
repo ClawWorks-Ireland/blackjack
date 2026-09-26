@@ -73,7 +73,7 @@
     setEdge: $('set-edge'), setNote: $('set-note'), setApply: $('set-apply'), setCancel: $('set-cancel'),
     setDefault: $('set-default'),
     stat: {
-      rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
+      rate: $('stat-rate'), ret: $('stat-return'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
       accuracy: $('stat-accuracy'), hints: $('stat-hints'), counts: $('stat-counts'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
     },
   };
@@ -242,6 +242,9 @@
   function renderStats() {
     const rate = Stats.winRate(stats);
     els.stat.rate.textContent = rate === null ? '–' : `${Math.round(rate * 100)}%`;
+    const ret = Stats.returnRate(stats);
+    els.stat.ret.textContent = ret === null ? '–' : `${(ret * 100).toFixed(1)}%`;
+    els.stat.ret.dataset.sign = ret === null ? '' : ret > 1 ? 'up' : ret < 1 ? 'down' : '';
     els.stat.record.textContent = `${stats.wins}–${stats.losses}–${stats.pushes}`;
     els.stat.blackjacks.textContent = String(stats.blackjacks);
     const acc = Stats.accuracy(stats);
@@ -362,7 +365,7 @@
   function maybeRecord(settleAt) {
     if (game.phase !== 'done' || recordedRound === round) return;
     recordedRound = round;
-    stats = Stats.recordRound(stats, game.results, game.net);
+    stats = Stats.recordRound(stats, game.results, game.net, game.wagered);
     storage('set', STATS_KEY, JSON.stringify(stats));
     history = Stats.addHistory(history, historyEntry());
     storage('set', HISTORY_KEY, JSON.stringify(history));

@@ -147,3 +147,23 @@ test('recordCountCheck scores running-count checks without mutating', () => {
   assert.equal(S.parseStats(JSON.stringify(s)).countCorrect, 1);
   assert.equal(S.parseStats(JSON.stringify({ wins: 1 })).countChecks, 0);
 });
+
+// --- Return (R1) ---
+
+test('R1: return is money back per $1 wagered', () => {
+  let s = S.emptyStats();
+  assert.equal(S.returnRate(s), null);
+  s = S.recordRound(s, [{ outcome: 'win' }], 10, 10);
+  s = S.recordRound(s, [{ outcome: 'lose' }], -10, 10);
+  assert.equal(S.returnRate(s), 1);
+  const doubled = S.recordRound(S.emptyStats(), [{ outcome: 'win' }], 20, 20);
+  assert.equal(S.returnRate(doubled), 2);
+});
+
+test('R1: stats saved before wagers were tracked load with nothing wagered', () => {
+  const legacy = S.parseStats(JSON.stringify({ rounds: 5, net: 30 }));
+  assert.equal(legacy.wagered, 0);
+  assert.equal(S.returnRate(legacy), null);
+  // The legacy $30 net has no wagers behind it, so it stays out of return.
+  assert.equal(S.returnRate(S.recordRound(legacy, [{ outcome: 'win' }], 10, 10)), 2);
+});

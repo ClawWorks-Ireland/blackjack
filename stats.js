@@ -14,14 +14,16 @@
       rounds: 0, hands: 0, wins: 0, losses: 0, pushes: 0, blackjacks: 0,
       net: 0, bestRound: 0, worstRound: 0, streak: 0, bestStreak: 0,
       hintsShown: 0, hintsFollowed: 0, movesScored: 0, movesCorrect: 0,
-      countChecks: 0, countCorrect: 0,
+      countChecks: 0, countCorrect: 0, wagered: 0, wageredNet: 0,
     };
   }
 
   /** Return new stats after a finished round (does not mutate input). */
-  function recordRound(stats, results, net) {
+  function recordRound(stats, results, net, wagered = 0) {
     const s = { ...stats };
     s.rounds++;
+    s.wagered += wagered;
+    s.wageredNet += net; // net since wagers were tracked (older stats had none)
     for (const r of results) {
       s.hands++;
       if (WIN.has(r.outcome)) s.wins++;
@@ -82,6 +84,15 @@
     return stats.movesScored ? stats.movesCorrect / stats.movesScored : null;
   }
 
+  /**
+   * Money back per $1 bet: (net + wagered) / wagered, e.g. 0.996. Null
+   * until something has been wagered (including stats saved before
+   * wagers were tracked).
+   */
+  function returnRate(stats) {
+    return stats.wagered > 0 ? (stats.wageredNet + stats.wagered) / stats.wagered : null;
+  }
+
   /** Wins as a fraction of decided hands, or null before any are decided. */
   function winRate(stats) {
     const decided = stats.wins + stats.losses;
@@ -126,7 +137,7 @@
   }
 
   const api = {
-    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, HISTORY_MAX, addHistory, parseHistory,
+    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, returnRate, HISTORY_MAX, addHistory, parseHistory,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackStats = api;

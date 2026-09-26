@@ -153,6 +153,15 @@
       return this.results.reduce((sum, r) => sum + r.net, 0) + (this.insuranceNet || 0) + this.sideNet;
     }
 
+    /**
+     * Money put at risk this round: every hand's final bet (after doubles
+     * and splits), insurance, and side bets.
+     */
+    get wagered() {
+      return this.hands.reduce((sum, h) => sum + h.bet, 0) + this.insurance +
+        this.sideBets.reduce((sum, s) => sum + s.stake, 0);
+    }
+
     /** Chip change from this round's side bets. */
     get sideNet() {
       return this.sideBets.reduce((sum, s) => sum + s.net, 0);
