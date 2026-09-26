@@ -16,6 +16,7 @@
       <button id="coach-toggle" class="toggle" aria-pressed="true">Coach notes on <kbd>C</kbd></button>
       <button id="count-toggle" class="toggle" aria-pressed="false">Count hidden <kbd>K</kbd></button>
       <button id="rules-open" class="toggle" aria-haspopup="dialog">Table rules <kbd>T</kbd></button>
+      <button id="prefs-open" class="toggle" aria-haspopup="dialog">Settings <kbd>O</kbd></button>
       <button id="help-open" class="toggle" aria-haspopup="dialog">Rules &amp; help <kbd>?</kbd></button>
     </header>
     <p id="rules-text" class="rules"></p>
@@ -201,7 +202,46 @@
     </form>
   </dialog>
 
+  <dialog id="prefs" class="help settings prefs" aria-labelledby="prefs-title">
+    <form id="prefs-form" class="help-body" method="dialog">
+      <h2 id="prefs-title">Settings</h2>
+      <label class="row" for="pref-speed">Animation
+        <select id="pref-speed">
+          <option value="auto">Automatic (off if your system reduces motion)</option>
+          <option value="normal">Normal</option>
+          <option value="fast">Fast</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label class="row" for="pref-volume">Volume <span id="pref-volume-value">80%</span>
+        <input id="pref-volume" type="range" min="0" max="100" step="5" value="80">
+      </label>
+      <label class="row" for="pref-table">Table colour
+        <select id="pref-table">
+          <option value="green">Green</option>
+          <option value="blue">Blue</option>
+          <option value="red">Red</option>
+          <option value="charcoal">Charcoal</option>
+        </select>
+      </label>
+      <label class="row" for="pref-back">Card back
+        <select id="pref-back">
+          <option value="blue">Blue</option>
+          <option value="red">Red</option>
+          <option value="green">Green</option>
+          <option value="black">Black</option>
+        </select>
+      </label>
+      <p class="note">Changes apply straight away and are saved in this browser. Mute is still M.</p>
+      <div class="dialog-actions">
+        <button type="submit" id="prefs-close">Done</button>
+        <button type="button" id="prefs-default" class="link">Defaults</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="format.js"></script>
+  <script src="prefs.js"></script>
   <script src="a11y.js"></script>
   <script src="betting.js"></script>
   <script src="sidebets.js"></script>

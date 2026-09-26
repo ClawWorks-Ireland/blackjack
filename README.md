@@ -100,6 +100,10 @@ button starts you over with $1,000.
   the last 100 rounds, and export up to 500 rounds as CSV
 - **Sound (M to toggle):** card, chip and outcome sounds made with the
   Web Audio API, no audio files
+- **Settings (O):** animation speed (automatic, normal, fast or off;
+  automatic turns it off when your system asks for reduced motion), a
+  volume slider, and table colour and card-back themes. Saved in the
+  browser
 - **Deal animations:** cards fly in one at a time in table order and
   the dealer's hole card flips on reveal. Totals, results and the
   action buttons appear once the last card lands. Skipped when your
@@ -152,18 +156,19 @@ and history; it doesn't touch the bankroll.
 | `betting.js` | Bet checks, chips and rebet amounts. No DOM code |
 | `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
 | `counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
+| `prefs.js` | Display and sound settings, animation timing. No DOM code |
 | `a11y.js` | Card announcements and contrast checks. No DOM code |
 | `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
-| `*.test.js` | Tests for the nine DOM-free modules |
+| `*.test.js` | Tests for the ten DOM-free modules |
 | `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
-The nine DOM-free modules work in both the browser (as
+The ten DOM-free modules work in both the browser (as
 `window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
 `window.BlackjackFormat`, `window.BlackjackBetting`, `window.BlackjackRules`,
-`window.BlackjackCounting`, `window.BlackjackSideBets` and `window.BlackjackA11y`) and Node (via `module.exports`). That's
+`window.BlackjackCounting`, `window.BlackjackSideBets`, `window.BlackjackA11y` and `window.BlackjackPrefs`) and Node (via `module.exports`). That's
 why they can be tested without a browser.
 
 ## Not included

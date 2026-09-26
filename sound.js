@@ -8,6 +8,7 @@
 
   let ctx = null;
   let muted = false;
+  let volume = 0.8; // 0..1, multiplies every cue
 
   function audio() {
     if (!ctx) {
@@ -29,7 +30,7 @@
     osc.type = type;
     osc.frequency.setValueAtTime(freq, t);
     amp.gain.setValueAtTime(0.0001, t);
-    amp.gain.exponentialRampToValueAtTime(gain, t + 0.01);
+    amp.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain * volume), t + 0.01);
     amp.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(amp).connect(ac.destination);
     osc.start(t);
@@ -51,7 +52,7 @@
     src.buffer = buf;
     filter.type = 'bandpass';
     filter.frequency.value = 3000;
-    amp.gain.value = 0.25;
+    amp.gain.value = 0.25 * volume;
     src.connect(filter).connect(amp).connect(ac.destination);
     src.start(t);
   }
@@ -66,7 +67,7 @@
   };
 
   function play(name, at = 0) {
-    if (muted || !cues[name]) return;
+    if (muted || volume <= 0 || !cues[name]) return;
     try { cues[name](at); } catch (_) { /* audio is best-effort */ }
   }
 
@@ -74,5 +75,7 @@
     play,
     get muted() { return muted; },
     set muted(v) { muted = !!v; },
+    get volume() { return volume; },
+    set volume(v) { volume = Math.min(1, Math.max(0, Number(v) || 0)); },
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -75,9 +75,11 @@ h2 { font-size: 1.1rem; margin: 0 0 0.5rem; }
   from { opacity: 0; transform: scale(0.9); }
   to { opacity: 1; transform: none; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .card.dealt, .card.flip, .message.reveal { animation: none; }
-}
+/* Animation speed (set from Settings; 'auto' turns it off for reduced motion). */
+body.anim-off .card.dealt, body.anim-off .card.flip, body.anim-off .message.reveal { animation: none; }
+body.anim-fast .card.dealt { animation-duration: 0.18s; }
+body.anim-fast .card.flip { animation-duration: 0.2s; }
+body.anim-fast .message.reveal { animation-duration: 0.15s; }
 
 .message { font-size: 1.25rem; font-weight: 600; min-height: 1.6em; margin: 1rem 0; }
 .message[data-outcome="win"], .message[data-outcome="blackjack"] { color: var(--gold); }
@@ -337,3 +339,18 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
 .paytable caption { text-align: left; font-weight: 600; color: var(--gold); padding-bottom: 0.25rem; }
 .paytable th, .paytable td { padding: 0.3rem 0.4rem; border-top: 1px solid rgba(255, 255, 255, 0.15); vertical-align: top; }
 .paytable th { font-weight: 500; opacity: 0.9; width: 45%; }
+
+/* Table colours (Settings). Each keeps disabled buttons at 3:1+ (prefs.test.js). */
+[data-table="blue"] { --felt: #0d3b66; --felt-dark: #082a4a; }
+[data-table="red"] { --felt: #6a1b1b; --felt-dark: #4a1010; }
+[data-table="charcoal"] { --felt: #2b2d31; --felt-dark: #1c1d20; }
+body { background: radial-gradient(circle at center, var(--felt), var(--felt-dark)); }
+
+/* Card backs (Settings). */
+[data-back="red"] .card.back { background: repeating-linear-gradient(45deg, #8d1b1b, #8d1b1b 6px, #c94040 6px, #c94040 12px); }
+[data-back="green"] .card.back { background: repeating-linear-gradient(45deg, #1b5e3a, #1b5e3a 6px, #3e9a68 6px, #3e9a68 12px); }
+[data-back="black"] .card.back { background: repeating-linear-gradient(45deg, #111, #111 6px, #444 6px, #444 12px); }
+
+/* Settings dialog */
+.prefs .row input[type="range"] { width: 12rem; accent-color: var(--gold); }
+.back-swatch { display: inline-block; width: 1.4rem; height: 2rem; border: 2px solid #fff; border-radius: 3px; vertical-align: middle; }

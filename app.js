@@ -26,6 +26,8 @@
   const Counting = window.BlackjackCounting;
   const Side = window.BlackjackSideBets;
   const A11y = window.BlackjackA11y;
+  const Prefs = window.BlackjackPrefs;
+  const PREFS_KEY = 'blackjack.prefs';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const newGame = (bankroll, rules) =>
@@ -82,6 +84,9 @@
     suggestRow: $('suggest-row'), suggestText: $('suggest-text'), suggestBet: $('suggest-bet'), unitInput: $('bet-unit'),
     sidePairs: $('side-pairs'), side213: $('side-213'), sideResult: $('side-result'), sideEdge: $('side-edge'),
     announcer: $('announcer'),
+    prefsDialog: $('prefs'), prefsOpen: $('prefs-open'), prefsForm: $('prefs-form'), prefSpeed: $('pref-speed'),
+    prefVolume: $('pref-volume'), prefVolumeValue: $('pref-volume-value'), prefTable: $('pref-table'),
+    prefBack: $('pref-back'), prefsDefault: $('prefs-default'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
@@ -136,8 +141,20 @@
 
   const saveGame = () => storage('set', GAME_KEY, JSON.stringify(game));
 
-  const stepMs = () => (reducedMotion.matches ? 0 : 180);
-  const LAND_MS = 400; // longest card animation (the hole-card flip)
+  // Display and sound preferences (Settings). 'auto' animation follows reduced motion.
+  let prefs = Prefs.normalizePrefs(parseJSON(storage('get', PREFS_KEY)));
+  const speed = () => Prefs.effectiveSpeed(prefs, reducedMotion.matches);
+  const stepMs = () => Prefs.timing(speed()).step;
+  const landMs = () => Prefs.timing(speed()).land; // longest card animation (the hole-card flip)
+
+  function applyPrefs() {
+    const body = document.body;
+    body.classList.toggle('anim-off', speed() === 'off');
+    body.classList.toggle('anim-fast', speed() === 'fast');
+    body.dataset.table = prefs.table;
+    body.dataset.back = prefs.back;
+    Sound.volume = prefs.volume;
+  }
 
   function cardEl(card, hidden, anim) {
     const div = document.createElement('div');
@@ -517,7 +534,7 @@
       els.sideResult.hidden = true;
       els.rebetRow.hidden = true;
       els.chips.querySelectorAll('[data-chip]').forEach((b) => { b.disabled = true; });
-      revealTimer = setTimeout(render, settleAt + LAND_MS);
+      revealTimer = setTimeout(render, settleAt + landMs());
       return;
     }
 
@@ -615,7 +632,7 @@
    * dialog is open, and not when you're typing in the count box.
    */
   function manageFocus() {
-    if (!userActed || els.help.open || els.settings.open) return;
+    if (!userActed || els.help.open || els.settings.open || els.prefsDialog.open) return;
     if (document.activeElement === els.countGuess) return;
     const phase = game.phase;
     const actions = phase === 'insurance' ? [els.insure, els.noInsure]
@@ -974,6 +991,42 @@
     els.message.textContent = 'New rules are in effect with a fresh shoe. Place your bet.';
   });
 
+  // --- Settings (display and sound) ---
+
+  function fillPrefs() {
+    els.prefSpeed.value = prefs.speed;
+    els.prefVolume.value = String(Math.round(prefs.volume * 100));
+    els.prefVolumeValue.textContent = `${Math.round(prefs.volume * 100)}%`;
+    els.prefTable.value = prefs.table;
+    els.prefBack.value = prefs.back;
+  }
+
+  function readPrefs() {
+    prefs = Prefs.normalizePrefs({
+      speed: els.prefSpeed.value, volume: Number(els.prefVolume.value) / 100,
+      table: els.prefTable.value, back: els.prefBack.value,
+    });
+    storage('set', PREFS_KEY, JSON.stringify(prefs));
+    applyPrefs();
+    els.prefVolumeValue.textContent = `${Math.round(prefs.volume * 100)}%`;
+  }
+
+  els.prefsOpen.addEventListener('click', () => {
+    if (els.prefsDialog.open) return;
+    fillPrefs();
+    els.prefsDialog.showModal();
+  });
+  els.prefsForm.addEventListener('input', readPrefs);
+  els.prefsForm.addEventListener('change', readPrefs);
+  els.prefVolume.addEventListener('change', () => Sound.play('chip')); // hear the new level
+  els.prefsDefault.addEventListener('click', () => {
+    prefs = { ...Prefs.DEFAULT_PREFS };
+    fillPrefs();
+    readPrefs();
+  });
+  els.prefsDialog.addEventListener('click', (e) => { if (e.target === els.prefsDialog) els.prefsDialog.close(); });
+  reducedMotion.addEventListener?.('change', applyPrefs);
+
   // Single source for key bindings and the help panel, so they can't drift.
   const SHORTCUT_GROUPS = [
     ['Your turn', [
@@ -989,7 +1042,7 @@
     ]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
-      ['t', 'Table rules', els.rulesOpen],
+      ['t', 'Table rules', els.rulesOpen], ['o', 'Settings: animation, volume, colours', els.prefsOpen],
       ['?', 'Rules, payouts and shortcuts', els.helpOpen],
     ]],
   ];
@@ -1060,7 +1113,7 @@
   els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
 
   document.addEventListener('keydown', (e) => {
-    if (els.help.open || els.settings.open) return; // Escape closes dialogs natively
+    if (els.help.open || els.settings.open || els.prefsDialog.open) return; // Escape closes dialogs natively
     // Typing in any box (bet, side bets, count guess) isn't a shortcut.
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).
@@ -1083,6 +1136,7 @@
 
   renderHelp();
 
+  applyPrefs();
   renderMute();
   render();
 })();
