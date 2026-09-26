@@ -26,7 +26,8 @@
   const SUITS = ['♠', '♥', '♦', '♣'];
   const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
   const DEALER_STAND = 17;
-  const MAX_HANDS = 4;
+  const MAX_HANDS = 4; // per betting spot, after splits
+  const MAX_SPOTS = 3;
   const PENETRATION = 0.75; // cut card sits three quarters of the way into the shoe
   const SIDE_MAX = 100; // per side bet
   const SIDE = typeof module !== 'undefined' && module.exports
@@ -74,6 +75,8 @@
   }
 
   const isBlackjack = (hand) => hand.length === 2 && handValue(hand).total === 21;
+  /** A blackjack dealt to a spot (not made after a split). */
+  const isNatural = (h) => !h.fromSplit && isBlackjack(h.cards);
   const isBust = (hand) => handValue(hand).total > 21;
   /** Dealer draws below 17, and on soft 17 when the table uses H17. */
   function dealerShouldHit(hand, h17 = false) {
@@ -135,6 +138,7 @@
       this.insuranceNet = null; // null until insurance is settled
       this.tookEvenMoney = false;
       this.sideBets = []; // settled as soon as the cards are dealt
+      this.spotBets = []; // initial bet on each spot this round
     }
 
     /** The table rules, in the shape the settings panel and strategy use. */
@@ -172,7 +176,9 @@
       return this.phase !== 'player' && this.phase !== 'insurance' && this.bankroll < this.minBet;
     }
 
+    /** Insurance covers every spot: half the total of the initial bets. */
     get insuranceCost() {
+      if (this.spotBets.length) return this.spotBets.reduce((a, b) => a + b, 0) / 2;
       return this.hands.length ? this.hands[0].bet / 2 : 0;
     }
 
@@ -212,7 +218,8 @@
      * ordinary insurance.
      */
     get evenMoneyOffered() {
-      return this.phase === 'insurance' && this.payout === 1.5 && isBlackjack(this.hands[0].cards);
+      return this.phase === 'insurance' && this.payout === 1.5 && this.hands.length === 1 &&
+        isBlackjack(this.hands[0].cards);
     }
 
     canInsure() {
@@ -227,7 +234,7 @@
     canSplit() {
       const h = this.currentHand;
       return !!h && h.cards.length === 2 && h.cards[0].rank === h.cards[1].rank &&
-        this.hands.length < MAX_HANDS && this.bankroll >= h.bet;
+        this.hands.filter((x) => x.spot === h.spot).length < MAX_HANDS && this.bankroll >= h.bet;
     }
 
     canSurrender() {
@@ -242,16 +249,22 @@
      */
     deal(bet, side = {}) {
       if (this.phase === 'player' || this.phase === 'insurance') throw new Error('Round in progress');
-      if (!Number.isFinite(bet) || bet <= 0) throw new Error('Bet must be positive');
-      if (bet < this.minBet) throw new Error(`Minimum bet is $${this.minBet}`);
-      if (bet > this.maxBet) throw new Error(`Maximum bet is $${this.maxBet}`);
+      // One bet per spot: a number for one spot, or an array for up to three.
+      const bets = Array.isArray(bet) ? bet : [bet];
+      if (bets.length < 1 || bets.length > MAX_SPOTS) throw new Error(`Play 1 to ${MAX_SPOTS} spots`);
+      for (const b of bets) {
+        if (!Number.isFinite(b) || b <= 0) throw new Error('Bet must be positive');
+        if (b < this.minBet) throw new Error(`Minimum bet is $${this.minBet}`);
+        if (b > this.maxBet) throw new Error(`Maximum bet is $${this.maxBet}`);
+      }
       const sides = Object.entries(side).filter(([, stake]) => stake);
       for (const [name, stake] of sides) {
         if (!(name in SIDE.BETS)) throw new Error(`Unknown side bet ${name}`);
         if (!Number.isInteger(stake) || stake < 0) throw new Error('Side bets are in whole dollars');
         if (stake > SIDE_MAX) throw new Error(`Side bets are at most $${SIDE_MAX}`);
       }
-      const total = bet + sides.reduce((sum, [, stake]) => sum + stake, 0);
+      const main = bets.reduce((a, b) => a + b, 0);
+      const total = main + sides.reduce((sum, [, stake]) => sum + stake, 0);
       if (total > this.bankroll) throw new Error('Bet exceeds bankroll');
       // Between rounds is the only time the shoe is replaced.
       this.newShoe = this.cutCardReached;
@@ -259,16 +272,22 @@
         this.shoe = shuffle(createShoe(this.decks), this.rng);
         this.shuffles++;
       }
-      this.bankroll -= bet;
+      this.bankroll -= main;
+      this.spotBets = bets.slice();
       this.results = [];
       this.insurance = 0;
       this.insuranceNet = null;
       this.tookEvenMoney = false;
-      const cards = [this.draw(), this.draw()];
+      // Draw order: each spot's two cards, then the dealer's two.
+      this.hands = bets.map((b, spot) => ({
+        cards: [this.draw(), this.draw()], bet: b, spot,
+        fromSplit: false, splitAces: false, surrendered: false, done: false,
+      }));
       this.dealer = [this.draw(), this.draw()];
-      this.hands = [{ cards, bet, fromSplit: false, splitAces: false, surrendered: false, done: false }];
       this.active = 0;
-      this.sideBets = sides.map(([name, stake]) => SIDE.settleSide(name, stake, [...cards, this.dealer[0]]));
+      // Side bets ride on the first spot.
+      const first = this.hands[0].cards;
+      this.sideBets = sides.map(([name, stake]) => SIDE.settleSide(name, stake, [...first, this.dealer[0]]));
       for (const s of this.sideBets) this.bankroll += s.net; // stake stays or winnings added
       if (this.dealer[0].rank === 'A') this.phase = 'insurance';
       else this.peek();
@@ -295,7 +314,13 @@
         if (dBJ) this.bankroll += this.insurance * 3; // stake back + 2:1
       }
       this.phase = 'player';
-      if (dBJ || isBlackjack(this.hands[0].cards)) this.finish();
+      if (dBJ) {
+        this.finish();
+        return;
+      }
+      // A natural on any spot is paid at the end; play moves to the next spot.
+      for (const h of this.hands) if (isNatural(h)) h.done = true;
+      this.advance();
     }
 
     hit() {
@@ -326,7 +351,7 @@
       const aces = h.cards[0].rank === 'A';
       this.bankroll -= h.bet;
       const second = {
-        cards: [h.cards.pop()], bet: h.bet, fromSplit: true, splitAces: aces, surrendered: false, done: false,
+        cards: [h.cards.pop()], bet: h.bet, spot: h.spot, fromSplit: true, splitAces: aces, surrendered: false, done: false,
       };
       h.fromSplit = true;
       h.splitAces = aces;
@@ -363,7 +388,8 @@
       }
       if (this.active < this.hands.length) return;
       // Dealer only draws if at least one player hand is still live.
-      if (this.hands.some((h) => !h.surrendered && !isBust(h.cards))) {
+      // (A natural is already paid off, so it doesn't make the dealer draw either.)
+      if (this.hands.some((h) => !h.surrendered && !isBust(h.cards) && !isNatural(h))) {
         while (dealerShouldHit(this.dealer, this.h17)) this.dealer.push(this.draw());
       }
       this.finish();
@@ -385,7 +411,7 @@
         shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
         insurance: this.insurance, insuranceNet: this.insuranceNet, tookEvenMoney: this.tookEvenMoney,
-        sideBets: this.sideBets,
+        sideBets: this.sideBets, spotBets: this.spotBets,
       };
     }
 
@@ -406,9 +432,11 @@
       g.shoe = copy(data.shoe);
       g.phase = data.phase;
       g.hands = data.hands.map((h) => ({
-        cards: copy(h.cards), bet: h.bet, fromSplit: h.fromSplit, splitAces: h.splitAces,
+        cards: copy(h.cards), bet: h.bet, spot: h.spot ?? 0, fromSplit: h.fromSplit, splitAces: h.splitAces,
         surrendered: h.surrendered, done: h.done,
       }));
+      // Saves from before spots had one spot, bet as the first hand's.
+      g.spotBets = Array.isArray(data.spotBets) ? data.spotBets.slice() : (data.hands.length ? [data.hands[0].bet] : []);
       g.active = data.active;
       g.dealer = copy(data.dealer);
       g.results = data.results.map(({ outcome, net }) => ({ outcome, net }));
@@ -444,20 +472,23 @@
     for (const k of ['h17', 'das', 'lateSurrender']) if (d[k] !== undefined && !isBool(d[k])) return false;
     if (d.payout !== undefined && !PAYOUTS.includes(d.payout)) return false;
     if (!validCards(d.shoe) || !validCards(d.dealer)) return false;
-    if (!Array.isArray(d.hands) || !d.hands.every(validHand) || d.hands.length > MAX_HANDS) return false;
+    if (!Array.isArray(d.hands) || !d.hands.every(validHand) || d.hands.length > MAX_HANDS * MAX_SPOTS) return false;
     if (!Array.isArray(d.results) || !d.results.every(validResult)) return false;
     if (!isMoney(d.insurance) || !(d.insuranceNet === null || Number.isFinite(d.insuranceNet))) return false;
     if (!Number.isInteger(d.active) || d.active < 0) return false;
     const live = d.phase === 'player' || d.phase === 'insurance';
     if (live && (!d.hands.length || d.active >= d.hands.length || d.dealer.length < 2)) return false;
-    if (d.phase === 'insurance' && d.hands.length !== 1) return false;
+    if (d.phase === 'insurance' && (d.hands.length > MAX_SPOTS || d.hands.some((h) => h.cards.length !== 2))) return false;
+    if (d.spotBets !== undefined && !(Array.isArray(d.spotBets) && d.spotBets.length <= MAX_SPOTS &&
+      d.spotBets.every((b) => Number.isFinite(b) && b > 0))) return false;
+    if (d.hands.some((h) => h.spot !== undefined && !(Number.isInteger(h.spot) && h.spot >= 0 && h.spot < MAX_SPOTS))) return false;
     if (d.sideBets !== undefined && !(Array.isArray(d.sideBets) && d.sideBets.every(validSide))) return false;
     if (d.phase === 'done' && d.results.length !== d.hands.length) return false;
     return true;
   }
 
   const api = {
-    SUITS, RANKS, MAX_HANDS, PAYOUTS, SIDE_MAX, createShoe, shuffle, cardValue, handValue,
+    SUITS, RANKS, MAX_HANDS, MAX_SPOTS, PAYOUTS, SIDE_MAX, createShoe, shuffle, cardValue, handValue,
     isBlackjack, isBust, dealerShouldHit, settle, Game,
   };
 

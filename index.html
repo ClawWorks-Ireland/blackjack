@@ -51,7 +51,13 @@
       <p id="count-result" class="count-result" role="status" hidden></p>
 
       <form id="bet-form" class="bet-form bet-only" novalidate>
-        <label for="bet">Bet</label>
+        <fieldset id="spots" class="spots">
+          <legend>Spots</legend>
+          <label><input type="radio" name="spots" value="1" checked> 1</label>
+          <label><input type="radio" name="spots" value="2"> 2</label>
+          <label><input type="radio" name="spots" value="3"> 3</label>
+        </fieldset>
+        <label for="bet">Bet per spot</label>
         <input id="bet" type="number" min="1" step="1" value="50" required>
         <button type="submit" id="deal">Deal <kbd>Enter</kbd></button>
       </form>

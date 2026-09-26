@@ -55,6 +55,11 @@ button starts you over with $1,000.
 
 ## Features
 
+- **Betting spots:** play 1, 2 or 3 spots a round, each with the bet in
+  the box. Every spot is dealt and played in turn against one dealer
+  hand, and each can split (up to 4 hands per spot), double or
+  surrender. Insurance covers all spots; even money is offered only
+  with one spot. Side bets ride on the first spot
 - **Betting:** type a bet or build one with $1, $5, $25, $100 and $500
   chips (Clear bet empties the box). Chips that would take you past the
   table maximum or your bankroll are disabled. After a round, Rebet

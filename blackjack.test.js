@@ -619,3 +619,85 @@ test('R1: wagered counts doubles, splits, insurance and side bets', () => {
   ins.takeInsurance();
   assert.equal(ins.wagered, 150);
 });
+
+// --- F5: 1-3 betting spots ---
+
+test('F5: two spots get two cards each before the dealer, and settle separately', () => {
+  // Spot 1: 10,9 (19). Spot 2: 10,6 (16). Dealer 10,8.
+  const g = riggedGame([c('10'), c('9'), c('10'), c('6'), c('10'), c('8')]);
+  g.deal([10, 20]);
+  assert.equal(g.hands.length, 2);
+  assert.deepEqual(g.hands.map((h) => [h.spot, h.bet, BJ.handValue(h.cards).total]), [[0, 10, 19], [1, 20, 16]]);
+  assert.equal(g.bankroll, 970);
+  g.stand();
+  assert.equal(g.active, 1);
+  g.stand();
+  assert.deepEqual(g.results.map((r) => r.outcome), ['win', 'lose']);
+  assert.equal(g.net, -10);
+  assert.equal(g.bankroll, 990);
+  assert.equal(g.wagered, 30);
+});
+
+test('F5: a natural on one spot is paid, the others still play', () => {
+  // Spot 1: A,K. Spot 2: 10,7. Dealer 10,8.
+  const g = riggedGame([c('A'), c('K'), c('10'), c('7'), c('10'), c('8')]);
+  g.deal([10, 10]);
+  assert.equal(g.phase, 'player');
+  assert.equal(g.active, 1, 'play starts on spot 2');
+  g.stand();
+  assert.deepEqual(g.results.map((r) => r.outcome), ['blackjack', 'lose']);
+  assert.equal(g.net, 15 - 10);
+});
+
+test('F5: when every spot is a natural the dealer does not draw', () => {
+  const g = riggedGame([c('A'), c('K'), c('A'), c('Q'), c('10'), c('6'), c('5')]);
+  g.deal([10, 10]);
+  assert.equal(g.phase, 'done');
+  assert.equal(g.dealer.length, 2);
+  assert.equal(g.net, 30);
+});
+
+test('F5: insurance covers every spot; even money only with one spot', () => {
+  // Spot 1: A,K (blackjack). Spot 2: 10,9. Dealer A up, K hole.
+  const g = riggedGame([c('A'), c('K'), c('10'), c('9'), c('A'), c('K')]);
+  g.deal([10, 20]);
+  assert.equal(g.phase, 'insurance');
+  assert.ok(!g.evenMoneyOffered);
+  assert.equal(g.insuranceCost, 15);
+  g.takeInsurance(); // dealer blackjack: insurance pays 30; spot 1 pushes, spot 2 loses 20
+  assert.deepEqual(g.results.map((r) => r.outcome), ['push', 'lose']);
+  assert.equal(g.net, 30 - 20);
+});
+
+test('F5: the split limit is per spot', () => {
+  // Spot 1: 8,8. Spot 2: 8,8. Dealer 10,7. Then 8s for resplits and small cards.
+  const g = riggedGame([c('8'), c('8'), c('8'), c('8'), c('10'), c('7'), c('8'), c('8'), c('8'),
+    c('2'), c('2'), c('2'), c('2'), c('2'), c('2'), c('2'), c('2')]);
+  g.deal([5, 5]);
+  g.split(); g.split(); g.split();
+  assert.equal(g.hands.filter((h) => h.spot === 0).length, 4);
+  assert.ok(!g.canSplit());
+  while (g.hands[g.active].spot === 0) g.stand();
+  assert.ok(g.canSplit(), 'spot 2 can still split');
+});
+
+test('F5: 1-3 spots only, each within the limits, total within the bankroll', () => {
+  const g = riggedGame([c('10'), c('9'), c('10'), c('7')], 25);
+  assert.throws(() => g.deal([]), /1 to 3 spots/);
+  assert.throws(() => g.deal([5, 5, 5, 5]), /1 to 3 spots/);
+  assert.throws(() => g.deal([10, 10, 10]), /exceeds bankroll/);
+  g.maxBet = 8;
+  assert.throws(() => g.deal([5, 9]), /Maximum bet/);
+});
+
+test('F5: spots survive save and restore; older saves are one spot', () => {
+  const g = riggedGame([c('10'), c('9'), c('10'), c('6'), c('10'), c('8')]);
+  g.deal([10, 20]);
+  const back = BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
+  assert.deepEqual(back.spotBets, [10, 20]);
+  assert.deepEqual(back.hands.map((h) => h.spot), [0, 1]);
+  const old = JSON.parse(JSON.stringify(riggedGame([c('10'), c('9'), c('10'), c('7')])));
+  delete old.spotBets;
+  assert.ok(BJ.Game.fromJSON(old));
+  assert.equal(BJ.Game.fromJSON({ ...JSON.parse(JSON.stringify(g)), spotBets: [1, 2, 3, 4] }), null);
+});

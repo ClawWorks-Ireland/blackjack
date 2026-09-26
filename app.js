@@ -13,6 +13,7 @@
   const COACH_KEY = 'blackjack.coach';
   const COUNT_KEY = 'blackjack.showCount';
   const UNIT_KEY = 'blackjack.unit';
+  const SPOTS_KEY = 'blackjack.spots';
   const GAME_KEY = 'blackjack.game'; // bankroll, shoe and any round in progress
   const Blackjack = window.Blackjack;
   const { Game, handValue } = Blackjack;
@@ -46,6 +47,7 @@
   const both = (fn) => { stats = fn(stats); session = fn(session); };
   Sound.muted = storage('get', MUTE_KEY) === '1';
   let countShown = storage('get', COUNT_KEY) === '1'; // hidden unless turned on
+  let spots = [1, 2, 3].includes(Number(storage('get', SPOTS_KEY))) ? Number(storage('get', SPOTS_KEY)) : 1;
   let countNote = null; // result of your last count check, or a new-shoe notice
 
   // Animation bookkeeping: cards already on the table, and whether the
@@ -66,7 +68,7 @@
     dealerCards: $('dealer-cards'), dealerTotal: $('dealer-total'),
     playerHands: $('player-hands'),
     message: $('message'), bankroll: $('bankroll'), betDisplay: $('bet-display'),
-    betForm: $('bet-form'), betInput: $('bet'), deal: $('deal'), limits: $('limits'),
+    betForm: $('bet-form'), betInput: $('bet'), deal: $('deal'), limits: $('limits'), spotsGroup: $('spots'),
     chips: $('chips'), clearBet: $('clear-bet'), rebetRow: $('rebet'), rebet: $('rebet-1'), rebet2: $('rebet-2'),
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
@@ -157,6 +159,21 @@
     return div;
   }
 
+  /**
+   * Name for hand i: "You" with one hand, "Hand 2" when one spot is split,
+   * and "Spot 2" / "Spot 2b" when you play more than one spot.
+   */
+  function handLabel(i) {
+    const hands = game.hands;
+    if (hands.length <= 1) return 'You';
+    const spotCount = new Set(hands.map((h) => h.spot ?? 0)).size;
+    if (spotCount <= 1) return `Hand ${i + 1}`;
+    const s = hands[i].spot ?? 0;
+    const same = hands.filter((h) => (h.spot ?? 0) === s);
+    const n = `Spot ${s + 1}`;
+    return same.length > 1 ? `${n}${'abcd'[same.indexOf(hands[i])]}` : n;
+  }
+
   function formatTotal(cards) {
     const { total, soft } = handValue(cards);
     return soft && total < 21 ? `soft ${total}` : `${total}`;
@@ -173,8 +190,7 @@
     const step = stepMs();
     let slot = 0;
     const owner = new Map();
-    const multi = game.hands.length > 1;
-    game.hands.forEach((h, i) => h.cards.forEach((card) => owner.set(card, multi ? `Hand ${i + 1}` : 'You')));
+    game.hands.forEach((h, i) => h.cards.forEach((card) => owner.set(card, handLabel(i))));
     game.dealer.forEach((card) => owner.set(card, 'Dealer'));
     const placements = [];
     const place = (card, kind = 'dealt') => {
@@ -189,9 +205,14 @@
     game.hands.forEach((h) => h.cards.forEach((card) => { if (!shown.has(card)) newPlayer.push(card); }));
     const newDealer = game.dealer.filter((card) => !shown.has(card));
 
-    if (newPlayer.length === 2 && newDealer.length === 2 && game.hands.length === 1) {
-      // Fresh deal: player, dealer, player, dealer.
-      [newPlayer[0], newDealer[0], newPlayer[1], newDealer[1]].forEach((card) => place(card));
+    const freshDeal = newDealer.length === 2 && newPlayer.length === game.hands.length * 2 &&
+      game.hands.every((h) => h.cards.length === 2 && !shown.has(h.cards[0]));
+    if (freshDeal) {
+      // Fresh deal, table order: one card to each spot, the dealer, then again.
+      game.hands.forEach((h) => place(h.cards[0]));
+      place(newDealer[0]);
+      game.hands.forEach((h) => place(h.cards[1]));
+      place(newDealer[1]);
     } else {
       newPlayer.forEach((card) => place(card));
       const hole = game.dealer[1];
@@ -215,7 +236,7 @@
     if (result) wrap.dataset.outcome = result.outcome;
 
     const label = document.createElement('h2');
-    const name = multi ? `Hand ${i + 1}` : 'You';
+    const name = handLabel(i);
     // While cards are still flying in, the total and outcome would give them away.
     let text = inFlight ? name : `${name} (${formatTotal(hand.cards)})`;
     if (multi) text += ` · ${money(hand.bet)}`;
@@ -238,7 +259,7 @@
       const r = game.results[0];
       text = MESSAGES[r.outcome](r.net);
     } else {
-      const parts = game.results.map((r, i) => `Hand ${i + 1}: ${SHORT[r.outcome]}`);
+      const parts = game.results.map((r, i) => `${handLabel(i)}: ${SHORT[r.outcome]}`);
       text = `${parts.join(' · ')}.`;
     }
     if (game.insuranceNet !== null) {
@@ -420,7 +441,8 @@
     'clearBet', 'rebet', 'rebet2',
   ];
 
-  const limits = () => ({ bankroll: game.bankroll, min: game.minBet, max: game.maxBet });
+  // Bets are per spot, so each spot can use its share of the bankroll.
+  const limits = () => ({ bankroll: game.bankroll / spots, min: game.minBet, max: game.maxBet });
 
   /** Chip, clear and rebet controls, which only work between rounds. */
   function renderBetControls() {
@@ -435,8 +457,13 @@
     els.rebetRow.hidden = !(open && game.phase === 'done' && lastBet > 0);
     els.rebet.disabled = one === null;
     els.rebet2.disabled = two === null;
-    els.rebet.firstChild.textContent = `Rebet ${money(lastBet)} `;
-    els.rebet2.firstChild.textContent = `Rebet ×2 ${money(lastBet * 2)} `;
+    const per = spots > 1 ? ` × ${spots} spots` : '';
+    els.rebet.firstChild.textContent = `Rebet ${money(lastBet)}${per} `;
+    els.rebet2.firstChild.textContent = `Rebet ×2 ${money(lastBet * 2)}${per} `;
+    for (const r of els.spotsGroup.querySelectorAll('input')) {
+      r.checked = Number(r.value) === spots;
+      r.disabled = !open;
+    }
   }
 
   /**
@@ -539,7 +566,7 @@
     } else if (inRound) {
       const multi = game.hands.length > 1;
       els.message.textContent = multi
-        ? `Playing hand ${game.active + 1} of ${game.hands.length}.`
+        ? `Playing ${handLabel(game.active)} (${game.active + 1} of ${game.hands.length}).`
         : 'Your move.';
       delete els.message.dataset.outcome;
       els.message.classList.remove('reveal');
@@ -662,14 +689,14 @@
     const bet = Number(els.betInput.value);
     const sides = { 'Perfect Pairs': els.sidePairs.value.trim(), '21+3': els.side213.value.trim() };
     const error = Betting.betError(bet, limits())
-      || Betting.sideError(bet, sides, { bankroll: game.bankroll, sideMax: Blackjack.SIDE_MAX });
+      || Betting.sideError(bet * spots, sides, { bankroll: game.bankroll, sideMax: Blackjack.SIDE_MAX });
     if (error) {
       els.message.textContent = error;
       delete els.message.dataset.outcome;
       return;
     }
     act(() => {
-      game.deal(bet, {
+      game.deal(Array(spots).fill(bet), {
         pairs: Number(els.sidePairs.value) || 0,
         t213: Number(els.side213.value) || 0,
       });
@@ -679,6 +706,14 @@
       lastBet = bet;
       storage('set', LAST_BET_KEY, String(bet));
     }, 'chip');
+  });
+
+  els.spotsGroup.addEventListener('change', (e) => {
+    const n = Number(e.target.value);
+    if (![1, 2, 3].includes(n)) return;
+    spots = n;
+    storage('set', SPOTS_KEY, String(n));
+    renderBetControls();
   });
 
   /** Put an amount in the bet box and deal it. */
