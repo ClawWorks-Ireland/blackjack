@@ -12,6 +12,7 @@
   const MUTE_KEY = 'blackjack.muted';
   const COACH_KEY = 'blackjack.coach';
   const COUNT_KEY = 'blackjack.showCount';
+  const UNIT_KEY = 'blackjack.unit';
   const GAME_KEY = 'blackjack.game'; // bankroll, shoe and any round in progress
   const Blackjack = window.Blackjack;
   const { Game, handValue } = Blackjack;
@@ -66,7 +67,7 @@
     countToggle: $('count-toggle'), countPanel: $('count-panel'), countRunning: $('count-running'),
     countTrue: $('count-true'), countDecks: $('count-decks'), countForm: $('count-check'),
     countGuess: $('count-guess'), countResult: $('count-result'),
-    suggestRow: $('suggest-row'), suggestText: $('suggest-text'), suggestBet: $('suggest-bet'),
+    suggestRow: $('suggest-row'), suggestText: $('suggest-text'), suggestBet: $('suggest-bet'), unitInput: $('bet-unit'),
     sidePairs: $('side-pairs'), side213: $('side-213'), sideResult: $('side-result'), sideEdge: $('side-edge'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
@@ -686,15 +687,30 @@
     // Suggested bet under the bet box: only while the count is shown, between rounds.
     const betting = !(game.phase === 'player' || game.phase === 'insurance') && !game.isBroke;
     const units = Counting.betUnits(s.trueCount);
-    const amount = Counting.suggestedBet(s.trueCount, { min: game.minBet, max: game.maxBet, bankroll: game.bankroll });
+    const unit = betUnit();
+    const amount = Counting.suggestedBet(s.trueCount, {
+      min: game.minBet, unit, max: game.maxBet, bankroll: game.bankroll,
+    });
     els.suggestRow.hidden = !(countShown && betting);
     els.suggestText.textContent = `Suggested bet: ${money(amount)} (${units} unit${units > 1 ? 's' : ''} of ` +
-      `${money(game.minBet)} at true count ${Counting.formatTrue(s.trueCount)})`;
+      `${money(unit)} at true count ${Counting.formatTrue(s.trueCount)})`;
     els.suggestBet.dataset.amount = String(amount);
     els.suggestBet.disabled = !(amount >= game.minBet);
     els.countResult.hidden = !countNote;
     els.countResult.textContent = countNote || '';
   }
+
+  /** Your base betting unit: saved, whole dollars, never below the table minimum. */
+  function betUnit() {
+    const n = Math.floor(Number(els.unitInput.value));
+    return Number.isFinite(n) && n >= game.minBet ? n : game.minBet;
+  }
+
+  els.unitInput.value = storage('get', UNIT_KEY) || '';
+  els.unitInput.addEventListener('input', () => {
+    storage('set', UNIT_KEY, els.unitInput.value.trim());
+    if (!inFlight) renderCount();
+  });
 
   els.suggestBet.addEventListener('click', () => {
     const amount = Number(els.suggestBet.dataset.amount);

@@ -77,9 +77,11 @@ button starts you over with $1,000.
   in the stats panel. While the count is shown, the coach plays the count: the
   Illustrious 18 and Fab 4 index plays for Hi-Lo (for example stand on 12
   vs 3 at a true count of +2), insurance at +3 or more, and a suggested bet
-  under the bet box: 1 unit (the table minimum) below a true count of
+  under the bet box: 1 unit below a true count of
   +2, then 2, 4, 8 and 12 units at +2, +3, +4 and +5 or more, capped at
-  the table maximum and your bankroll. B puts it in the bet box. With a
+  the table maximum and your bankroll. Your unit is fixed: it defaults to
+  the table minimum and you can set it in the Unit box (saved). B puts
+  the suggestion in the bet box. With a
   dealer ace at +3 or more, the insurance prompt says "Count says take
   it". Hints,
   accuracy and coach notes follow it

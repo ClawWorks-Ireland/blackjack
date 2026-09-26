@@ -146,3 +146,16 @@ test('F4b: suggested bet is capped by the table maximum and the bankroll', () =>
   assert.equal(K.suggestedBet(6, { min: 50, max: 500 }), 500);
   assert.equal(K.suggestedBet(6, { min: 5, max: 500, bankroll: 42.5 }), 42);
 });
+
+test('B11: the unit is fixed, not your last bet', () => {
+  // Follow the ramp at +4 with a $25 unit, then the count drops to +1.
+  const t = { min: 5, unit: 25, max: 500 };
+  assert.equal(K.suggestedBet(4, t), 200);
+  assert.equal(K.suggestedBet(1, t), 25); // back to 1 unit, not $200
+});
+
+test('B11: a unit below the table minimum, or blank, uses the minimum', () => {
+  assert.equal(K.suggestedBet(3, { min: 5, unit: 2, max: 500 }), 20);
+  assert.equal(K.suggestedBet(3, { min: 5, unit: NaN, max: 500 }), 20);
+  assert.equal(K.suggestedBet(5, { min: 5, unit: 100, max: 500 }), 500);
+});

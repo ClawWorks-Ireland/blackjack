@@ -162,10 +162,15 @@
     return 12;
   }
 
-  /** Suggested bet in dollars, capped at the table maximum and what you can afford. */
-  function suggestedBet(tc, { min, max = Infinity, bankroll = Infinity }) {
+  /**
+   * Suggested bet in dollars: units x your base unit. The unit is fixed
+   * (it does not follow your last bet), defaults to the table minimum and
+   * is never below it. Capped at the table maximum and what you can afford.
+   */
+  function suggestedBet(tc, { min, unit = min, max = Infinity, bankroll = Infinity }) {
+    const base = Math.max(min, Math.floor(unit) || min);
     const afford = Math.floor(bankroll + 1e-9);
-    return Math.max(0, Math.min(betUnits(tc) * min, max, afford));
+    return Math.max(0, Math.min(betUnits(tc) * base, max, afford));
   }
 
   const api = {
