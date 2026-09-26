@@ -701,3 +701,25 @@ test('F5: spots survive save and restore; older saves are one spot', () => {
   assert.ok(BJ.Game.fromJSON(old));
   assert.equal(BJ.Game.fromJSON({ ...JSON.parse(JSON.stringify(g)), spotBets: [1, 2, 3, 4] }), null);
 });
+
+test('F5: two spots, one split: every hand settles and return counts every bet', () => {
+  // Spot 1: 8,8 -> split. Spot 2: 10,9. Dealer 10,7.
+  // Spot 1a draws 3 (11) then doubles into 10 (21); spot 1b draws 10 (18); spot 2 stands on 19.
+  const g = riggedGame([c('8'), c('8'), c('10'), c('9'), c('10'), c('7'), c('3'), c('10'), c('10')]);
+  g.deal([10, 20]);
+  g.split();
+  assert.deepEqual(g.hands.map((h) => h.spot), [0, 0, 1]);
+  g.double();                 // 1a: 8+3 -> doubles into 10 = 21
+  g.stand();                  // 1b: 8+10 = 18
+  g.stand();                  // spot 2: 19
+  assert.equal(g.phase, 'done');
+  assert.deepEqual(g.hands.map((h) => [h.spot, h.bet, BJ.handValue(h.cards).total]), [[0, 20, 21], [0, 10, 18], [1, 20, 19]]);
+  assert.deepEqual(g.results.map((r) => r.outcome), ['win', 'win', 'win']);
+  assert.equal(g.net, 20 + 10 + 20);
+  assert.equal(g.wagered, 50);
+  assert.equal(g.bankroll, 1050);
+  const S = require('./stats.js');
+  const st = S.recordRound(S.emptyStats(), g.results, g.net, g.wagered);
+  assert.deepEqual([st.hands, st.wins, st.wagered], [3, 3, 50]);
+  assert.equal(S.returnRate(st), 2);
+});
