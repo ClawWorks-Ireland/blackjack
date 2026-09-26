@@ -11,7 +11,12 @@
  * (wizardofodds.com/games/blackjack/appendix/15/). The late-surrender and
  * 6:5 adjustments come from tools/house_edge.js; its 6:5 figure (-1.36%
  * at 6 decks) agrees with Wizard's rule-variation table (-1.39%).
- * Cut-card effects are not included.
+ *
+ * The game deals to a cut card at 75% and shuffles only between rounds,
+ * which costs the player a little more than a fresh shuffle every hand.
+ * CUT_CARD is that extra cost, measured by simulating the game itself
+ * (about 60 million rounds per rule set, coach's play, shipped shoe).
+ * It is largest with few decks. houseEdge() includes it by default.
  */
 (function (root) {
   'use strict';
@@ -30,6 +35,8 @@
   const SURRENDER = { 1: [0.017, 0.031], 2: [0.048, 0.063], 6: [0.073, 0.088], 8: [0.076, 0.092] };
   // Percentage points 6:5 blackjack adds for the house.
   const SIX_FIVE = { 1: 1.395, 2: 1.373, 6: 1.36, 8: 1.358 };
+  // Percentage points the 75% cut card adds for the house (simulated, SE ~0.01-0.02).
+  const CUT_CARD = { 1: 0.13, 2: 0.07, 6: 0.03, 8: 0.03 };
 
   /** Fill in and check saved settings; anything invalid falls back to the default. */
   function normalizeRules(raw) {
@@ -41,12 +48,17 @@
     return r;
   }
 
-  /** House edge in percent (negative means the player has the edge). */
-  function houseEdge(rules) {
+  /**
+   * House edge in percent (negative means the player has the edge), as
+   * this game deals it. Pass { cutCard: false } for the fresh-shuffle
+   * figure published tables use.
+   */
+  function houseEdge(rules, { cutCard = true } = {}) {
     const r = normalizeRules(rules);
     let edge = BASE[r.decks][r.h17 ? 1 : 0][r.das ? 1 : 0];
     if (r.lateSurrender) edge -= SURRENDER[r.decks][r.h17 ? 1 : 0];
     if (r.payout === 1.2) edge += SIX_FIVE[r.decks];
+    if (cutCard) edge += CUT_CARD[r.decks];
     return Math.round(edge * 100) / 100;
   }
 

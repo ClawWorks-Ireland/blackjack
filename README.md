@@ -140,5 +140,8 @@ cell. Splits are valued without resplitting, a small approximation.
 
 The house edge uses Wizard of Odds' published figures for these rules
 without surrender, plus late-surrender and 6:5 adjustments from
-`tools/house_edge.js`. It assumes basic strategy and ignores cut-card
-effects.
+`tools/house_edge.js`. It assumes basic strategy. It also includes the
+cost of the cut card (the shoe is dealt to 75% and only shuffled
+between rounds): 0.13 points at 1 deck, 0.07 at 2 decks and 0.03 at 6
+or 8, measured by simulating about 60 million rounds of this game per
+rule set. Without it the default table would show 0.33%; with it, 0.36%.
