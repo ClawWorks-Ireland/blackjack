@@ -49,3 +49,18 @@ test('F10: disabled buttons have at least 3:1 contrast', () => {
   assert.match(css, /button:disabled[^{]*\{[^}]*var\(--disabled-bg\)/, 'disabled rule uses the tokens');
   assert.doesNotMatch(css, /button:disabled\s*\{[^}]*opacity:\s*0\.[0-5]/, 'no low-opacity fade');
 });
+
+test('B13: a round that ends on the deal still moves focus to Rebet/Deal', () => {
+  // Round 4 finished (focus managed for done/4); round 5 is a dealt blackjack: done/5 at once.
+  assert.equal(A.focusTarget({ phase: 'done', round: 5, focused: { phase: 'done', round: 4 }, focusUsable: false }), 'next');
+  assert.equal(A.focusTarget({ phase: 'done', round: 5, focused: { phase: 'done', round: 4 }, focusUsable: true }), 'next');
+});
+
+test('focus: new decisions go to the actions; repeat renders leave focus alone', () => {
+  assert.equal(A.focusTarget({ phase: 'player', round: 2, focused: { phase: 'done', round: 1 } }), 'actions');
+  assert.equal(A.focusTarget({ phase: 'player', round: 2, focused: { phase: 'player', round: 2 }, focusUsable: true }), null);
+  assert.equal(A.focusTarget({ phase: 'player', round: 2, focused: { phase: 'player', round: 2 }, focusUsable: false }), 'actions');
+  assert.equal(A.focusTarget({ phase: 'done', round: 2, focused: { phase: 'done', round: 2 }, focusUsable: true }), null);
+  assert.equal(A.focusTarget({ phase: 'done', round: 2, focused: { phase: 'done', round: 2 }, focusUsable: false }), 'next');
+  assert.equal(A.focusTarget({ phase: 'betting', round: 0 }), null);
+});

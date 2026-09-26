@@ -62,7 +62,7 @@
   let inFlight = false; // dealt cards still animating onto the table
   let pendingAnnouncement = ''; // cards dealt this change, read out once they land
   let userActed = false; // only move focus after the player does something
-  let focusPhase = null; // phase focus was last managed for
+  let focused = {}; // {phase, round} focus was last managed for
   let revealTimer = null;
 
   const $ = (id) => document.getElementById(id);
@@ -635,15 +635,14 @@
     if (!userActed || els.help.open || els.settings.open || els.prefsDialog.open) return;
     if (document.activeElement === els.countGuess) return;
     const phase = game.phase;
-    const actions = phase === 'insurance' ? [els.insure, els.noInsure]
-      : [els.hit, els.stand, els.double, els.split, els.surrender];
-    if (phase === 'player' || phase === 'insurance') {
-      // New decision point, or focus was left on something that's gone.
-      if (focusPhase !== phase || !usable(document.activeElement)) focusFirst(actions);
-    } else if (phase === 'done' && focusPhase !== 'done') {
+    const target = A11y.focusTarget({ phase, round, focused, focusUsable: usable(document.activeElement) });
+    if (target === 'actions') {
+      focusFirst(phase === 'insurance' ? [els.insure, els.noInsure]
+        : [els.hit, els.stand, els.double, els.split, els.surrender]);
+    } else if (target === 'next') {
       focusFirst([els.rebet, els.deal]);
     }
-    focusPhase = phase;
+    focused = { phase, round };
   }
 
   const MOVE_LABEL = {

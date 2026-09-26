@@ -42,7 +42,28 @@
     return (hi + 0.05) / (lo + 0.05);
   }
 
-  const api = { cardName, dealAnnouncement, luminance, contrastRatio };
+  /**
+   * Where keyboard focus should go after a render. Returns 'actions' (the
+   * first action you can take), 'next' (Rebet, else Deal) or null (leave it).
+   * Keyed by round, not just phase, so a round that ends on the deal (a
+   * blackjack) still moves focus even though the phase was already 'done'.
+   *   phase, round        - the game now
+   *   focused             - {phase, round} focus was last managed for
+   *   focusUsable         - is the focused element still a usable control?
+   */
+  function focusTarget({ phase, round, focused = {}, focusUsable = false }) {
+    if (phase === 'player' || phase === 'insurance') {
+      const fresh = focused.phase !== phase || focused.round !== round;
+      return fresh || !focusUsable ? 'actions' : null;
+    }
+    if (phase === 'done') {
+      const fresh = focused.phase !== 'done' || focused.round !== round;
+      return fresh || !focusUsable ? 'next' : null;
+    }
+    return null;
+  }
+
+  const api = { focusTarget, cardName, dealAnnouncement, luminance, contrastRatio };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackA11y = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
