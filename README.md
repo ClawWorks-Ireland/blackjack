@@ -117,7 +117,9 @@ button starts you over with $1,000.
   targets at least 44px tall. The header buttons scroll sideways in one
   row, the rules line and side-bet pay text move to Rules & help, Rebet
   and the bet box sit right under the bankroll between hands, and with
-  2-3 spots the hands sit side by side with overlapping cards
+  2-3 spots the hands sit side by side with overlapping cards. Held
+  sideways (landscape, under 500px tall), the table sits on the left and
+  the controls on the right so the cards and actions share one screen
 - **Rules, payouts and shortcuts (?):** the table's current rules and
   house edge, every main-game payout, and the side-bet pay tables with
   their edges, plus the full list of shortcuts. Table rules links to it

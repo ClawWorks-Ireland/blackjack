@@ -410,3 +410,57 @@ body { background: radial-gradient(circle at center, var(--felt), var(--felt-dar
   .more-hint:not([hidden]) { animation: nudge 1.4s ease-in-out 2; }
 }
 @keyframes nudge { 50% { transform: translateX(4px); } }
+
+/* Landscape phones (e.g. 844x390): table on the left, controls on the right,
+   so the cards and the actions share one screen. Stats sit below. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .layout { padding: 0.25rem 0.5rem; gap: 0.5rem; }
+  .table {
+    width: 100%; max-width: none; padding: 0; text-align: center;
+    display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); column-gap: 0.75rem;
+    grid-template-areas: "top top" "dealer controls" "msg controls" "hands controls";
+    grid-template-rows: auto auto auto 1fr; align-items: start;
+  }
+  .table > .top { grid-area: top; }
+  .table > .hand:first-of-type { grid-area: dealer; }
+  .table > .message { grid-area: msg; margin: 0.25rem 0; font-size: 1rem; min-height: 1.3em; }
+  .table > .hand:nth-of-type(2) { grid-area: hands; }
+  .table > .controls { grid-area: controls; margin-top: 0; gap: 0.4rem; align-self: start; }
+  .rules, .side-pays { display: none; }
+
+  .top { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; gap: 0.4rem; scrollbar-width: none; }
+  .top::-webkit-scrollbar { display: none; }
+  .top h1 { flex: 0 0 auto; font-size: 1.3rem; }
+  .top button.toggle { flex: 0 0 auto; min-height: 44px; padding: 0.25rem 0.55rem; font-size: 0.85rem; }
+  button kbd { display: none; }
+
+  h2 { font-size: 0.9rem; margin-bottom: 0.25rem; }
+  .hand { min-height: 0; }
+  .cards { min-height: 0; gap: 0.3rem; }
+  .card { width: 52px; height: 75px; }
+  .card .corner { font-size: 0.85rem; top: 3px; left: 5px; }
+  .card .pip { font-size: 1.5rem; }
+
+  .controls > .bank { order: -6; }
+  .controls > #rebet { order: -5; }
+  .controls > .bet-form { order: -4; }
+  .controls > .chips { order: -3; }
+  .controls > .limits { order: -2; margin: 0; }
+  .actions { flex-wrap: wrap; justify-content: center; gap: 0.35rem; }
+  .actions button { padding: 0.45rem 0.7rem; min-height: 44px; }
+  .chip { width: 44px; height: 44px; }
+
+  .player-hands:has(> :nth-child(2)) { flex-wrap: nowrap; gap: 0.25rem; }
+  .player-hands:has(> :nth-child(2)) .player-hand { flex: 1 1 0; min-width: 0; padding: 0.2rem; }
+  .player-hands:has(> :nth-child(2)) h2 { font-size: 0.75rem; line-height: 1.25; }
+  .player-hands:has(> :nth-child(2)) .cards { flex-wrap: nowrap; gap: 0; }
+  .player-hands:has(> :nth-child(2)) .card { width: 44px; height: 63px; flex: 0 0 auto; }
+  .player-hands:has(> :nth-child(2)) .card + .card { margin-left: -26px; }
+  .player-hands:has(> :nth-child(2)) .cards:has(> :nth-child(5)) .card + .card { margin-left: -32px; }
+  .player-hands:has(> :nth-child(2)) .pip { font-size: 1.2rem; }
+  .player-hands:has(> :nth-child(4)) { flex-wrap: wrap; }
+  .player-hands:has(> :nth-child(4)) .player-hand { flex: 0 0 calc(33.333% - 0.25rem); }
+
+  .stats { width: 100%; margin-top: 0; }
+  .more-hint:not([hidden]) { display: block; }
+}
