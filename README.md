@@ -90,7 +90,9 @@ button starts you over with $1,000.
 - **Stats panel:** win rate (pushes excluded), return (money back per
   $1 bet, counting doubles, splits, insurance and side bets), wins, losses, pushes,
   blackjacks, strategy accuracy on every move, hints followed, net,
-  streak, best round, and the last 20 rounds hand by hand
+  streak, best round, and the last 20 rounds hand by hand. Switch
+  between This session and All time, see a graph of your bankroll over
+  the last 100 rounds, and export up to 500 rounds as CSV
 - **Sound (M to toggle):** card, chip and outcome sounds made with the
   Web Audio API, no audio files
 - **Deal animations:** cards fly in one at a time in table order and

@@ -106,6 +106,10 @@
 
   <aside class="stats" aria-labelledby="stats-label">
     <h2 id="stats-label">Stats</h2>
+    <div class="scope" role="group" aria-label="Which stats to show">
+      <button type="button" id="scope-session" class="toggle" aria-pressed="true">This session</button>
+      <button type="button" id="scope-all" class="toggle" aria-pressed="false">All time</button>
+    </div>
     <dl>
       <div class="headline"><dt>Win rate</dt><dd id="stat-rate">–</dd></div>
       <div class="headline" title="Money back per $1 bet. Above 100% means you're ahead."><dt>Return <abbr title="Money back per $1 bet. Above 100% means you're ahead.">?</abbr></dt><dd id="stat-return">–</dd></div>
@@ -119,9 +123,16 @@
       <div><dt>Best round</dt><dd id="stat-best">$0</dd></div>
       <div><dt>Rounds</dt><dd id="stat-rounds">0</dd></div>
     </dl>
+    <figure class="bank-graph">
+      <svg id="bank-graph" viewBox="0 0 260 70" role="img" aria-label="Bankroll graph">
+        <polyline id="bank-line" points="" fill="none" stroke-width="2" stroke-linejoin="round" />
+      </svg>
+      <figcaption id="bank-caption"></figcaption>
+    </figure>
     <h3 id="history-label">Recent hands</h3>
     <ol id="history" class="history" aria-labelledby="history-label" tabindex="0"></ol>
-    <p class="note">Pushes don't count toward win rate. Return is money back per $1 bet, counting doubles, splits, insurance and side bets; above 100% means you're ahead. Accuracy scores every decision, hinted or not. Last 20 rounds shown. Saved in this browser.</p>
+    <p class="note">Pushes don't count toward win rate. Return is money back per $1 bet, counting doubles, splits, insurance and side bets; above 100% means you're ahead. Accuracy scores every decision, hinted or not. Last 20 rounds shown; the graph and CSV cover up to 500. Session stats reset when you reload. Saved in this browser.</p>
+    <button id="export-csv" class="link">Export history (CSV)</button>
     <button id="reset-stats" class="link">Reset stats and history</button>
   </aside>
   </div>

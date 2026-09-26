@@ -112,7 +112,8 @@
     return base;
   }
 
-  const HISTORY_MAX = 20;
+  const HISTORY_MAX = 500; // kept for the graph and CSV export
+  const HISTORY_SHOWN = 20; // rounds listed in the panel
   const OUTCOMES = new Set([...WIN, ...LOSS, 'push']);
 
   /** Prepend a round summary, keeping only the newest `max` entries. */
@@ -136,7 +137,53 @@
     }
   }
 
+  /** Newest-first history -> bankroll after each round, oldest first (last `n`). */
+  function bankrollSeries(history, n = 100) {
+    return history.slice(0, n).map((e) => e.bankroll).filter(Number.isFinite).reverse();
+  }
+
+  /**
+   * SVG polyline points for a series in a w x h box with `pad` margin.
+   * A flat series draws across the middle. Returns '' for fewer than 2 points.
+   */
+  function sparkPoints(values, w, h, pad = 4) {
+    if (values.length < 2) return '';
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    const span = hi - lo;
+    const x = (i) => pad + (i * (w - 2 * pad)) / (values.length - 1);
+    const y = (v) => (span ? pad + ((hi - v) * (h - 2 * pad)) / span : h / 2);
+    return values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  }
+
+  const CSV_COLUMNS = ['round', 'hands', 'dealer', 'dealer_total', 'outcomes', 'wagered', 'net', 'insurance',
+    'side_bets', 'bankroll'];
+
+  /** One CSV field: quoted when it holds a comma, quote or newline. */
+  function csvField(v) {
+    const s = v === null || v === undefined ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  /** History as CSV, oldest round first. Fields missing from older rounds are blank. */
+  function historyCSV(history) {
+    const rows = history.slice().reverse().map((e) => [
+      e.round,
+      e.hands.map((h) => `${h.cards} (${h.total})`).join(' | '),
+      e.dealerCards,
+      e.dealer,
+      e.hands.map((h) => h.outcome).join(' | '),
+      e.wagered,
+      e.net,
+      e.evenMoney ? 'even money' : Number.isFinite(e.insurance) ? e.insurance : '',
+      Number.isFinite(e.sideNet) && e.sideNet !== 0 ? e.sideNet : '',
+      e.bankroll,
+    ].map(csvField).join(','));
+    return [CSV_COLUMNS.join(','), ...rows].join('\n') + '\n';
+  }
+
   const api = {
+    bankrollSeries, sparkPoints, historyCSV, HISTORY_SHOWN,
     emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, returnRate, HISTORY_MAX, addHistory, parseHistory,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

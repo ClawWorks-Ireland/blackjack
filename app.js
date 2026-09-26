@@ -39,6 +39,10 @@
   let recordedRound = game.phase === 'done' ? round : 0; // last round folded into stats
   let stats = Stats.parseStats(storage('get', STATS_KEY));
   let history = Stats.parseHistory(storage('get', HISTORY_KEY));
+  let session = Stats.emptyStats(); // this page visit only; not saved
+  let statsScope = 'session';
+  /** Apply a stats update to both the lifetime and the session totals. */
+  const both = (fn) => { stats = fn(stats); session = fn(session); };
   Sound.muted = storage('get', MUTE_KEY) === '1';
   let countShown = storage('get', COUNT_KEY) === '1'; // hidden unless turned on
   let countNote = null; // result of your last count check, or a new-shoe notice
@@ -63,6 +67,8 @@
     hit: $('hit'), stand: $('stand'), double: $('double'), split: $('split'),
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
+    scopeSession: $('scope-session'), scopeAll: $('scope-all'), graph: $('bank-graph'), graphLine: $('bank-line'),
+    graphCaption: $('bank-caption'), exportCsv: $('export-csv'),
     hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
     countToggle: $('count-toggle'), countPanel: $('count-panel'), countRunning: $('count-running'),
     countTrue: $('count-true'), countDecks: $('count-decks'), countForm: $('count-check'),
@@ -242,6 +248,11 @@
   }
 
   function renderStats() {
+    // Shadows the lifetime totals: the panel shows whichever scope is picked.
+    const stats = statsScope === 'session' ? session : lifetimeStats();
+    els.scopeSession.setAttribute('aria-pressed', String(statsScope === 'session'));
+    els.scopeAll.setAttribute('aria-pressed', String(statsScope === 'all'));
+    renderGraph();
     const rate = Stats.winRate(stats);
     els.stat.rate.textContent = rate === null ? '–' : `${Math.round(rate * 100)}%`;
     const ret = Stats.returnRate(stats);
@@ -274,6 +285,8 @@
       net: game.net,
       insurance: game.insuranceNet,
       evenMoney: game.tookEvenMoney,
+      wagered: game.wagered,
+      bankroll: game.bankroll,
       sideNet: game.sideNet,
       sideWins: game.sideBets.filter((s) => s.win).map((s) => `${Side.BETS[s.bet].name} ${s.win}`),
       dealer: handValue(game.dealer).total,
@@ -292,7 +305,7 @@
       els.history.replaceChildren(li);
       return;
     }
-    els.history.replaceChildren(...history.map((e) => {
+    els.history.replaceChildren(...history.slice(0, Stats.HISTORY_SHOWN).map((e) => {
       const li = document.createElement('li');
       li.dataset.sign = e.net > 0 ? 'up' : e.net < 0 ? 'down' : '';
       const top = document.createElement('div');
@@ -367,7 +380,7 @@
   function maybeRecord(settleAt) {
     if (game.phase !== 'done' || recordedRound === round) return;
     recordedRound = round;
-    stats = Stats.recordRound(stats, game.results, game.net, game.wagered);
+    both((s) => Stats.recordRound(s, game.results, game.net, game.wagered));
     storage('set', STATS_KEY, JSON.stringify(stats));
     history = Stats.addHistory(history, historyEntry());
     storage('set', HISTORY_KEY, JSON.stringify(history));
@@ -569,8 +582,8 @@
       const source = advice.deviation ? 'The count says' : 'Basic strategy says';
       coachNote = `Off chart: you chose ${chose}. ${source} ${advice.label} (${why}).`;
     }
-    stats = Stats.recordMove(stats, correct);
-    if (hinted) stats = Stats.recordHint(stats, correct);
+    both((s) => Stats.recordMove(s, correct));
+    if (hinted) both((s) => Stats.recordHint(s, correct));
     storage('set', STATS_KEY, JSON.stringify(stats));
   }
 
@@ -662,6 +675,43 @@
     storage('set', COACH_KEY, coachOn ? '1' : '0');
     renderCoach();
   });
+  // --- Stats scope, bankroll graph, CSV export ---
+
+  const lifetimeStats = () => stats;
+
+  function renderGraph() {
+    const series = Stats.bankrollSeries(history, 100);
+    const pts = Stats.sparkPoints(series, 260, 70, 4);
+    els.graphLine.setAttribute('points', pts);
+    if (series.length < 2) {
+      els.graphCaption.textContent = 'The bankroll graph starts after two rounds.';
+      els.graph.setAttribute('aria-label', 'Bankroll graph: not enough rounds yet');
+      return;
+    }
+    const first = series[0];
+    const last = series[series.length - 1];
+    const text = `Bankroll over the last ${series.length} rounds: ${money(first)} to ${money(last)} ` +
+      `(high ${money(Math.max(...series))}, low ${money(Math.min(...series))}).`;
+    els.graphCaption.textContent = text;
+    els.graph.setAttribute('aria-label', text);
+    els.graph.dataset.sign = last > first ? 'up' : last < first ? 'down' : '';
+  }
+
+  els.scopeSession.addEventListener('click', () => { statsScope = 'session'; renderStats(); });
+  els.scopeAll.addEventListener('click', () => { statsScope = 'all'; renderStats(); });
+
+  els.exportCsv.addEventListener('click', () => {
+    const blob = new Blob([Stats.historyCSV(history)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `blackjack-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
   // --- Side bets ---
 
   function renderSide() {
@@ -743,7 +793,7 @@
     }
     const { running, trueCount } = Counting.countState(game);
     const right = guess === running;
-    stats = Stats.recordCountCheck(stats, right);
+    both((s) => Stats.recordCountCheck(s, right));
     storage('set', STATS_KEY, JSON.stringify(stats));
     countNote = right
       ? `Right: the running count is ${Counting.signed(running)} (true count ${Counting.formatTrue(trueCount)}).`
@@ -761,6 +811,7 @@
   });
   els.resetStats.addEventListener('click', () => {
     stats = Stats.emptyStats();
+    session = Stats.emptyStats();
     history = [];
     storage('remove', STATS_KEY);
     storage('remove', HISTORY_KEY);

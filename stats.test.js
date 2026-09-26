@@ -167,3 +167,41 @@ test('R1: stats saved before wagers were tracked load with nothing wagered', () 
   // The legacy $30 net has no wagers behind it, so it stays out of return.
   assert.equal(S.returnRate(S.recordRound(legacy, [{ outcome: 'win' }], 10, 10)), 2);
 });
+
+// --- F7: bankroll graph and CSV ---
+
+const hist = (round, bankroll, extra = {}) => ({
+  round, net: 10, dealer: 18, dealerCards: '10♠ 8♥', bankroll,
+  hands: [{ cards: 'K♠ 9♦', total: 19, outcome: 'win' }], ...extra,
+});
+
+test('F7: history keeps enough rounds for the graph and export', () => {
+  assert.ok(S.HISTORY_MAX >= 100);
+  assert.equal(S.HISTORY_SHOWN, 20);
+});
+
+test('F7: bankroll series is oldest first and skips rounds without a bankroll', () => {
+  const h = [hist(3, 1030), hist(2, 1020), hist(1, undefined)]; // newest first
+  assert.deepEqual(S.bankrollSeries(h), [1020, 1030]);
+  assert.deepEqual(S.bankrollSeries([hist(5, 5), hist(4, 4), hist(3, 3)], 2), [4, 5]);
+});
+
+test('F7: sparkline points span the box and put the high at the top', () => {
+  const pts = S.sparkPoints([100, 50, 150], 104, 58, 2).split(' ').map((p) => p.split(',').map(Number));
+  assert.deepEqual(pts.map(([x]) => x), [2, 52, 102]);
+  assert.deepEqual(pts.map(([, y]) => y), [29, 56, 2]);
+  assert.equal(S.sparkPoints([7], 100, 50), '');
+  assert.ok(S.sparkPoints([5, 5], 100, 50).endsWith(',25.0'));
+});
+
+test('F7: CSV is oldest first, quotes commas and quotes, blanks missing fields', () => {
+  const csv = S.historyCSV([
+    hist(2, 1015, { net: -5, wagered: 15, sideNet: -5, insurance: null }),
+    hist(1, 1020, { wagered: 10, dealerCards: 'A♠, "x"' }),
+  ]);
+  const lines = csv.trim().split('\n');
+  assert.equal(lines[0], 'round,hands,dealer,dealer_total,outcomes,wagered,net,insurance,side_bets,bankroll');
+  assert.equal(lines[1], '1,K♠ 9♦ (19),"A♠, ""x""",18,win,10,10,,,1020');
+  assert.equal(lines[2], '2,K♠ 9♦ (19),10♠ 8♥,18,win,15,-5,,-5,1015');
+  assert.equal(S.historyCSV([]).trim(), lines[0]);
+});
