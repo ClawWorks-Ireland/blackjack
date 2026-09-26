@@ -65,7 +65,8 @@
     hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
     countToggle: $('count-toggle'), countPanel: $('count-panel'), countRunning: $('count-running'),
     countTrue: $('count-true'), countDecks: $('count-decks'), countForm: $('count-check'),
-    countGuess: $('count-guess'), countResult: $('count-result'), countBet: $('count-bet'),
+    countGuess: $('count-guess'), countResult: $('count-result'),
+    suggestRow: $('suggest-row'), suggestText: $('suggest-text'), suggestBet: $('suggest-bet'),
     sidePairs: $('side-pairs'), side213: $('side-213'), sideResult: $('side-result'), sideEdge: $('side-edge'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
@@ -500,6 +501,10 @@
         : game.canInsure()
         ? `Dealer shows an ace. Insure for ${money(game.insuranceCost)}?`
         : 'Dealer shows an ace. Not enough chips to insure.';
+      const tcNow = Counting.countState(game).trueCount;
+      if (countShown && Counting.countInsurance(tcNow) && game.canInsure()) {
+        els.message.textContent += ` Count says take it (true count ${Counting.formatTrue(tcNow)}).`;
+      }
       delete els.message.dataset.outcome;
       els.message.classList.remove('reveal');
     } else if (inRound) {
@@ -678,14 +683,26 @@
     els.countRunning.textContent = Counting.signed(s.running);
     els.countTrue.textContent = Counting.formatTrue(s.trueCount);
     els.countDecks.textContent = `${s.decksLeft.toFixed(1)} decks unseen`;
-    const betting = !(game.phase === 'player' || game.phase === 'insurance');
-    const unit = lastBet > 0 ? lastBet : game.minBet;
+    // Suggested bet under the bet box: only while the count is shown, between rounds.
+    const betting = !(game.phase === 'player' || game.phase === 'insurance') && !game.isBroke;
     const units = Counting.betUnits(s.trueCount);
-    els.countBet.hidden = !betting;
-    els.countBet.textContent = `Count bet: ${units} unit${units > 1 ? 's' : ''} (${money(units * unit)} with a ${money(unit)} base bet)`;
+    const amount = Counting.suggestedBet(s.trueCount, { min: game.minBet, max: game.maxBet, bankroll: game.bankroll });
+    els.suggestRow.hidden = !(countShown && betting);
+    els.suggestText.textContent = `Suggested bet: ${money(amount)} (${units} unit${units > 1 ? 's' : ''} of ` +
+      `${money(game.minBet)} at true count ${Counting.formatTrue(s.trueCount)})`;
+    els.suggestBet.dataset.amount = String(amount);
+    els.suggestBet.disabled = !(amount >= game.minBet);
     els.countResult.hidden = !countNote;
     els.countResult.textContent = countNote || '';
   }
+
+  els.suggestBet.addEventListener('click', () => {
+    const amount = Number(els.suggestBet.dataset.amount);
+    if (!(amount > 0)) return;
+    els.betInput.value = String(amount);
+    Sound.play('chip');
+    renderBetControls();
+  });
 
   els.countToggle.addEventListener('click', () => {
     countShown = !countShown;
@@ -808,7 +825,10 @@
     ]],
     ['Betting', [['x', 'Rebet ×2 after a round', els.rebet2]]],
     ['Insurance', [['i', 'Take insurance (even money)', els.insure], ['n', 'No insurance', els.noInsure]]],
-    ['Counting', [['k', 'Show or hide the count', els.countToggle], ['q', 'Check your running count', els.countGuess]]],
+    ['Counting', [
+      ['k', 'Show or hide the count', els.countToggle], ['q', 'Check your running count', els.countGuess],
+      ['b', 'Put the suggested bet in the bet box', els.suggestBet],
+    ]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
       ['t', 'Table rules', els.rulesOpen],

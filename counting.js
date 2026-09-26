@@ -149,19 +149,27 @@
   }
 
   /**
-   * Bet ramp in units of your base bet: 1 unit at a true count of +1 or less,
-   * then 2, 4 and 8 units at +2, +3 and +4 or more.
+   * Bet ramp in units (1 unit = the table minimum), by true count rounded
+   * down: below +2 bet 1 unit, then 2, 4, 8 and 12 units at +2, +3, +4
+   * and +5 or more.
    */
   function betUnits(tc) {
     const t = Math.floor(tc);
-    if (t <= 1) return 1;
+    if (t < 2) return 1;
     if (t === 2) return 2;
     if (t === 3) return 4;
-    return 8;
+    if (t === 4) return 8;
+    return 12;
+  }
+
+  /** Suggested bet in dollars, capped at the table maximum and what you can afford. */
+  function suggestedBet(tc, { min, max = Infinity, bankroll = Infinity }) {
+    const afford = Math.floor(bankroll + 1e-9);
+    return Math.max(0, Math.min(betUnits(tc) * min, max, afford));
   }
 
   const api = {
-    hiLo, countState, trueCount, signed, formatTrue, parseGuess, countPlay, countInsurance, betUnits,
+    hiLo, countState, trueCount, signed, formatTrue, parseGuess, countPlay, countInsurance, betUnits, suggestedBet,
     INSURANCE_INDEX,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

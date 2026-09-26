@@ -76,8 +76,12 @@ button starts you over with $1,000.
   running count (like +3) and press Enter to check it. Checks are scored
   in the stats panel. While the count is shown, the coach plays the count: the
   Illustrious 18 and Fab 4 index plays for Hi-Lo (for example stand on 12
-  vs 3 at a true count of +2), insurance at +3 or more, and a bet ramp of
-  1, 2, 4 and 8 units at true counts up to +1, +2, +3 and +4. Hints,
+  vs 3 at a true count of +2), insurance at +3 or more, and a suggested bet
+  under the bet box: 1 unit (the table minimum) below a true count of
+  +2, then 2, 4, 8 and 12 units at +2, +3, +4 and +5 or more, capped at
+  the table maximum and your bankroll. B puts it in the bet box. With a
+  dealer ace at +3 or more, the insurance prompt says "Count says take
+  it". Hints,
   accuracy and coach notes follow it
 - **Coach notes (C to toggle):** after an off-chart move, a note says
   what the chart recommends. Moves are still scored when notes are off

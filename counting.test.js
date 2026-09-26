@@ -133,6 +133,16 @@ test('insurance and even money at +3 or more', () => {
   assert.equal(K.countInsurance(3.4, true).label, 'Even money');
 });
 
-test('bet ramp: 1, 2, 4, 8 units', () => {
-  assert.deepEqual([-2, 0, 1.9, 2, 3.5, 4, 9].map(K.betUnits), [1, 1, 1, 2, 4, 8, 8]);
+test('bet ramp: 1, 2, 4, 8, 12 units', () => {
+  assert.deepEqual([-2, 0, 1.9, 2, 3.5, 4, 4.9, 5, 9].map(K.betUnits), [1, 1, 1, 2, 4, 8, 8, 12, 12]);
+});
+
+test('F4b: suggested bet uses the table minimum as a unit', () => {
+  const t = { min: 5, max: 500 };
+  assert.deepEqual([-1, 2.4, 3.0, 5.7].map((tc) => K.suggestedBet(tc, t)), [5, 10, 20, 60]);
+});
+
+test('F4b: suggested bet is capped by the table maximum and the bankroll', () => {
+  assert.equal(K.suggestedBet(6, { min: 50, max: 500 }), 500);
+  assert.equal(K.suggestedBet(6, { min: 5, max: 500, bankroll: 42.5 }), 42);
 });
