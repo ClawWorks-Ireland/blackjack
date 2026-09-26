@@ -426,6 +426,8 @@
     const offering = game.phase === 'insurance';
     const live = inRound || offering;
     const { plan, settleAt } = planAnimations(live);
+    // While a hand is in play, betting rows collapse so the actions fit on a phone.
+    document.body.classList.toggle('in-hand', live);
     renderRulesText();
     inFlight = plan.size > 0 && stepMs() > 0;
 
