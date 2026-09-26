@@ -62,6 +62,12 @@ button starts you over with $1,000.
 - **Hint (G):** shows the basic-strategy move for the table's current
   rules and why, for example
   "Hard 16 vs dealer ace: Surrender", and highlights the button
+- **Card-counting trainer (Hi-Lo):** press K to show or hide the
+  running count, true count and decks unseen. The dealer's hole card
+  isn't counted until it's turned over, and the count restarts with each
+  new shoe. To practise, keep the count hidden, then press Q, type your
+  running count (like +3) and press Enter to check it. Checks are scored
+  in the stats panel
 - **Coach notes (C to toggle):** after an off-chart move, a note says
   what the chart recommends. Moves are still scored when notes are off
 - **Stats panel:** win rate (pushes excluded), wins, losses, pushes,
@@ -97,6 +103,8 @@ and history; it doesn't touch the bankroll.
 | M | Sound on/off |
 | C | Coach notes on/off |
 | T | Table rules |
+| K | Show or hide the count |
+| Q | Check your running count |
 | ? | Show shortcuts |
 | Enter | Deal, or deal again with the same bet |
 | X | Rebet ×2 after a round |
@@ -111,21 +119,22 @@ and history; it doesn't touch the bankroll.
 | `format.js` | Money formatting ($1,002.50). No DOM code |
 | `betting.js` | Bet checks, chips and rebet amounts. No DOM code |
 | `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
+| `counting.js` | Hi-Lo running and true count from the game state. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
-| `*.test.js` | Tests for the six DOM-free modules |
+| `*.test.js` | Tests for the seven DOM-free modules |
 | `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
-The six DOM-free modules work in both the browser (as
+The seven DOM-free modules work in both the browser (as
 `window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
-`window.BlackjackFormat`, `window.BlackjackBetting` and
-`window.BlackjackRules`) and Node (via `module.exports`). That's
+`window.BlackjackFormat`, `window.BlackjackBetting`, `window.BlackjackRules`
+and `window.BlackjackCounting`) and Node (via `module.exports`). That's
 why they can be tested without a browser.
 
 ## Not included
 
-No card counting aids or side bets.
+No side bets, and the coach doesn't change its advice with the count.
 
 ## How the strategy chart was made
 

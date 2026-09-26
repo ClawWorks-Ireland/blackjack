@@ -11,6 +11,7 @@
   const HISTORY_KEY = 'blackjack.history';
   const MUTE_KEY = 'blackjack.muted';
   const COACH_KEY = 'blackjack.coach';
+  const COUNT_KEY = 'blackjack.showCount';
   const GAME_KEY = 'blackjack.game'; // bankroll, shoe and any round in progress
   const { Game, handValue } = window.Blackjack;
   const Stats = window.BlackjackStats;
@@ -19,6 +20,7 @@
   const { money, signedMoney } = window.BlackjackFormat;
   const Betting = window.BlackjackBetting;
   const Rules = window.BlackjackRules;
+  const Counting = window.BlackjackCounting;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const newGame = (bankroll, rules) =>
@@ -35,6 +37,8 @@
   let stats = Stats.parseStats(storage('get', STATS_KEY));
   let history = Stats.parseHistory(storage('get', HISTORY_KEY));
   Sound.muted = storage('get', MUTE_KEY) === '1';
+  let countShown = storage('get', COUNT_KEY) === '1'; // hidden unless turned on
+  let countNote = null; // result of your last count check, or a new-shoe notice
 
   // Animation bookkeeping: cards already on the table, and whether the
   // dealer's hole card was face-down on the previous render.
@@ -57,6 +61,9 @@
     surrender: $('surrender'), insurance: $('insurance'), insure: $('insure'), noInsure: $('no-insure'),
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
     hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
+    countToggle: $('count-toggle'), countPanel: $('count-panel'), countRunning: $('count-running'),
+    countTrue: $('count-true'), countDecks: $('count-decks'), countForm: $('count-check'),
+    countGuess: $('count-guess'), countResult: $('count-result'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
     settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
@@ -64,7 +71,7 @@
     setDefault: $('set-default'),
     stat: {
       rate: $('stat-rate'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
-      accuracy: $('stat-accuracy'), hints: $('stat-hints'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
+      accuracy: $('stat-accuracy'), hints: $('stat-hints'), counts: $('stat-counts'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
     },
   };
 
@@ -234,6 +241,9 @@
     const acc = Stats.accuracy(stats);
     els.stat.accuracy.textContent = acc === null ? '–'
       : `${Math.round(acc * 100)}% (${stats.movesCorrect} of ${stats.movesScored})`;
+    const cr = Stats.countRate(stats);
+    els.stat.counts.textContent = cr === null ? '–'
+      : `${stats.countCorrect} of ${stats.countChecks} (${Math.round(cr * 100)}%)`;
     const hr = Stats.hintRate(stats);
     els.stat.hints.textContent = hr === null ? '–'
       : `${stats.hintsFollowed} of ${stats.hintsShown} (${Math.round(hr * 100)}%)`;
@@ -422,6 +432,7 @@
       : live ? `(${game.dealer[0].rank === 'A' ? 'ace' : handValue([game.dealer[0]]).total} showing)`
       : `(${formatTotal(game.dealer)})`;
     els.bankroll.textContent = money(game.bankroll);
+    renderCount();
 
     els.hit.disabled = !inRound;
     els.stand.disabled = !inRound;
@@ -549,6 +560,7 @@
       game.deal(bet);
       round++;
       coachNote = null;
+      countNote = game.newShoe ? 'New shoe shuffled: the count starts again from 0.' : null;
       lastBet = bet;
       storage('set', LAST_BET_KEY, String(bet));
     }, 'chip');
@@ -601,6 +613,53 @@
     storage('set', COACH_KEY, coachOn ? '1' : '0');
     renderCoach();
   });
+  // --- Card-counting trainer (Hi-Lo) ---
+
+  /** Count panel and check result. Only called once dealt cards have landed. */
+  function renderCount() {
+    const s = Counting.countState(game);
+    els.countToggle.setAttribute('aria-pressed', String(countShown));
+    els.countToggle.firstChild.textContent = countShown ? 'Count shown ' : 'Count hidden ';
+    els.countPanel.hidden = !countShown;
+    els.countRunning.textContent = Counting.signed(s.running);
+    els.countTrue.textContent = Counting.formatTrue(s.trueCount);
+    els.countDecks.textContent = `${s.decksLeft.toFixed(1)} decks unseen`;
+    els.countResult.hidden = !countNote;
+    els.countResult.textContent = countNote || '';
+  }
+
+  els.countToggle.addEventListener('click', () => {
+    countShown = !countShown;
+    storage('set', COUNT_KEY, countShown ? '1' : '0');
+    if (!inFlight) renderCount();
+  });
+
+  els.countForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (inFlight) {
+      countNote = 'Wait for the cards to land, then check.';
+      renderCount();
+      return;
+    }
+    const guess = Counting.parseGuess(els.countGuess.value);
+    if (guess === null) {
+      countNote = 'Enter the running count as a whole number, like +3 or -2.';
+      renderCount();
+      return;
+    }
+    const { running, trueCount } = Counting.countState(game);
+    const right = guess === running;
+    stats = Stats.recordCountCheck(stats, right);
+    storage('set', STATS_KEY, JSON.stringify(stats));
+    countNote = right
+      ? `Right: the running count is ${Counting.signed(running)} (true count ${Counting.formatTrue(trueCount)}).`
+      : `Not quite: the running count is ${Counting.signed(running)}, you said ${Counting.signed(guess)}.`;
+    els.countGuess.value = '';
+    els.countGuess.blur();
+    renderCount();
+    renderStats();
+  });
+
   els.mute.addEventListener('click', () => {
     Sound.muted = !Sound.muted;
     storage('set', MUTE_KEY, Sound.muted ? '1' : '0');
@@ -690,6 +749,7 @@
     ]],
     ['Betting', [['x', 'Rebet ×2 after a round', els.rebet2]]],
     ['Insurance', [['i', 'Take insurance (even money)', els.insure], ['n', 'No insurance', els.noInsure]]],
+    ['Counting', [['k', 'Show or hide the count', els.countToggle], ['q', 'Check your running count', els.countGuess]]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
       ['t', 'Table rules', els.rulesOpen],
@@ -733,7 +793,7 @@
 
   document.addEventListener('keydown', (e) => {
     if (els.help.open || els.settings.open) return; // Escape closes dialogs natively
-    if (e.target === els.betInput || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target === els.betInput || e.target === els.countGuess || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).
     // Buttons handle their own Enter, so leave those alone.
     if (e.key === 'Enter') {
@@ -747,7 +807,8 @@
     const btn = SHORTCUTS[e.key.toLowerCase()];
     if (btn && !btn.disabled && !btn.closest('[hidden]')) {
       e.preventDefault();
-      btn.click();
+      if (btn.tagName === 'INPUT') btn.focus(); // Q jumps to the count box
+      else btn.click();
     }
   });
 

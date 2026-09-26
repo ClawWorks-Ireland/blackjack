@@ -133,3 +133,17 @@ test('recordMove scores decisions and accuracy', () => {
   assert.equal(S.accuracy(s), 0.75);
   assert.equal(S.parseStats(JSON.stringify(s)).movesCorrect, 3);
 });
+
+// --- Count checks ---
+
+test('recordCountCheck scores running-count checks without mutating', () => {
+  const start = S.emptyStats();
+  assert.equal(S.countRate(start), null);
+  let s = S.recordCountCheck(start, true);
+  s = S.recordCountCheck(s, false);
+  assert.equal(start.countChecks, 0);
+  assert.deepEqual([s.countChecks, s.countCorrect], [2, 1]);
+  assert.equal(S.countRate(s), 0.5);
+  assert.equal(S.parseStats(JSON.stringify(s)).countCorrect, 1);
+  assert.equal(S.parseStats(JSON.stringify({ wins: 1 })).countChecks, 0);
+});

@@ -14,6 +14,7 @@
       rounds: 0, hands: 0, wins: 0, losses: 0, pushes: 0, blackjacks: 0,
       net: 0, bestRound: 0, worstRound: 0, streak: 0, bestStreak: 0,
       hintsShown: 0, hintsFollowed: 0, movesScored: 0, movesCorrect: 0,
+      countChecks: 0, countCorrect: 0,
     };
   }
 
@@ -60,6 +61,20 @@
       movesScored: stats.movesScored + 1,
       movesCorrect: stats.movesCorrect + (correct ? 1 : 0),
     };
+  }
+
+  /** Record one running-count check (does not mutate). */
+  function recordCountCheck(stats, correct) {
+    return {
+      ...stats,
+      countChecks: stats.countChecks + 1,
+      countCorrect: stats.countCorrect + (correct ? 1 : 0),
+    };
+  }
+
+  /** Fraction of count checks you got right, or null before any. */
+  function countRate(stats) {
+    return stats.countChecks ? stats.countCorrect / stats.countChecks : null;
   }
 
   /** Fraction of decisions matching basic strategy, or null before any. */
@@ -111,7 +126,7 @@
   }
 
   const api = {
-    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, HISTORY_MAX, addHistory, parseHistory,
+    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, HISTORY_MAX, addHistory, parseHistory,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackStats = api;

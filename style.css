@@ -275,3 +275,10 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
 .settings .edge { margin: 0; font-weight: 600; color: var(--gold); }
 .settings .note { margin: 0; }
 .dialog-actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+
+/* Card-counting trainer */
+.count-panel { font-variant-numeric: tabular-nums; padding: 0.35rem 0.75rem; border-radius: 6px; background: rgba(0, 0, 0, 0.25); }
+.count-panel strong { color: var(--gold); }
+.count-check { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+.count-check input { width: 4.5rem; padding: 0.45rem; font-size: 1rem; border-radius: 6px; border: none; min-height: 44px; text-align: center; }
+.count-result { margin: 0; font-size: 0.95rem; }

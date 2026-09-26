@@ -13,6 +13,7 @@
       <h1>Blackjack</h1>
       <button id="mute" class="toggle" aria-pressed="false">🔊 Sound on <kbd>M</kbd></button>
       <button id="coach-toggle" class="toggle" aria-pressed="true">Coach notes on <kbd>C</kbd></button>
+      <button id="count-toggle" class="toggle" aria-pressed="false">Count hidden <kbd>K</kbd></button>
       <button id="rules-open" class="toggle" aria-haspopup="dialog">Table rules <kbd>T</kbd></button>
       <button id="help-open" class="toggle" aria-haspopup="dialog">Shortcuts <kbd>?</kbd></button>
     </header>
@@ -34,6 +35,18 @@
         Bankroll: <strong id="bankroll">$1,000</strong>
         <span id="bet-display"></span>
       </div>
+
+      <div id="count-panel" class="count-panel" hidden aria-label="Hi-Lo count">
+        Running count <strong id="count-running">0</strong>
+        · True count <strong id="count-true">0.0</strong>
+        · <span id="count-decks">6.0 decks unseen</span>
+      </div>
+      <form id="count-check" class="count-check" novalidate>
+        <label for="count-guess">Your running count</label>
+        <input id="count-guess" type="text" inputmode="numeric" autocomplete="off" placeholder="+3" size="4">
+        <button type="submit" class="toggle">Check <kbd>Q</kbd></button>
+      </form>
+      <p id="count-result" class="count-result" role="status" hidden></p>
 
       <form id="bet-form" class="bet-form" novalidate>
         <label for="bet">Bet</label>
@@ -82,6 +95,7 @@
       <div><dt>Blackjacks</dt><dd id="stat-blackjacks">0</dd></div>
       <div><dt>Strategy accuracy</dt><dd id="stat-accuracy">–</dd></div>
       <div><dt>Hints followed</dt><dd id="stat-hints">–</dd></div>
+      <div><dt>Count checks right</dt><dd id="stat-counts">–</dd></div>
       <div><dt>Net</dt><dd id="stat-net">$0</dd></div>
       <div><dt>Streak</dt><dd id="stat-streak">–</dd></div>
       <div><dt>Best round</dt><dd id="stat-best">$0</dd></div>
@@ -149,6 +163,7 @@
   <script src="stats.js"></script>
   <script src="sound.js"></script>
   <script src="strategy.js"></script>
+  <script src="counting.js"></script>
   <script src="rules.js"></script>
   <script src="app.js"></script>
 </body>
