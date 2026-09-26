@@ -1155,4 +1155,10 @@
   applyPrefs();
   renderMute();
   render();
+
+  // Offline support and install (PWA). Service workers need http(s), so
+  // opening index.html straight from disk just skips this.
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode unavailable */ });
+  }
 })();

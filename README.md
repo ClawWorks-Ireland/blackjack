@@ -14,6 +14,11 @@ npm start            # serves on http://127.0.0.1:8080 (localhost only)
 
 `npm start` uses Python's built-in web server, so it needs `python3`.
 
+Served over http(s), the game is an installable app (PWA): your browser
+offers "Install" or "Add to Home Screen", and after one visit it works
+offline. Online it always loads the latest files; offline it uses the
+last copy. Opening `index.html` straight from disk skips this.
+
 ## Test it
 
 ```bash
@@ -165,6 +170,7 @@ and history; it doesn't touch the bankroll.
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
+| `manifest.webmanifest`, `sw.js`, `icons/` | Install and offline support |
 | `*.test.js` | Tests for the ten DOM-free modules |
 | `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
