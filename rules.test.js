@@ -62,3 +62,15 @@ test('describe spells out the rules and the edge', () => {
   assert.match(one, /Single deck · Dealer hits soft 17 · Blackjack pays 6:5 · .*not after a split/);
   assert.match(two, /No surrender · House edge 1\.71%/);
 });
+
+test('F9: payout rows follow the rules', () => {
+  const rows = Object.fromEntries(R.payoutRows(base));
+  assert.equal(rows.Blackjack, '3:2');
+  assert.equal(rows['Late surrender'], 'Half your bet back');
+  assert.ok('Even money (your blackjack vs an ace, one spot)' in rows);
+  const six5 = Object.fromEntries(R.payoutRows({ ...base, payout: 1.2, lateSurrender: false, das: false }));
+  assert.equal(six5.Blackjack, '6:5');
+  assert.equal(six5['Late surrender'], 'Not offered');
+  assert.equal(six5['Double down'], 'Any two cards, not after a split');
+  assert.ok(!Object.keys(six5).some((k) => k.startsWith('Even money')));
+});

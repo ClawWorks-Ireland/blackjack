@@ -106,7 +106,9 @@ button starts you over with $1,000.
   system asks for reduced motion
 - **Phones:** the layout fits screens down to 360px wide, with touch
   targets at least 44px tall
-- **Keyboard play:** press ? for the full list of shortcuts
+- **Rules, payouts and shortcuts (?):** the table's current rules and
+  house edge, every main-game payout, and the side-bet pay tables with
+  their edges, plus the full list of shortcuts. Table rules links to it
 - **Accessibility:** each card is read out by screen readers as it lands
   ("You: 8 of spades. Dealer: a face-down card."). After a deal, focus
   moves to the first action you can take; after a round, to Rebet or

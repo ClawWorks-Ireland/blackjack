@@ -83,6 +83,7 @@
     sidePairs: $('side-pairs'), side213: $('side-213'), sideResult: $('side-result'), sideEdge: $('side-edge'),
     announcer: $('announcer'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
+    helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
     settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
     setEdge: $('set-edge'), setNote: $('set-note'), setApply: $('set-apply'), setCancel: $('set-cancel'),
@@ -989,7 +990,7 @@
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
       ['t', 'Table rules', els.rulesOpen],
-      ['?', 'Show this help', els.helpOpen],
+      ['?', 'Rules, payouts and shortcuts', els.helpOpen],
     ]],
   ];
   const SHORTCUTS = Object.fromEntries(
@@ -1020,8 +1021,39 @@
     els.helpList.replaceChildren(...sections.flat());
   }
 
-  els.helpOpen.addEventListener('click', () => {
+  /** Rules and payouts for the table as it's set right now. */
+  function renderPayouts() {
+    const [one, two] = Rules.describe(game.rules);
+    els.helpRules.replaceChildren(one, document.createElement('br'), two);
+    const rows = (tbody, list) => tbody.replaceChildren(...list.map(([what, pays]) => {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th');
+      th.scope = 'row';
+      th.textContent = what;
+      const td = document.createElement('td');
+      td.textContent = pays;
+      tr.append(th, td);
+      return tr;
+    }));
+    rows(els.helpPayouts.tBodies[0], Rules.payoutRows(game.rules));
+    const sides = [];
+    for (const [bet, table] of Object.entries(Side.PAYS)) {
+      const edge = Side.houseEdge(bet, game.decks).toFixed(2);
+      const pays = Object.entries(table).map(([hand, odds]) => `${hand} ${odds}:1`).join(', ');
+      sides.push([`${Side.BETS[bet].name} (house edge ${edge}%)`, pays]);
+    }
+    rows(els.helpSides.tBodies[0], sides);
+  }
+
+  function openHelp() {
+    renderPayouts();
     if (!els.help.open) els.help.showModal();
+  }
+
+  els.helpOpen.addEventListener('click', openHelp);
+  els.setPayouts.addEventListener('click', () => {
+    els.settings.close();
+    openHelp();
   });
   els.helpClose.addEventListener('click', () => els.help.close());
   // Clicking the backdrop (outside the panel) closes it too.

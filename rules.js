@@ -92,7 +92,23 @@
     return [first.join(' · '), second.join(' · ')];
   }
 
-  const api = { DECKS, DEFAULT_RULES, normalizeRules, houseEdge, edgeText, describe, sameRules };
+  /** Main-game payouts for these rules, as [what, pays] rows. */
+  function payoutRows(rules) {
+    const r = normalizeRules(rules);
+    const rows = [
+      ['Win', '1:1'],
+      ['Blackjack', r.payout === 1.5 ? '3:2' : '6:5'],
+      ['21 after a split', '1:1 (not blackjack)'],
+      ['Push (tie)', 'Bet returned'],
+      ['Insurance (dealer shows an ace)', 'Costs half your bet, pays 2:1'],
+    ];
+    if (r.payout === 1.5) rows.push(['Even money (your blackjack vs an ace, one spot)', '1:1 now']);
+    rows.push(['Late surrender', r.lateSurrender ? 'Half your bet back' : 'Not offered']);
+    rows.push(['Double down', r.das ? 'Any two cards, also after a split' : 'Any two cards, not after a split']);
+    return rows;
+  }
+
+  const api = { payoutRows, DECKS, DEFAULT_RULES, normalizeRules, houseEdge, edgeText, describe, sameRules };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackRules = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

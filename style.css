@@ -330,3 +330,10 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
 .spots label { display: inline-flex; align-items: center; gap: 0.2rem; min-height: 44px; }
 .spots input { width: 1.1rem; height: 1.1rem; accent-color: var(--gold); }
 .bet-form { flex-wrap: wrap; justify-content: center; }
+
+/* Rules and payouts overlay */
+.help { width: min(520px, 94vw); max-height: 90vh; }
+.paytable { width: 100%; border-collapse: collapse; margin: 0.5rem 0 0.9rem; font-size: 0.85rem; text-align: left; }
+.paytable caption { text-align: left; font-weight: 600; color: var(--gold); padding-bottom: 0.25rem; }
+.paytable th, .paytable td { padding: 0.3rem 0.4rem; border-top: 1px solid rgba(255, 255, 255, 0.15); vertical-align: top; }
+.paytable th { font-weight: 500; opacity: 0.9; width: 45%; }

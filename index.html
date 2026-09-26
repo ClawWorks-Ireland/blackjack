@@ -16,7 +16,7 @@
       <button id="coach-toggle" class="toggle" aria-pressed="true">Coach notes on <kbd>C</kbd></button>
       <button id="count-toggle" class="toggle" aria-pressed="false">Count hidden <kbd>K</kbd></button>
       <button id="rules-open" class="toggle" aria-haspopup="dialog">Table rules <kbd>T</kbd></button>
-      <button id="help-open" class="toggle" aria-haspopup="dialog">Shortcuts <kbd>?</kbd></button>
+      <button id="help-open" class="toggle" aria-haspopup="dialog">Rules &amp; help <kbd>?</kbd></button>
     </header>
     <p id="rules-text" class="rules"></p>
 
@@ -146,7 +146,14 @@
 
   <dialog id="help" class="help" aria-labelledby="help-title">
     <div class="help-body">
-      <h2 id="help-title">Keyboard shortcuts</h2>
+      <h2 id="help-title">Rules, payouts and shortcuts</h2>
+      <section aria-labelledby="payouts-title">
+        <h3 id="payouts-title">This table</h3>
+        <p id="help-rules" class="note"></p>
+        <table class="paytable" id="help-payouts"><caption>Main game</caption><tbody></tbody></table>
+        <table class="paytable" id="help-sides"><caption>Side bets</caption><tbody></tbody></table>
+      </section>
+      <h3>Keyboard shortcuts</h3>
       <div id="help-list"></div>
       <p class="note">Shortcuts only work when that button is available. Esc closes this panel.</p>
       <button id="help-close" autofocus>Close</button>
@@ -189,6 +196,7 @@
         <button type="submit" id="set-apply">Apply</button>
         <button type="button" id="set-cancel" class="toggle">Cancel</button>
         <button type="button" id="set-default" class="link">Default rules</button>
+        <button type="button" id="set-payouts" class="link">See payouts</button>
       </div>
     </form>
   </dialog>
