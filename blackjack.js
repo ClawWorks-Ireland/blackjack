@@ -28,6 +28,9 @@
   const DEALER_STAND = 17;
   const MAX_HANDS = 4;
   const PENETRATION = 0.75; // cut card sits three quarters of the way into the shoe
+  const SIDE_MAX = 100; // per side bet
+  const SIDE = typeof module !== 'undefined' && module.exports
+    ? require('./sidebets.js') : root.BlackjackSideBets;
 
   function createShoe(decks = 6) {
     const shoe = [];
@@ -131,6 +134,7 @@
       this.insurance = 0; // side-bet stake
       this.insuranceNet = null; // null until insurance is settled
       this.tookEvenMoney = false;
+      this.sideBets = []; // settled as soon as the cards are dealt
     }
 
     /** The table rules, in the shape the settings panel and strategy use. */
@@ -144,9 +148,14 @@
       return this.phase === 'player' ? this.hands[this.active] : null;
     }
 
-    /** Total chip change for the finished round, including insurance. */
+    /** Total chip change for the finished round, including insurance and side bets. */
     get net() {
-      return this.results.reduce((sum, r) => sum + r.net, 0) + (this.insuranceNet || 0);
+      return this.results.reduce((sum, r) => sum + r.net, 0) + (this.insuranceNet || 0) + this.sideNet;
+    }
+
+    /** Chip change from this round's side bets. */
+    get sideNet() {
+      return this.sideBets.reduce((sum, s) => sum + s.net, 0);
     }
 
     /** Between rounds with less than the minimum bet left: time to start over. */
@@ -217,12 +226,24 @@
       return this.lateSurrender && !!h && !h.fromSplit && h.cards.length === 2;
     }
 
-    deal(bet) {
+    /**
+     * Start a round. `side` holds optional side bets in dollars:
+     * { pairs: Perfect Pairs, t213: 21+3 }. They settle as soon as the
+     * cards are out, before insurance or play.
+     */
+    deal(bet, side = {}) {
       if (this.phase === 'player' || this.phase === 'insurance') throw new Error('Round in progress');
       if (!Number.isFinite(bet) || bet <= 0) throw new Error('Bet must be positive');
       if (bet < this.minBet) throw new Error(`Minimum bet is $${this.minBet}`);
       if (bet > this.maxBet) throw new Error(`Maximum bet is $${this.maxBet}`);
-      if (bet > this.bankroll) throw new Error('Bet exceeds bankroll');
+      const sides = Object.entries(side).filter(([, stake]) => stake);
+      for (const [name, stake] of sides) {
+        if (!(name in SIDE.BETS)) throw new Error(`Unknown side bet ${name}`);
+        if (!Number.isInteger(stake) || stake < 0) throw new Error('Side bets are in whole dollars');
+        if (stake > SIDE_MAX) throw new Error(`Side bets are at most $${SIDE_MAX}`);
+      }
+      const total = bet + sides.reduce((sum, [, stake]) => sum + stake, 0);
+      if (total > this.bankroll) throw new Error('Bet exceeds bankroll');
       // Between rounds is the only time the shoe is replaced.
       this.newShoe = this.cutCardReached;
       if (this.newShoe) {
@@ -238,6 +259,8 @@
       this.dealer = [this.draw(), this.draw()];
       this.hands = [{ cards, bet, fromSplit: false, splitAces: false, surrendered: false, done: false }];
       this.active = 0;
+      this.sideBets = sides.map(([name, stake]) => SIDE.settleSide(name, stake, [...cards, this.dealer[0]]));
+      for (const s of this.sideBets) this.bankroll += s.net; // stake stays or winnings added
       if (this.dealer[0].rank === 'A') this.phase = 'insurance';
       else this.peek();
     }
@@ -353,6 +376,7 @@
         shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
         insurance: this.insurance, insuranceNet: this.insuranceNet, tookEvenMoney: this.tookEvenMoney,
+        sideBets: this.sideBets,
       };
     }
 
@@ -382,6 +406,7 @@
       g.insurance = data.insurance;
       g.insuranceNet = data.insuranceNet;
       g.tookEvenMoney = data.tookEvenMoney === true;
+      g.sideBets = (data.sideBets || []).map(({ bet, stake, win, odds, net }) => ({ bet, stake, win, odds, net }));
       return g;
     }
   }
@@ -397,6 +422,9 @@
     Number.isFinite(h.bet) && h.bet > 0 && isBool(h.fromSplit) && isBool(h.splitAces) &&
     isBool(h.surrendered) && isBool(h.done);
   const validResult = (r) => isObj(r) && OUTCOMES.includes(r.outcome) && Number.isFinite(r.net);
+
+  const validSide = (s) => isObj(s) && ['pairs', 't213'].includes(s.bet) && Number.isFinite(s.stake) && s.stake > 0 &&
+    (s.win === null || typeof s.win === 'string') && Number.isFinite(s.odds) && Number.isFinite(s.net);
 
   function validSave(d) {
     if (!isObj(d) || !isMoney(d.bankroll) || !PHASES.includes(d.phase)) return false;
@@ -414,12 +442,13 @@
     const live = d.phase === 'player' || d.phase === 'insurance';
     if (live && (!d.hands.length || d.active >= d.hands.length || d.dealer.length < 2)) return false;
     if (d.phase === 'insurance' && d.hands.length !== 1) return false;
+    if (d.sideBets !== undefined && !(Array.isArray(d.sideBets) && d.sideBets.every(validSide))) return false;
     if (d.phase === 'done' && d.results.length !== d.hands.length) return false;
     return true;
   }
 
   const api = {
-    SUITS, RANKS, MAX_HANDS, PAYOUTS, createShoe, shuffle, cardValue, handValue,
+    SUITS, RANKS, MAX_HANDS, PAYOUTS, SIDE_MAX, createShoe, shuffle, cardValue, handValue,
     isBlackjack, isBust, dealerShouldHit, settle, Game,
   };
 

@@ -56,6 +56,16 @@
         <button type="submit" id="deal">Deal <kbd>Enter</kbd></button>
       </form>
       <p id="limits" class="limits">Table limits $1–$500</p>
+      <div class="side-bets" role="group" aria-labelledby="side-label">
+        <span id="side-label">Side bets (optional, up to $100):</span>
+        <label for="side-pairs">Perfect Pairs</label>
+        <input id="side-pairs" type="number" min="0" max="100" step="1" placeholder="0" inputmode="numeric">
+        <label for="side-213">21+3</label>
+        <input id="side-213" type="number" min="0" max="100" step="1" placeholder="0" inputmode="numeric">
+      </div>
+      <p class="side-pays">Perfect Pairs pays 25:1 perfect, 12:1 colored, 6:1 mixed. 21+3 pays 100:1 suited trips,
+        40:1 straight flush, 30:1 trips, 10:1 straight, 5:1 flush. <span id="side-edge"></span></p>
+      <p id="side-result" class="side-result" role="status" hidden></p>
       <div id="chips" class="chips" role="group" aria-label="Add chips to your bet">
         <button type="button" class="chip" data-chip="1" aria-label="Add $1">1</button>
         <button type="button" class="chip" data-chip="5" aria-label="Add $5">5</button>
@@ -161,6 +171,7 @@
 
   <script src="format.js"></script>
   <script src="betting.js"></script>
+  <script src="sidebets.js"></script>
   <script src="blackjack.js"></script>
   <script src="stats.js"></script>
   <script src="sound.js"></script>

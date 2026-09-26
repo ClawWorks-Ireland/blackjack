@@ -61,3 +61,14 @@ test('rebet and rebet x2 respect the bankroll and limits', () => {
   assert.equal(rebetAmount(300, 2, { ...limits, bankroll: 1000 }), null); // 600 > table max
   assert.equal(rebetAmount(0, 1, limits), null);
 });
+
+const { sideError } = require('./betting.js');
+
+test('side bets: optional, whole dollars, capped, and fit with the main bet', () => {
+  assert.equal(sideError(10, { 'Perfect Pairs': '', '21+3': '' }, { bankroll: 100 }), null);
+  assert.equal(sideError(10, { 'Perfect Pairs': '5', '21+3': '5' }, { bankroll: 100 }), null);
+  assert.equal(sideError(10, { 'Perfect Pairs': '2.5' }, { bankroll: 100 }), 'Perfect Pairs must be a whole-dollar amount.');
+  assert.equal(sideError(10, { '21+3': '150' }, { bankroll: 1000 }), '21+3 is at most $100.');
+  assert.equal(sideError(95, { 'Perfect Pairs': '10' }, { bankroll: 100.5 }),
+    'Your bet and side bets come to $105; you can bet up to $100.');
+});

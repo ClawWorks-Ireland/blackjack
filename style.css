@@ -284,3 +284,9 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
 .count-result { margin: 0; font-size: 0.95rem; }
 .count-bet { margin-top: 0.2rem; font-weight: 600; }
 .count-note { font-size: 0.8rem; opacity: 0.75; }
+
+/* Side bets */
+.side-bets { display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; align-items: center; justify-content: center; font-size: 0.95rem; }
+.side-bets input { width: 4.5rem; padding: 0.4rem; font-size: 1rem; border-radius: 6px; border: none; min-height: 44px; }
+.side-pays { margin: 0; font-size: 0.8rem; opacity: 0.75; max-width: 36rem; }
+.side-result { margin: 0; font-weight: 600; }

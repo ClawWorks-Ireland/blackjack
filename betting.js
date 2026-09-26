@@ -52,7 +52,26 @@
     return betError(amount, limits) ? null : amount;
   }
 
-  const api = { CHIPS, maxBet, betError, parseBet, addChip, rebetAmount };
+  /**
+   * Check the side-bet boxes. Returns an error message or null. Each is
+   * optional (empty = no bet), whole dollars, at most `sideMax`, and the
+   * main bet plus side bets must fit in the bankroll.
+   */
+  function sideError(main, sides, { bankroll, sideMax = 100 }) {
+    let total = main;
+    for (const [name, raw] of Object.entries(sides)) {
+      if (raw === '' || raw === undefined || raw === null) continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return `${name} must be a whole-dollar amount.`;
+      if (n > sideMax) return `${name} is at most ${money(sideMax)}.`;
+      total += n;
+    }
+    const most = maxBet(bankroll);
+    if (total > most) return `Your bet and side bets come to ${money(total)}; you can bet up to ${money(most)}.`;
+    return null;
+  }
+
+  const api = { sideError, CHIPS, maxBet, betError, parseBet, addChip, rebetAmount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackBetting = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

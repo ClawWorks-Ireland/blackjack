@@ -13,7 +13,8 @@
   const COACH_KEY = 'blackjack.coach';
   const COUNT_KEY = 'blackjack.showCount';
   const GAME_KEY = 'blackjack.game'; // bankroll, shoe and any round in progress
-  const { Game, handValue } = window.Blackjack;
+  const Blackjack = window.Blackjack;
+  const { Game, handValue } = Blackjack;
   const Stats = window.BlackjackStats;
   const Sound = window.BlackjackSound;
   const Strategy = window.BlackjackStrategy;
@@ -21,6 +22,7 @@
   const Betting = window.BlackjackBetting;
   const Rules = window.BlackjackRules;
   const Counting = window.BlackjackCounting;
+  const Side = window.BlackjackSideBets;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const newGame = (bankroll, rules) =>
@@ -64,6 +66,7 @@
     countToggle: $('count-toggle'), countPanel: $('count-panel'), countRunning: $('count-running'),
     countTrue: $('count-true'), countDecks: $('count-decks'), countForm: $('count-check'),
     countGuess: $('count-guess'), countResult: $('count-result'), countBet: $('count-bet'),
+    sidePairs: $('side-pairs'), side213: $('side-213'), sideResult: $('side-result'), sideEdge: $('side-edge'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
     settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
@@ -221,13 +224,16 @@
     if (game.insuranceNet !== null) {
       text += game.insuranceNet > 0 ? ` Insurance pays ${money(game.insuranceNet)}.` : ' Insurance lost.';
     }
-    if (game.results.length > 1 || game.insuranceNet !== null) text += ` Net ${money(game.net)}.`;
+    if (game.sideBets.length) text += ` Side bets ${signedMoney(game.sideNet)}.`;
+    if (game.results.length > 1 || game.insuranceNet !== null || game.sideBets.length) {
+      text += ` Net ${signedMoney(game.net)}.`;
+    }
     return text;
   }
 
   function netOutcome() {
     if (game.tookEvenMoney) return 'win';
-    if (game.results.length === 1 && game.insuranceNet === null) {
+    if (game.results.length === 1 && game.insuranceNet === null && !game.sideBets.length) {
       return game.results[0].outcome === 'surrender' ? 'lose' : game.results[0].outcome;
     }
     return game.net > 0 ? 'win' : game.net < 0 ? 'lose' : 'push';
@@ -263,6 +269,8 @@
       net: game.net,
       insurance: game.insuranceNet,
       evenMoney: game.tookEvenMoney,
+      sideNet: game.sideNet,
+      sideWins: game.sideBets.filter((s) => s.win).map((s) => `${Side.BETS[s.bet].name} ${s.win}`),
       dealer: handValue(game.dealer).total,
       dealerCards: cardText(game.dealer),
       hands: game.hands.map((h, i) => ({
@@ -297,6 +305,10 @@
       const yours = e.hands.map((h) => `${h.cards} (${h.total})`).join(' | ');
       let text = `${yours} vs ${e.dealerCards} (${e.dealer})`;
       if (e.evenMoney) text += ' · even money';
+      if (Number.isFinite(e.sideNet) && e.sideNet !== 0) {
+        const wins = Array.isArray(e.sideWins) && e.sideWins.length ? ` (${e.sideWins.join(', ')})` : '';
+        text += ` · side bets ${signedMoney(e.sideNet)}${wins}`;
+      }
       else if (Number.isFinite(e.insurance)) text += e.insurance > 0 ? ' · insurance paid' : ' · insurance lost';
       detail.textContent = text;
       li.append(top, detail);
@@ -362,7 +374,13 @@
 
   /** Chips the finished round paid back (stakes, winnings, insurance). */
   function returnedThisRound() {
-    if (game.phase !== 'done') return 0;
+    // Side bets settle at the deal: take back any winnings until the cards land.
+    const side = game.sideBets.reduce((sum, s) => sum + (s.win ? s.stake * (s.odds + 1) : 0), 0);
+    if (game.phase !== 'done') return side;
+    return side + roundReturn();
+  }
+
+  function roundReturn() {
     const hands = game.hands.reduce((sum, h, i) => sum + h.bet + game.results[i].net, 0);
     return hands + (game.insuranceNet > 0 ? game.insurance + game.insuranceNet : 0);
   }
@@ -435,6 +453,7 @@
       els.hintText.hidden = true;
       els.coach.hidden = true;
       els.reset.hidden = true;
+      els.sideResult.hidden = true;
       els.rebetRow.hidden = true;
       els.chips.querySelectorAll('[data-chip]').forEach((b) => { b.disabled = true; });
       revealTimer = setTimeout(render, settleAt + LAND_MS);
@@ -446,6 +465,7 @@
       : `(${formatTotal(game.dealer)})`;
     els.bankroll.textContent = money(game.bankroll);
     renderCount();
+    renderSide();
 
     els.hit.disabled = !inRound;
     els.stand.disabled = !inRound;
@@ -563,14 +583,19 @@
   els.betForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const bet = Number(els.betInput.value);
-    const error = Betting.betError(bet, limits());
+    const sides = { 'Perfect Pairs': els.sidePairs.value.trim(), '21+3': els.side213.value.trim() };
+    const error = Betting.betError(bet, limits())
+      || Betting.sideError(bet, sides, { bankroll: game.bankroll, sideMax: Blackjack.SIDE_MAX });
     if (error) {
       els.message.textContent = error;
       delete els.message.dataset.outcome;
       return;
     }
     act(() => {
-      game.deal(bet);
+      game.deal(bet, {
+        pairs: Number(els.sidePairs.value) || 0,
+        t213: Number(els.side213.value) || 0,
+      });
       round++;
       coachNote = null;
       countNote = game.newShoe ? 'New shoe shuffled: the count starts again from 0.' : null;
@@ -626,6 +651,19 @@
     storage('set', COACH_KEY, coachOn ? '1' : '0');
     renderCoach();
   });
+  // --- Side bets ---
+
+  function renderSide() {
+    const bets = game.sideBets;
+    els.sideResult.hidden = !bets.length || game.phase === 'betting';
+    els.sideResult.textContent = bets.map((s) => (s.win
+      ? `${Side.describeWin(s)}: +${money(s.net)}`
+      : `${Side.BETS[s.bet].name}: no win, -${money(s.stake)}`)).join(' · ');
+    const decks = game.decks;
+    els.sideEdge.textContent = `House edge with ${decks} deck${decks > 1 ? 's' : ''}: ` +
+      `Perfect Pairs ${Side.houseEdge('pairs', decks).toFixed(2)}%, 21+3 ${Side.houseEdge('t213', decks).toFixed(2)}%`;
+  }
+
   // --- Card-counting trainer (Hi-Lo) ---
 
   /** Count panel and check result. Only called once dealt cards have landed. */
@@ -811,7 +849,8 @@
 
   document.addEventListener('keydown', (e) => {
     if (els.help.open || els.settings.open) return; // Escape closes dialogs natively
-    if (e.target === els.betInput || e.target === els.countGuess || e.metaKey || e.ctrlKey || e.altKey) return;
+    // Typing in any box (bet, side bets, count guess) isn't a shortcut.
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).
     // Buttons handle their own Enter, so leave those alone.
     if (e.key === 'Enter') {

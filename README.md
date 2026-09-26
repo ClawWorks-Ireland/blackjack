@@ -62,6 +62,13 @@ button starts you over with $1,000.
 - **Hint (G):** shows the basic-strategy move for the table's current
   rules and why, for example
   "Hard 16 vs dealer ace: Surrender", and highlights the button
+- **Side bets:** optional Perfect Pairs and 21+3, up to $100 each,
+  settled as soon as the cards are dealt. Perfect Pairs pays 25:1 for a
+  perfect pair, 12:1 colored and 6:1 mixed. 21+3 (your two cards and the
+  dealer's up card) pays 100:1 suited trips, 40:1 straight flush, 30:1
+  trips, 10:1 straight and 5:1 flush. The table shows each bet's exact
+  house edge for the current deck count (6.11% and 4.62% at 6 decks).
+  Results appear in the message and the hand history
 - **Card-counting trainer (Hi-Lo):** press K to show or hide the
   running count, true count and decks unseen. The dealer's hole card
   isn't counted until it's turned over, and the count restarts with each
@@ -123,22 +130,23 @@ and history; it doesn't touch the bankroll.
 | `format.js` | Money formatting ($1,002.50). No DOM code |
 | `betting.js` | Bet checks, chips and rebet amounts. No DOM code |
 | `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
-| `counting.js` | Hi-Lo running and true count from the game state. No DOM code |
+| `counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
+| `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
-| `*.test.js` | Tests for the seven DOM-free modules |
+| `*.test.js` | Tests for the eight DOM-free modules |
 | `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
-The seven DOM-free modules work in both the browser (as
+The eight DOM-free modules work in both the browser (as
 `window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
-`window.BlackjackFormat`, `window.BlackjackBetting`, `window.BlackjackRules`
-and `window.BlackjackCounting`) and Node (via `module.exports`). That's
+`window.BlackjackFormat`, `window.BlackjackBetting`, `window.BlackjackRules`,
+`window.BlackjackCounting` and `window.BlackjackSideBets`) and Node (via `module.exports`). That's
 why they can be tested without a browser.
 
 ## Not included
 
-No side bets. The index plays are the standard shoe-game (S17) values and are used for every rule set.
+The index plays are the standard shoe-game (S17) values and are used for every rule set.
 
 ## How the strategy chart was made
 

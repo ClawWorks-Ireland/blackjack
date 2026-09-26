@@ -571,3 +571,38 @@ test('rules are saved with the game; older saves load with the defaults', () => 
   assert.equal(BJ.Game.fromJSON({ ...old, payout: 2 }), null);
   assert.equal(BJ.Game.fromJSON({ ...old, h17: 'yes' }), null);
 });
+
+// --- Side bets ---
+
+test('side bets settle at the deal and add to the round net', () => {
+  // You 8h 8d (colored pair) vs dealer 9h up: 21+3 loses. Stand 16 v 9... dealer 9,7 draws 2 -> 18.
+  const g = riggedGame([c('8', '♥'), c('8', '♦'), c('9', '♣'), c('7', '♣'), c('2', '♣')]);
+  g.deal(10, { pairs: 5, t213: 5 });
+  assert.deepEqual(g.sideBets.map((s) => [s.bet, s.win, s.net]), [['pairs', 'colored pair', 60], ['t213', null, -5]]);
+  assert.equal(g.bankroll, 1000 - 10 + 55);
+  g.stand();
+  assert.equal(g.results[0].outcome, 'lose');
+  assert.equal(g.net, -10 + 55);
+  assert.equal(g.bankroll, 1045);
+});
+
+test('side bets count against the bankroll and table limits', () => {
+  const g = riggedGame([c('10'), c('9'), c('10'), c('7')], 20);
+  assert.throws(() => g.deal(15, { pairs: 10 }), /exceeds bankroll/);
+  assert.throws(() => g.deal(5, { pairs: 101 }), /at most \$100/);
+  assert.throws(() => g.deal(5, { pairs: 2.5 }), /whole dollars/);
+  assert.throws(() => g.deal(5, { craps: 1 }), /Unknown side bet/);
+  g.deal(10, { pairs: 0, t213: 10 });
+  assert.equal(g.sideBets.length, 1);
+});
+
+test('side bets survive save and restore; old saves have none', () => {
+  const g = riggedGame([c('8', '♥'), c('8', '♦'), c('9', '♣'), c('7', '♣'), c('2', '♣')]);
+  g.deal(10, { pairs: 5 });
+  const back = BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
+  assert.equal(back.sideNet, 60);
+  const old = JSON.parse(JSON.stringify(g));
+  delete old.sideBets;
+  assert.equal(BJ.Game.fromJSON(old).sideNet, 0);
+  assert.equal(BJ.Game.fromJSON({ ...old, sideBets: [{ bet: 'pairs', stake: -1, win: null, odds: 0, net: 1 }] }), null);
+});
