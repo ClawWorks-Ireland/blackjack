@@ -67,7 +67,11 @@ button starts you over with $1,000.
   isn't counted until it's turned over, and the count restarts with each
   new shoe. To practise, keep the count hidden, then press Q, type your
   running count (like +3) and press Enter to check it. Checks are scored
-  in the stats panel
+  in the stats panel. While the count is shown, the coach plays the count: the
+  Illustrious 18 and Fab 4 index plays for Hi-Lo (for example stand on 12
+  vs 3 at a true count of +2), insurance at +3 or more, and a bet ramp of
+  1, 2, 4 and 8 units at true counts up to +1, +2, +3 and +4. Hints,
+  accuracy and coach notes follow it
 - **Coach notes (C to toggle):** after an off-chart move, a note says
   what the chart recommends. Moves are still scored when notes are off
 - **Stats panel:** win rate (pushes excluded), wins, losses, pushes,
@@ -134,7 +138,7 @@ why they can be tested without a browser.
 
 ## Not included
 
-No side bets, and the coach doesn't change its advice with the count.
+No side bets. The index plays are the standard shoe-game (S17) values and are used for every rule set.
 
 ## How the strategy chart was made
 

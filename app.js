@@ -63,7 +63,7 @@
     hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
     countToggle: $('count-toggle'), countPanel: $('count-panel'), countRunning: $('count-running'),
     countTrue: $('count-true'), countDecks: $('count-decks'), countForm: $('count-check'),
-    countGuess: $('count-guess'), countResult: $('count-result'),
+    countGuess: $('count-guess'), countResult: $('count-result'), countBet: $('count-bet'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
     settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
@@ -310,18 +310,29 @@
     return `${round}:${game.phase}:${game.active}:${h ? h.cards.length : 0}`;
   }
 
+  /**
+   * The coach's advice for this decision. With the count shown, it plays
+   * the count (Illustrious 18, Fab 4, insurance at +3); otherwise basic
+   * strategy. Hints, accuracy and coach notes all use this.
+   */
   function currentAdvice() {
-    if (game.phase === 'insurance') return Strategy.insuranceAdvice(game.evenMoneyOffered);
+    const tc = countShown ? Counting.countState(game).trueCount : null;
+    if (game.phase === 'insurance') {
+      return (tc !== null && Counting.countInsurance(tc, game.evenMoneyOffered))
+        || Strategy.insuranceAdvice(game.evenMoneyOffered);
+    }
     const h = game.currentHand;
     if (!h) return null;
-    return Strategy.recommend(h.cards, game.dealer[0], {
+    const allowed = {
       canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(),
-    }, game.rules);
+    };
+    const basic = Strategy.recommend(h.cards, game.dealer[0], allowed, game.rules);
+    return tc === null ? basic : Counting.countPlay(h.cards, game.dealer[0], allowed, basic, tc);
   }
 
   const ADVICE_BUTTON = {
     hit: 'hit', stand: 'stand', double: 'double', split: 'split', surrender: 'surrender',
-    'no-insurance': 'noInsure',
+    'no-insurance': 'noInsure', insurance: 'insure',
   };
 
   function renderHint() {
@@ -329,7 +340,9 @@
     Object.values(ADVICE_BUTTON).forEach((k) => els[k].classList.remove('suggested'));
     els.hintText.hidden = !advice;
     if (!advice) return;
-    els.hintText.textContent = `Basic strategy: ${advice.label}. ${advice.reason}.`;
+    const source = advice.deviation ? 'Count play' : 'Basic strategy';
+    const basicNote = advice.basicLabel ? ` Basic strategy alone says ${advice.basicLabel}.` : '';
+    els.hintText.textContent = `${source}: ${advice.label}. ${advice.reason}.${basicNote}`;
     els[ADVICE_BUTTON[advice.action]].classList.add('suggested');
   }
 
@@ -522,8 +535,8 @@
     if (!correct) {
       const why = advice.reason.charAt(0).toLowerCase() + advice.reason.slice(1);
       const chose = (game.evenMoneyOffered && EVEN_MONEY_LABEL[move]) || MOVE_LABEL[move];
-      coachNote = `Off chart: you chose ${chose}. ` +
-        `Basic strategy says ${advice.label} (${why}).`;
+      const source = advice.deviation ? 'The count says' : 'Basic strategy says';
+      coachNote = `Off chart: you chose ${chose}. ${source} ${advice.label} (${why}).`;
     }
     stats = Stats.recordMove(stats, correct);
     if (hinted) stats = Stats.recordHint(stats, correct);
@@ -624,6 +637,11 @@
     els.countRunning.textContent = Counting.signed(s.running);
     els.countTrue.textContent = Counting.formatTrue(s.trueCount);
     els.countDecks.textContent = `${s.decksLeft.toFixed(1)} decks unseen`;
+    const betting = !(game.phase === 'player' || game.phase === 'insurance');
+    const unit = lastBet > 0 ? lastBet : game.minBet;
+    const units = Counting.betUnits(s.trueCount);
+    els.countBet.hidden = !betting;
+    els.countBet.textContent = `Count bet: ${units} unit${units > 1 ? 's' : ''} (${money(units * unit)} with a ${money(unit)} base bet)`;
     els.countResult.hidden = !countNote;
     els.countResult.textContent = countNote || '';
   }
@@ -631,7 +649,7 @@
   els.countToggle.addEventListener('click', () => {
     countShown = !countShown;
     storage('set', COUNT_KEY, countShown ? '1' : '0');
-    if (!inFlight) renderCount();
+    if (!inFlight) { renderCount(); renderHint(); }
   });
 
   els.countForm.addEventListener('submit', (e) => {

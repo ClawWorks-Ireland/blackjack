@@ -75,3 +75,64 @@ test('count guesses accept signed whole numbers only', () => {
   assert.equal(K.signed(-1), '-1');
   assert.equal(K.signed(0), '0');
 });
+
+// --- Count-based advice ---
+
+const { recommend } = require('./strategy.js');
+const ALL = { canDouble: true, canSplit: true, canSurrender: true };
+const NO_LS = { canDouble: true, canSplit: true, canSurrender: false };
+const play = (ranks, up, tc, allowed = ALL) => {
+  const cards = ranks.map((r) => c(r));
+  const basic = recommend(cards, c(up), allowed);
+  return K.countPlay(cards, c(up), allowed, basic, tc);
+};
+
+test('index plays switch at their true count', () => {
+  assert.equal(play(['10', '6'], '10', 0, NO_LS).action, 'stand');   // 16 v 10 at 0
+  assert.equal(play(['10', '6'], '10', -1, NO_LS).action, 'hit');
+  assert.equal(play(['10', '2'], '3', 2).action, 'stand');           // 12 v 3 at +2
+  assert.equal(play(['10', '2'], '3', 1.9).action, 'hit');            // rounds down
+  assert.equal(play(['10', '2'], '4', -0.5).action, 'hit');           // 12 v 4 below 0
+  assert.equal(play(['10', '2'], '4', 0).action, 'stand');
+  assert.equal(play(['7', '4'], 'A', 1).action, 'double');            // 11 v A at +1
+  assert.equal(play(['5', '4'], '2', 1).action, 'double');            // 9 v 2 at +1
+  assert.equal(play(['K', 'K'], '6', 4).action, 'split');             // tens v 6 at +4
+  assert.equal(play(['K', 'K'], '6', 3).action, 'stand');
+});
+
+test('Fab 4 surrenders, and 15 v 10 stops surrendering below 0', () => {
+  assert.equal(play(['10', '4'], '10', 3).action, 'surrender');
+  assert.equal(play(['10', '4'], '10', 2).action, 'hit');
+  assert.equal(play(['10', '5'], '9', 2).action, 'surrender');
+  assert.equal(play(['10', '5'], 'A', 1).action, 'surrender');
+  assert.equal(play(['10', '5'], '10', 0).action, 'surrender');
+  assert.equal(play(['10', '5'], '10', -1).action, 'hit');
+  // 16 v 10 with surrender available: surrender, whatever the count.
+  assert.equal(play(['10', '6'], '10', 2).action, 'surrender');
+});
+
+test('deviations only suggest moves you can make', () => {
+  const noDouble = { canDouble: false, canSplit: false, canSurrender: false };
+  assert.equal(play(['7', '4'], 'A', 5, noDouble).action, 'hit');
+  assert.equal(play(['5', '3', '3'], 'A', 5, ALL).action, 'hit');   // three cards: no double
+  assert.equal(play(['K', 'K'], '6', 5, noDouble).action, 'stand');
+});
+
+test('a deviation explains itself; basic plays pass through', () => {
+  const d = play(['10', '2'], '3', 2.4);
+  assert.ok(d.deviation);
+  assert.equal(d.reason, 'Hard 12 vs dealer 3 at true count +2.4, index +2');
+  assert.equal(d.basicLabel, 'Hit');
+  assert.ok(!play(['10', '7'], '6', 5).deviation);
+  assert.ok(!play(['A', '6'], '3', 5).deviation);                      // soft hands: basic only
+});
+
+test('insurance and even money at +3 or more', () => {
+  assert.equal(K.countInsurance(2.9), null);
+  assert.equal(K.countInsurance(3).action, 'insurance');
+  assert.equal(K.countInsurance(3.4, true).label, 'Even money');
+});
+
+test('bet ramp: 1, 2, 4, 8 units', () => {
+  assert.deepEqual([-2, 0, 1.9, 2, 3.5, 4, 9].map(K.betUnits), [1, 1, 1, 2, 4, 8, 8]);
+});
