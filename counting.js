@@ -46,9 +46,17 @@
   /** "+3", "0", "-2". */
   const signed = (n) => (n > 0 ? `+${n}` : String(n));
 
-  /** True count to one decimal: "+1.5", "0.0", "-2.3". */
+  /**
+   * True count to one decimal, rounded DOWN like the bet ramp and index
+   * plays, so what you see is on the same side of every index as what is
+   * used: 2.96 shows "+2.9" and bets as +2. "0.0", "-2.3".
+   */
   function formatTrue(tc) {
-    const r = Math.round(tc * 10) / 10;
+    // Tenths come from the fraction above the floor, so the shown value can
+    // never land on the other side of a whole number from Math.floor(tc).
+    const whole = Math.floor(tc);
+    const tenths = Math.min(9, Math.floor((tc - whole) * 10 + 1e-9)); // 1e-9 absorbs 0.3 * 10 = 2.999...
+    const r = Math.round((whole + tenths / 10) * 10) / 10;
     const s = Math.abs(r).toFixed(1);
     return r > 0 ? `+${s}` : r < 0 ? `-${s}` : '0.0';
   }
@@ -173,8 +181,11 @@
     return Math.max(0, Math.min(betUnits(tc) * base, max, afford));
   }
 
+  /** The whole-number true count bets and plays use: "+2", "0", "-1". */
+  const wholeTrue = (tc) => signed(Math.floor(tc));
+
   const api = {
-    hiLo, countState, trueCount, signed, formatTrue, parseGuess, countPlay, countInsurance, betUnits, suggestedBet,
+    wholeTrue, hiLo, countState, trueCount, signed, formatTrue, parseGuess, countPlay, countInsurance, betUnits, suggestedBet,
     INSURANCE_INDEX,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

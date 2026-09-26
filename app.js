@@ -822,7 +822,7 @@
     els.countToggle.firstChild.textContent = countShown ? 'Count shown ' : 'Count hidden ';
     els.countPanel.hidden = !countShown;
     els.countRunning.textContent = Counting.signed(s.running);
-    els.countTrue.textContent = Counting.formatTrue(s.trueCount);
+    els.countTrue.textContent = `${Counting.formatTrue(s.trueCount)} (plays as ${Counting.wholeTrue(s.trueCount)})`;
     els.countDecks.textContent = `${s.decksLeft.toFixed(1)} decks unseen`;
     // Suggested bet under the bet box: only while the count is shown, between rounds.
     const betting = !(game.phase === 'player' || game.phase === 'insurance') && !game.isBroke;

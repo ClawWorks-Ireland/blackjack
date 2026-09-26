@@ -159,3 +159,21 @@ test('B11: a unit below the table minimum, or blank, uses the minimum', () => {
   assert.equal(K.suggestedBet(3, { min: 5, unit: NaN, max: 500 }), 20);
   assert.equal(K.suggestedBet(5, { min: 5, unit: 100, max: 500 }), 500);
 });
+
+test('B12: the shown true count and the one used agree about every index', () => {
+  assert.equal(K.formatTrue(2.96), '+2.9');
+  assert.equal(K.betUnits(2.96), 2); // both below +3
+  assert.equal(K.wholeTrue(2.96), '+2');
+  assert.equal(K.formatTrue(3), '+3.0');
+  assert.equal(K.betUnits(3), 4);
+  assert.equal(K.formatTrue(2.3), '+2.3'); // no float slip to +2.2
+  assert.equal(K.formatTrue(-0.04), '-0.1');
+  assert.equal(K.wholeTrue(-0.04), '-1');
+  for (let tc = -6; tc <= 6; tc += 0.01) {
+    const shown = Number(K.formatTrue(tc));
+    assert.equal(Math.floor(shown), Math.floor(tc), `tc ${tc} shows ${shown}`);
+  }
+  for (const tc of [3 - 1e-12, 2 - 1e-12, -1e-12, 1e-12]) {
+    assert.equal(Math.floor(Number(K.formatTrue(tc))), Math.floor(tc), `edge ${tc}`);
+  }
+});
