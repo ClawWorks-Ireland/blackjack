@@ -991,6 +991,23 @@
     els.message.textContent = 'New rules are in effect with a fresh shoe. Place your bet.';
   });
 
+  // --- Phone header scroll hint ---
+  // On narrow screens the header buttons scroll sideways; fade whichever
+  // edge has more buttons past it, and show an arrow until you reach the end.
+  const top = document.getElementById('top');
+  const moreHint = document.getElementById('more-hint');
+  function updateMoreHint() {
+    const left = top.scrollLeft > 2;
+    const right = top.scrollLeft + top.clientWidth < top.scrollWidth - 2;
+    top.dataset.more = [left && 'left', right && 'right'].filter(Boolean).join(' ');
+    moreHint.hidden = !right;
+  }
+  top.addEventListener('scroll', updateMoreHint, { passive: true });
+  window.addEventListener('resize', updateMoreHint);
+  // Keyboard users tabbing to a hidden button: bring it into view.
+  top.addEventListener('focusin', (e) => e.target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
+  updateMoreHint();
+
   // --- Settings (display and sound) ---
 
   function fillPrefs() {

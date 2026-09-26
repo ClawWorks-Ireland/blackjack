@@ -364,6 +364,17 @@ body { background: radial-gradient(circle at center, var(--felt), var(--felt-dar
   .top { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; gap: 0.4rem; padding-bottom: 0.2rem;
     scrollbar-width: none; }
   .top::-webkit-scrollbar { display: none; }
+  /* Scroll hint: fade the edge that has more buttons past it, plus an arrow. */
+  .top[data-more~="right"] { -webkit-mask-image: linear-gradient(to right, #000 80%, transparent);
+    mask-image: linear-gradient(to right, #000 80%, transparent); }
+  .top[data-more~="left"] { -webkit-mask-image: linear-gradient(to left, #000 80%, transparent);
+    mask-image: linear-gradient(to left, #000 80%, transparent); }
+  .top[data-more~="left"][data-more~="right"] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent); }
+  .table { position: relative; }
+  .more-hint { position: absolute; right: 0.25rem; top: 0.9rem; z-index: 1; pointer-events: none;
+    color: var(--gold); font-size: 1.4rem; line-height: 1; }
   .top h1 { flex: 0 0 auto; font-size: 1.4rem; }
   .top button.toggle { flex: 0 0 auto; min-height: 44px; padding: 0.3rem 0.6rem; font-size: 0.85rem; }
   .rules, .side-pays { display: none; }
@@ -390,3 +401,12 @@ body { background: radial-gradient(circle at center, var(--felt), var(--felt-dar
   .player-hands:has(> :nth-child(4)) { flex-wrap: wrap; }
   .player-hands:has(> :nth-child(4)) .player-hand { flex: 0 0 calc(33.333% - 0.25rem); }
 }
+
+.more-hint { display: none; }
+@media (max-width: 600px) {
+  .more-hint:not([hidden]) { display: block; }
+}
+@media (prefers-reduced-motion: no-preference) and (max-width: 600px) {
+  .more-hint:not([hidden]) { animation: nudge 1.4s ease-in-out 2; }
+}
+@keyframes nudge { 50% { transform: translateX(4px); } }
