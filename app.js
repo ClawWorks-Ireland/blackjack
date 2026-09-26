@@ -408,7 +408,7 @@
       canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(),
     };
     const basic = Strategy.recommend(h.cards, game.dealer[0], allowed, game.rules);
-    return tc === null ? basic : Counting.countPlay(h.cards, game.dealer[0], allowed, basic, tc);
+    return tc === null ? basic : Counting.countPlay(h.cards, game.dealer[0], allowed, basic, tc, game.rules);
   }
 
   const ADVICE_BUTTON = {

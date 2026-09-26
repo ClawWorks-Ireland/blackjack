@@ -177,3 +177,25 @@ test('B12: the shown true count and the one used agree about every index', () =>
     assert.equal(Math.floor(Number(K.formatTrue(tc))), Math.floor(tc), `edge ${tc}`);
   }
 });
+
+test('N1: H17 index plays for 11 v A, 10 v A and 15 v A', () => {
+  const H17 = { decks: 6, h17: true, das: true };
+  const playH = (ranks, up, tc, allowed = ALL) => {
+    const cards = ranks.map((r) => c(r));
+    const basic = recommend(cards, c(up), allowed, H17);
+    return K.countPlay(cards, c(up), allowed, basic, tc, { h17: true });
+  };
+  // 11 v A: H17 basic doubles; hit only below -1.
+  assert.equal(playH(['7', '4'], 'A', -1).action, 'double');
+  assert.equal(playH(['7', '4'], 'A', -2).action, 'hit');
+  assert.equal(play(['7', '4'], 'A', 0).action, 'hit'); // S17: needs +1
+  // 10 v A: +3 under H17, +4 under S17.
+  assert.equal(playH(['6', '4'], 'A', 3).action, 'double');
+  assert.equal(play(['6', '4'], 'A', 3).action, 'hit');
+  // 15 v A: H17 surrenders down to -1; S17 needs +1.
+  assert.equal(playH(['10', '5'], 'A', -1).action, 'surrender');
+  assert.equal(playH(['10', '5'], 'A', -2).action, 'hit');
+  assert.equal(play(['10', '5'], 'A', 0).action, 'hit');
+  // Unchanged entries still apply under H17.
+  assert.equal(playH(['10', '6'], '10', 0, NO_LS).action, 'stand');
+});

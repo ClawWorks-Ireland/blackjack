@@ -176,7 +176,7 @@ why they can be tested without a browser.
 
 ## Not included
 
-The index plays are the standard shoe-game (S17) values and are used for every rule set.
+The index plays are the standard shoe-game values, with the H17 set (11 vs A, 10 vs A, 15 vs A) when the dealer hits soft 17. They aren't adjusted for 1 or 2 decks.
 
 ## How the strategy chart was made
 

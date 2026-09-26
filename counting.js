@@ -72,7 +72,7 @@
 
   /**
    * Index plays for Hi-Lo in a shoe game: the Illustrious 18 and the Fab 4
-   * surrenders (Don Schlesinger, Blackjack Attack), S17 values. Each entry
+   * surrenders (Don Schlesinger, Blackjack Attack), S17 values; H17 changes below. Each entry
    * is [total, dealer up (11 = ace), play, index, sense]: make the play when
    * the true count, rounded down, is >= index ('at'), or < index ('below').
    * Otherwise basic strategy stands. Pair rows use the pair's card value.
@@ -90,6 +90,15 @@
     [14, 10, 3, 'at'], [15, 9, 2, 'at'], [15, 11, 1, 'at'],
     [15, 10, 0, 'below'], // basic says surrender; below 0, don't
   ];
+  // Where the dealer hits soft 17 (H17) three indices move (Schlesinger's
+  // H17 tables): 11 vs A is a basic-strategy double, so hit only below -1;
+  // 10 vs A doubles from +3; 15 vs A is a basic surrender, kept down to -1.
+  const HARD_H17 = HARD.filter(([t, u]) => !(u === 11 && (t === 11 || t === 10))).concat([
+    [11, 11, 'hit', -1, 'below'], [10, 11, 'double', 3, 'at'],
+  ]);
+  const SURRENDERS_H17 = SURRENDERS.filter(([t, u]) => !(t === 15 && u === 11)).concat([
+    [15, 11, -1, 'below'], // basic H17 surrenders 15 vs A; below -1, don't
+  ]);
   const INSURANCE_INDEX = 3;
 
   const upName = (up) => (up === 11 ? 'ace' : String(up));
@@ -101,7 +110,9 @@
    * and returns an index play when one applies, else `basic` unchanged.
    * Only moves you can actually make are suggested.
    */
-  function countPlay(cards, upcard, allowed, basic, tc) {
+  function countPlay(cards, upcard, allowed, basic, tc, { h17 = false } = {}) {
+    const HARD_SET = h17 ? HARD_H17 : HARD;
+    const SURR_SET = h17 ? SURRENDERS_H17 : SURRENDERS;
     const t = Math.floor(tc);
     const up = BJ.cardValue(upcard);
     const { total, soft } = BJ.handValue(cards);
@@ -115,7 +126,7 @@
     const isPair = twoCards && cards[0].rank === cards[1].rank;
 
     if (allowed.canSurrender) {
-      for (const [tot, u, index, sense] of SURRENDERS) {
+      for (const [tot, u, index, sense] of SURR_SET) {
         if (tot !== total || u !== up) continue;
         const surrender = applies(t, index, sense) === (sense === 'at');
         if (surrender && basic.action !== 'surrender') return dev('surrender', `Hard ${total}`, index);
@@ -135,7 +146,7 @@
       }
     }
 
-    for (const [tot, u, play, index, sense] of HARD) {
+    for (const [tot, u, play, index, sense] of HARD_SET) {
       if (tot !== total || u !== up || !applies(t, index, sense)) continue;
       if (play === 'double' && !(allowed.canDouble && twoCards)) continue;
       if (play === basic.action) return basic;
