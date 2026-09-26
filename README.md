@@ -109,7 +109,10 @@ button starts you over with $1,000.
   action buttons appear once the last card lands. Skipped when your
   system asks for reduced motion
 - **Phones:** the layout fits screens down to 360px wide, with touch
-  targets at least 44px tall
+  targets at least 44px tall. The header buttons scroll sideways in one
+  row, the rules line and side-bet pay text move to Rules & help, Rebet
+  and the bet box sit right under the bankroll between hands, and with
+  2-3 spots the hands sit side by side with overlapping cards
 - **Rules, payouts and shortcuts (?):** the table's current rules and
   house edge, every main-game payout, and the side-bet pay tables with
   their edges, plus the full list of shortcuts. Table rules links to it

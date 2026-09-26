@@ -354,3 +354,39 @@ body { background: radial-gradient(circle at center, var(--felt), var(--felt-dar
 /* Settings dialog */
 .prefs .row input[type="range"] { width: 12rem; accent-color: var(--gold); }
 .back-swatch { display: inline-block; width: 1.4rem; height: 2rem; border: 2px solid #fff; border-radius: 3px; vertical-align: middle; }
+
+/* Phones: fit a round (and the next bet) on one screen.
+   - Header toggles sit in one scrollable row instead of wrapping to three.
+   - The rules line and side-bet pay text move to Rules & help (?).
+   - Between hands, Rebet / the bet box come first, right under the bankroll.
+   - With 2-3 hands, cards overlap so hands sit side by side. */
+@media (max-width: 600px) {
+  .top { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; gap: 0.4rem; padding-bottom: 0.2rem;
+    scrollbar-width: none; }
+  .top::-webkit-scrollbar { display: none; }
+  .top h1 { flex: 0 0 auto; font-size: 1.4rem; }
+  .top button.toggle { flex: 0 0 auto; min-height: 44px; padding: 0.3rem 0.6rem; font-size: 0.85rem; }
+  .rules, .side-pays { display: none; }
+  .hand { min-height: 0; }
+  .controls { gap: 0.6rem; margin-top: 0.5rem; }
+  .controls > .bank { order: -6; }
+  .controls > #rebet { order: -5; }
+  .controls > .bet-form { order: -4; }
+  .controls > .chips { order: -3; }
+  .controls > .limits { order: -2; margin: 0; }
+  .message { margin: 0.5rem 0; font-size: 1.1rem; }
+
+  .player-hands:has(> :nth-child(2)) { flex-wrap: nowrap; gap: 0.25rem; }
+  .player-hands:has(> :nth-child(2)) .player-hand { flex: 1 1 0; min-width: 0; padding: 0.3rem 0.2rem; }
+  .player-hands:has(> :nth-child(2)) h2 { font-size: 0.78rem; line-height: 1.25; }
+  .player-hands:has(> :nth-child(2)) .cards { flex-wrap: nowrap; gap: 0; min-height: 69px; }
+  .player-hands:has(> :nth-child(2)) .card { width: 48px; height: 69px; flex: 0 0 auto; }
+  .player-hands:has(> :nth-child(2)) .card + .card { margin-left: -28px; }
+  .player-hands:has(> :nth-child(2)) .card .corner { font-size: 0.8rem; top: 3px; left: 4px; }
+  .player-hands:has(> :nth-child(2)) .pip { font-size: 1.3rem; }
+  /* Long hands overlap more so 5-6 cards still fit a third of the width. */
+  .player-hands:has(> :nth-child(2)) .cards:has(> :nth-child(5)) .card + .card { margin-left: -34px; }
+  /* Four or more hands (splits across spots): wrap to rows of three. */
+  .player-hands:has(> :nth-child(4)) { flex-wrap: wrap; }
+  .player-hands:has(> :nth-child(4)) .player-hand { flex: 0 0 calc(33.333% - 0.25rem); }
+}
