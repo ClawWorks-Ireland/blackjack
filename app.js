@@ -24,6 +24,7 @@
   const Rules = window.BlackjackRules;
   const Counting = window.BlackjackCounting;
   const Side = window.BlackjackSideBets;
+  const A11y = window.BlackjackA11y;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const newGame = (bankroll, rules) =>
@@ -55,6 +56,9 @@
   let coachNote = null; // feedback on your last off-chart move
   let coachOn = storage('get', COACH_KEY) !== '0'; // on unless turned off
   let inFlight = false; // dealt cards still animating onto the table
+  let pendingAnnouncement = ''; // cards dealt this change, read out once they land
+  let userActed = false; // only move focus after the player does something
+  let focusPhase = null; // phase focus was last managed for
   let revealTimer = null;
 
   const $ = (id) => document.getElementById(id);
@@ -75,6 +79,7 @@
     countGuess: $('count-guess'), countResult: $('count-result'),
     suggestRow: $('suggest-row'), suggestText: $('suggest-text'), suggestBet: $('suggest-bet'), unitInput: $('bet-unit'),
     sidePairs: $('side-pairs'), side213: $('side-213'), sideResult: $('side-result'), sideEdge: $('side-edge'),
+    announcer: $('announcer'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
     settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
@@ -167,7 +172,14 @@
     const plan = new Map();
     const step = stepMs();
     let slot = 0;
+    const owner = new Map();
+    const multi = game.hands.length > 1;
+    game.hands.forEach((h, i) => h.cards.forEach((card) => owner.set(card, multi ? `Hand ${i + 1}` : 'You')));
+    game.dealer.forEach((card) => owner.set(card, 'Dealer'));
+    const placements = [];
     const place = (card, kind = 'dealt') => {
+      const faceDown = live && card === game.dealer[1] && kind === 'dealt';
+      placements.push({ who: owner.get(card), card: faceDown ? null : card, kind });
       plan.set(card, { kind, delay: slot * step });
       Sound.play('card', (slot * step) / 1000);
       slot++;
@@ -190,7 +202,7 @@
     game.hands.forEach((h) => h.cards.forEach((card) => shown.add(card)));
     game.dealer.forEach((card) => shown.add(card));
     holeWasHidden = live && game.dealer.length > 1;
-    return { plan, settleAt: Math.max(0, slot - 1) * step };
+    return { plan, settleAt: Math.max(0, slot - 1) * step, placements };
   }
 
   function handEl(hand, i, plan, inFlight) {
@@ -438,7 +450,8 @@
     const inRound = game.phase === 'player';
     const offering = game.phase === 'insurance';
     const live = inRound || offering;
-    const { plan, settleAt } = planAnimations(live);
+    const { plan, settleAt, placements } = planAnimations(live);
+    if (placements.length) pendingAnnouncement = [pendingAnnouncement, A11y.dealAnnouncement(placements)].filter(Boolean).join(' ');
     // While a hand is in play, betting rows collapse so the actions fit on a phone.
     document.body.classList.toggle('in-hand', live);
     renderRulesText();
@@ -547,6 +560,45 @@
 
     renderStats();
     renderHistory();
+    announceCards();
+    manageFocus();
+  }
+
+  /** Read out the cards dealt since the last announcement, once they've landed. */
+  function announceCards() {
+    if (!userActed) pendingAnnouncement = ''; // don't read out a restored table on load
+    if (!pendingAnnouncement) return;
+    els.announcer.textContent = '';
+    const text = pendingAnnouncement;
+    pendingAnnouncement = '';
+    // A fresh text node after clearing makes screen readers read it again.
+    requestAnimationFrame(() => { els.announcer.textContent = text; });
+  }
+
+  const usable = (b) => b && !b.disabled && !b.closest('[hidden]') && b.offsetParent !== null;
+  const focusFirst = (list) => {
+    const b = list.find(usable);
+    if (b && document.activeElement !== b) b.focus();
+  };
+
+  /**
+   * After a deal, focus the first action you can take; after a round,
+   * focus Rebet (or Deal). Only once you've started playing, never while a
+   * dialog is open, and not when you're typing in the count box.
+   */
+  function manageFocus() {
+    if (!userActed || els.help.open || els.settings.open) return;
+    if (document.activeElement === els.countGuess) return;
+    const phase = game.phase;
+    const actions = phase === 'insurance' ? [els.insure, els.noInsure]
+      : [els.hit, els.stand, els.double, els.split, els.surrender];
+    if (phase === 'player' || phase === 'insurance') {
+      // New decision point, or focus was left on something that's gone.
+      if (focusPhase !== phase || !usable(document.activeElement)) focusFirst(actions);
+    } else if (phase === 'done' && focusPhase !== 'done') {
+      focusFirst([els.rebet, els.deal]);
+    }
+    focusPhase = phase;
   }
 
   const MOVE_LABEL = {
@@ -589,6 +641,7 @@
 
   function act(fn, cue, move) {
     if (inFlight) return; // wait for the cards to land
+    userActed = true;
     try {
       scoreMove(move);
       fn();

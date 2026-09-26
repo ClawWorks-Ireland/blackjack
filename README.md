@@ -102,6 +102,11 @@ button starts you over with $1,000.
 - **Phones:** the layout fits screens down to 360px wide, with touch
   targets at least 44px tall
 - **Keyboard play:** press ? for the full list of shortcuts
+- **Accessibility:** each card is read out by screen readers as it lands
+  ("You: 8 of spades. Dealer: a face-down card."). After a deal, focus
+  moves to the first action you can take; after a round, to Rebet or
+  Deal. Disabled buttons use a dashed outline and at least 3:1 contrast
+  rather than fading out
 
 Your bankroll, the shoe and any hand in progress are saved in the
 browser's `localStorage`, so a reload carries on where you left off. So
@@ -140,17 +145,18 @@ and history; it doesn't touch the bankroll.
 | `betting.js` | Bet checks, chips and rebet amounts. No DOM code |
 | `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
 | `counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
+| `a11y.js` | Card announcements and contrast checks. No DOM code |
 | `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
-| `*.test.js` | Tests for the eight DOM-free modules |
+| `*.test.js` | Tests for the nine DOM-free modules |
 | `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
-The eight DOM-free modules work in both the browser (as
+The nine DOM-free modules work in both the browser (as
 `window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
 `window.BlackjackFormat`, `window.BlackjackBetting`, `window.BlackjackRules`,
-`window.BlackjackCounting` and `window.BlackjackSideBets`) and Node (via `module.exports`). That's
+`window.BlackjackCounting`, `window.BlackjackSideBets` and `window.BlackjackA11y`) and Node (via `module.exports`). That's
 why they can be tested without a browser.
 
 ## Not included

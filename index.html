@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   <div class="layout">
   <main class="table">
     <header class="top">
@@ -21,13 +22,13 @@
 
     <section class="hand" aria-labelledby="dealer-label">
       <h2 id="dealer-label">Dealer <span id="dealer-total" class="total"></span></h2>
-      <div id="dealer-cards" class="cards" aria-live="polite"></div>
+      <div id="dealer-cards" class="cards"></div>
     </section>
 
     <p id="message" class="message" role="status" aria-live="polite">Place your bet to start.</p>
 
     <section class="hand" aria-label="Your hands">
-      <div id="player-hands" class="player-hands" aria-live="polite"></div>
+      <div id="player-hands" class="player-hands"></div>
     </section>
 
     <section class="controls">
@@ -187,6 +188,7 @@
   </dialog>
 
   <script src="format.js"></script>
+  <script src="a11y.js"></script>
   <script src="betting.js"></script>
   <script src="sidebets.js"></script>
   <script src="blackjack.js"></script>

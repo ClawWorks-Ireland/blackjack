@@ -2,6 +2,10 @@
   --felt: #0f5132;
   --felt-dark: #0a3a24;
   --gold: #f5c542;
+  /* Disabled controls: 7.9:1 label, 6:1+ dashed edge against the felt. */
+  --disabled-bg: #2f4a3c;
+  --disabled-fg: #e3e9e5;
+  --disabled-border: #c9d3cc;
   --text: #f8f9fa;
   --red: #c1121f;
 }
@@ -95,7 +99,7 @@ button {
   font-weight: 600;
   cursor: pointer;
 }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:disabled { background: var(--disabled-bg); color: var(--disabled-fg); border: 2px dashed var(--disabled-border); cursor: not-allowed; }
 button:focus-visible, input:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 button.link { background: transparent; color: var(--gold); text-decoration: underline; }
 kbd { font-size: 0.75rem; opacity: 0.6; margin-left: 0.2rem; }
@@ -310,3 +314,12 @@ button.suggested { box-shadow: 0 0 0 3px #fff, 0 0 14px 4px var(--gold); }
 .bank-graph svg[data-sign="up"] polyline { stroke: var(--gold); }
 .bank-graph svg[data-sign="down"] polyline { stroke: #ffb3b3; }
 .bank-graph figcaption { font-size: 0.8rem; opacity: 0.8; margin-top: 0.3rem; }
+
+/* Disabled states win over per-control colours (chips, toggles, links). */
+.table button:disabled, .stats button:disabled, dialog button:disabled {
+  background: var(--disabled-bg); color: var(--disabled-fg); border: 2px dashed var(--disabled-border); opacity: 1;
+}
+.table button.link:disabled, .stats button.link:disabled { background: transparent; border-color: transparent; text-decoration: none; }
+.table button:disabled kbd { opacity: 0.85; }
+/* Screen-reader-only live region for card announcements. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
