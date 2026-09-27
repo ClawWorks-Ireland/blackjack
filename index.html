@@ -109,6 +109,7 @@
       </div>
       <p id="hint-text" class="hint" role="status" hidden></p>
       <p id="coach" class="coach" role="status" hidden></p>
+      <p id="review" class="coach review" hidden></p>
 
       <div id="insurance" class="actions" hidden>
         <button id="insure">Take insurance <kbd>I</kbd></button>
@@ -130,6 +131,7 @@
       <div class="headline" title="Money back per $1 bet. Above 100% means you're ahead."><dt>Return <abbr title="Money back per $1 bet. Above 100% means you're ahead.">?</abbr></dt><dd id="stat-return">–</dd></div>
       <div><dt>W–L–P (hands)</dt><dd id="stat-record">0–0–0</dd></div>
       <div><dt>Blackjacks</dt><dd id="stat-blackjacks">0</dd></div>
+      <div title="Expected money given away by off-chart plays: how much of a loss was mistakes rather than luck."><dt>Mistakes cost</dt><dd id="stat-evlost">–</dd></div>
       <div><dt>Strategy accuracy</dt><dd id="stat-accuracy">–</dd></div>
       <div><dt>Hints followed</dt><dd id="stat-hints">–</dd></div>
       <div><dt>Count checks right</dt><dd id="stat-counts">–</dd></div>
@@ -326,6 +328,8 @@
   <script src="counting.js"></script>
   <script src="chart.js"></script>
   <script src="drill.js"></script>
+  <script src="ev-data.js"></script>
+  <script src="ev.js"></script>
   <script src="rules.js"></script>
   <script src="app.js"></script>
 </body>

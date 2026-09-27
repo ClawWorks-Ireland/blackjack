@@ -501,3 +501,4 @@ body { background: radial-gradient(circle at center, var(--felt), var(--felt-dar
 .count-settings { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.6rem 0; }
 .count-settings select { font: inherit; padding: 0.35rem; border-radius: 6px; min-height: 44px; }
 .cd-card { min-height: 120px; justify-content: center; }
+.review { border-left-color: #ffd43b; }

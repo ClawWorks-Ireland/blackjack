@@ -200,8 +200,18 @@ test('F7: CSV is oldest first, quotes commas and quotes, blanks missing fields',
     hist(1, 1020, { wagered: 10, dealerCards: 'A♠, "x"' }),
   ]);
   const lines = csv.trim().split('\n');
-  assert.equal(lines[0], 'round,hands,dealer,dealer_total,outcomes,wagered,net,insurance,side_bets,bankroll');
-  assert.equal(lines[1], '1,K♠ 9♦ (19),"A♠, ""x""",18,win,10,10,,,1020');
-  assert.equal(lines[2], '2,K♠ 9♦ (19),10♠ 8♥,18,win,15,-5,,-5,1015');
+  assert.equal(lines[0], 'round,hands,dealer,dealer_total,outcomes,wagered,net,insurance,side_bets,bankroll,ev_lost,mistakes');
+  assert.equal(lines[1], '1,K♠ 9♦ (19),"A♠, ""x""",18,win,10,10,,,1020,,');
+  assert.equal(lines[2], '2,K♠ 9♦ (19),10♠ 8♥,18,win,15,-5,,-5,1015,,');
   assert.equal(S.historyCSV([]).trim(), lines[0]);
+});
+
+test('F14: EV given away is tracked in dollars and as a share of money bet', () => {
+  let s = S.recordRound(S.emptyStats(), [{ outcome: 'lose' }], -100, 100);
+  s = S.recordEvLost(s, 2.8);
+  s = S.recordEvLost(s, -1); // never negative
+  assert.equal(s.evLost, 2.8);
+  assert.ok(Math.abs(S.evLostRate(s) - 0.028) < 1e-12);
+  assert.equal(S.evLostRate(S.emptyStats()), null);
+  assert.equal(S.parseStats(JSON.stringify({ wins: 1 })).evLost, 0);
 });

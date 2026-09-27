@@ -16,6 +16,7 @@
       hintsShown: 0, hintsFollowed: 0, movesScored: 0, movesCorrect: 0,
       countChecks: 0, countCorrect: 0, wagered: 0, wageredNet: 0,
       misses: {}, // off-chart moves by chart cell, "hard 12|3" -> count
+      evLost: 0, // expected dollars given away by off-chart plays (F14)
     };
   }
 
@@ -64,6 +65,16 @@
       movesScored: stats.movesScored + 1,
       movesCorrect: stats.movesCorrect + (correct ? 1 : 0),
     };
+  }
+
+  /** Add the expected cost of a mistake, in dollars (does not mutate). */
+  function recordEvLost(stats, dollars) {
+    return { ...stats, evLost: stats.evLost + Math.max(0, dollars) };
+  }
+
+  /** Expected dollars lost to mistakes as a share of money wagered, or null. */
+  function evLostRate(stats) {
+    return stats.wagered > 0 ? stats.evLost / stats.wagered : null;
   }
 
   /** Count an off-chart move in chart cell `key` (does not mutate). */
@@ -170,7 +181,7 @@
   }
 
   const CSV_COLUMNS = ['round', 'hands', 'dealer', 'dealer_total', 'outcomes', 'wagered', 'net', 'insurance',
-    'side_bets', 'bankroll'];
+    'side_bets', 'bankroll', 'ev_lost', 'mistakes'];
 
   /** One CSV field: quoted when it holds a comma, quote or newline. */
   function csvField(v) {
@@ -191,13 +202,15 @@
       e.evenMoney ? 'even money' : Number.isFinite(e.insurance) ? e.insurance : '',
       Number.isFinite(e.sideNet) && e.sideNet !== 0 ? e.sideNet : '',
       e.bankroll,
+      Number.isFinite(e.evLost) && e.evLost > 0 ? Math.round(e.evLost * 100) / 100 : '',
+      Array.isArray(e.mistakes) ? e.mistakes.join('; ') : '',
     ].map(csvField).join(','));
     return [CSV_COLUMNS.join(','), ...rows].join('\n') + '\n';
   }
 
   const api = {
     bankrollSeries, sparkPoints, historyCSV, HISTORY_SHOWN,
-    recordMiss, emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, returnRate, HISTORY_MAX, addHistory, parseHistory,
+    recordEvLost, evLostRate, recordMiss, emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, returnRate, HISTORY_MAX, addHistory, parseHistory,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackStats = api;

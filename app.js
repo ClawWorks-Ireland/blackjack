@@ -29,6 +29,8 @@
   const Prefs = window.BlackjackPrefs;
   const Chart = window.BlackjackChart;
   const Drill = window.BlackjackDrill;
+  const EV = window.BlackjackEV;
+  let roundMistakes = []; // this round's off-chart plays with their cost
   const PREFS_KEY = 'blackjack.prefs';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -79,7 +81,7 @@
     reset: $('reset'), mute: $('mute'), resetStats: $('reset-stats'), history: $('history'),
     scopeSession: $('scope-session'), scopeAll: $('scope-all'), graph: $('bank-graph'), graphLine: $('bank-line'),
     graphCaption: $('bank-caption'), exportCsv: $('export-csv'),
-    hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
+    review: $('review'), hint: $('hint'), hintText: $('hint-text'), coach: $('coach'), coachToggle: $('coach-toggle'),
     countToggle: $('count-toggle'), countPanel: $('count-panel'), countRunning: $('count-running'),
     countTrue: $('count-true'), countDecks: $('count-decks'), countForm: $('count-check'),
     countGuess: $('count-guess'), countResult: $('count-result'),
@@ -107,7 +109,7 @@
     setDefault: $('set-default'),
     stat: {
       rate: $('stat-rate'), ret: $('stat-return'), record: $('stat-record'), blackjacks: $('stat-blackjacks'),
-      accuracy: $('stat-accuracy'), hints: $('stat-hints'), counts: $('stat-counts'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
+      evlost: $('stat-evlost'), accuracy: $('stat-accuracy'), hints: $('stat-hints'), counts: $('stat-counts'), net: $('stat-net'), streak: $('stat-streak'), best: $('stat-best'), rounds: $('stat-rounds'),
     },
   };
 
@@ -323,6 +325,10 @@
     els.stat.ret.dataset.sign = ret === null ? '' : ret > 1 ? 'up' : ret < 1 ? 'down' : '';
     els.stat.record.textContent = `${stats.wins}–${stats.losses}–${stats.pushes}`;
     els.stat.blackjacks.textContent = String(stats.blackjacks);
+    const lostRate = Stats.evLostRate(stats);
+    els.stat.evlost.textContent = stats.evLost > 0 || lostRate !== null
+      ? `${money(Math.round(stats.evLost * 100) / 100)}${lostRate === null ? '' : ` (${(lostRate * 100).toFixed(2)}% of bets)`}`
+      : '–';
     const acc = Stats.accuracy(stats);
     els.stat.accuracy.textContent = acc === null ? '–'
       : `${Math.round(acc * 100)}% (${stats.movesCorrect} of ${stats.movesScored})`;
@@ -350,6 +356,8 @@
       evenMoney: game.tookEvenMoney,
       wagered: game.wagered,
       bankroll: game.bankroll,
+      mistakes: roundMistakes.map((m) => m.text),
+      evLost: roundMistakes.reduce((s, m) => s + m.dollars, 0),
       sideNet: game.sideNet,
       sideWins: game.sideBets.filter((s) => s.win).map((s) => `${Side.BETS[s.bet].name} ${s.win}`),
       dealer: handValue(game.dealer).total,
@@ -386,6 +394,9 @@
       const yours = e.hands.map((h) => `${h.cards} (${h.total})`).join(' | ');
       let text = `${yours} vs ${e.dealerCards} (${e.dealer})`;
       if (e.evenMoney) text += ' · even money';
+      if (Array.isArray(e.mistakes) && e.mistakes.length) {
+        text += ` · mistakes: ${e.mistakes.join('; ')}`;
+      }
       if (Number.isFinite(e.sideNet) && e.sideNet !== 0) {
         const wins = Array.isArray(e.sideWins) && e.sideWins.length ? ` (${e.sideWins.join(', ')})` : '';
         text += ` · side bets ${signedMoney(e.sideNet)}${wins}`;
@@ -542,6 +553,7 @@
       els.message.classList.remove('reveal');
       els.hintText.hidden = true;
       els.coach.hidden = true;
+      els.review.hidden = true;
       els.reset.hidden = true;
       els.sideResult.hidden = true;
       els.rebetRow.hidden = true;
@@ -605,6 +617,7 @@
     els.hint.disabled = !live;
     renderHint();
     renderCoach();
+    renderReview();
 
     // Broke means below the minimum bet, not just zero: $0.50 can't be bet.
     const broke = game.isBroke;
@@ -663,6 +676,16 @@
   };
   const EVEN_MONEY_LABEL = { insurance: 'Even money', 'no-insurance': 'No even money' };
 
+  /** After a round: each off-chart play and what it cost. */
+  function renderReview() {
+    const show = game.phase === 'done' && roundMistakes.length > 0;
+    els.review.hidden = !show;
+    if (!show) return;
+    const total = roundMistakes.reduce((s, m) => s + m.dollars, 0);
+    els.review.textContent = `Round review: ${roundMistakes.map((m) => m.text).join('; ')}. ` +
+      `That's ${money(Math.round(total * 100) / 100)} of expected value given away.`;
+  }
+
   function renderCoach() {
     const show = coachOn && !!coachNote;
     els.coach.hidden = !show;
@@ -688,6 +711,17 @@
     if (!correct && hand && !advice.deviation && game.phase === 'player') {
       const key = Chart.cellKey(hand.cards, game.dealer[0], game.canSplit());
       both((s) => Stats.recordMiss(s, key));
+      const priced = EV.moveCost(game.rules, key, move, {
+        canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(),
+      });
+      if (priced && priced.cost > 0) {
+        const dollars = priced.cost * hand.bet;
+        both((s) => Stats.recordEvLost(s, dollars));
+        const [row, up] = key.split('|');
+        let text = EV.describe(move, Chart.rowLabel(row), Chart.upLabel(Number(up)), priced.cost);
+        if (hand.cards.length > 2) text += ' (estimated)';
+        roundMistakes.push({ text, cost: Math.round(priced.cost * 10000) / 10000, dollars: Math.round(dollars * 100) / 100 });
+      }
     }
     if (!correct) {
       const why = advice.reason.charAt(0).toLowerCase() + advice.reason.slice(1);
@@ -736,6 +770,7 @@
       });
       round++;
       coachNote = null;
+      roundMistakes = [];
       countNote = game.newShoe ? 'New shoe shuffled: the count starts again from 0.' : null;
       lastBet = bet;
       storage('set', LAST_BET_KEY, String(bet));

@@ -120,6 +120,12 @@ button starts you over with $1,000.
   2-3 spots the hands sit side by side with overlapping cards. Held
   sideways (landscape, under 500px tall), the table sits on the left and
   the controls on the right so the cards and actions share one screen
+- **Mistake review:** after a round, each off-chart play is listed with
+  what it cost in expected value, e.g. "Stood on 16 vs 10: -2.8% of your
+  bet" (from the solver's EV table for the current rules). The stats
+  panel shows the total as "Mistakes cost" in dollars and as a share of
+  money bet, so you can tell how much of a loss was mistakes and how
+  much was luck. Mistakes also appear in the history and CSV
 - **Training drills (W):** practice that never touches your bankroll
   or stats. Strategy flashcards show a hand and a dealer card; answer
   with H, S, D, P or R and get the reason straight away. Cards lean
@@ -181,6 +187,7 @@ and history; it doesn't touch the bankroll.
 | `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
 | `counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
 | `prefs.js` | Display and sound settings, animation timing. No DOM code |
+| `ev.js`, `ev-data.js` | Mistake cost from a precomputed EV table (`tools/make_ev.js`). No DOM code |
 | `drill.js` | Flashcard picking and scoring, count drill decks. No DOM code |
 | `chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
 | `a11y.js` | Card announcements and contrast checks. No DOM code |
