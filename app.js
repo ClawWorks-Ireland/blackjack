@@ -28,6 +28,7 @@
   const A11y = window.BlackjackA11y;
   const Prefs = window.BlackjackPrefs;
   const Chart = window.BlackjackChart;
+  const Drill = window.BlackjackDrill;
   const PREFS_KEY = 'blackjack.prefs';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -91,6 +92,13 @@
     chartDialog: $('chart'), chartRules: $('chart-rules'), chartLegend: $('chart-legend'),
     chartTables: $('chart-tables'), chartMisses: $('chart-misses'), chartCountNote: $('chart-count-note'),
     chartClose: $('chart-close'), chartOpenHelp: $('chart-open-help'),
+    drillDialog: $('drill'), drillOpen: $('drill-open'), drillClose: $('drill-close'),
+    tabFlash: $('tab-flash'), tabCount: $('tab-count'), panelFlash: $('panel-flash'), panelCount: $('panel-count'),
+    flashCount: $('flash-count'), flashUp: $('flash-up'), flashHand: $('flash-hand'), flashTotal: $('flash-total'),
+    flashTc: $('flash-tc'), flashAnswers: $('flash-answers'), flashFeedback: $('flash-feedback'),
+    flashNext: $('flash-next'), flashScore: $('flash-score'),
+    cdSize: $('cd-size'), cdSpeed: $('cd-speed'), cdStart: $('cd-start'), cdCard: $('cd-card'),
+    cdProgress: $('cd-progress'), cdForm: $('cd-form'), cdGuess: $('cd-guess'), cdResult: $('cd-result'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
@@ -636,7 +644,7 @@
    * dialog is open, and not when you're typing in the count box.
    */
   function manageFocus() {
-    if (!userActed || els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open) return;
+    if (!userActed || els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open) return;
     if (document.activeElement === els.countGuess) return;
     const phase = game.phase;
     const target = A11y.focusTarget({ phase, round, focused, focusUsable: usable(document.activeElement) });
@@ -1095,6 +1103,160 @@
   els.chartClose.addEventListener('click', () => els.chartDialog.close());
   els.chartDialog.addEventListener('click', (e) => { if (e.target === els.chartDialog) els.chartDialog.close(); });
 
+  // --- Training drills (never touch bankroll or stats) ---
+
+  let flash = null; // current flashcard
+  let flashAnswered = false;
+  let flashTally = Drill.emptyTally(Date.now());
+  let advanceTimer = null;
+
+  function drillTab(which) {
+    const f = which === 'flash';
+    els.tabFlash.setAttribute('aria-selected', String(f));
+    els.tabCount.setAttribute('aria-selected', String(!f));
+    els.tabFlash.setAttribute('aria-pressed', String(f));
+    els.tabCount.setAttribute('aria-pressed', String(!f));
+    els.panelFlash.hidden = !f;
+    els.panelCount.hidden = f;
+  }
+
+  function renderFlashScore() {
+    const t = flashTally;
+    const acc = t.answered ? Math.round((t.right / t.answered) * 100) : 0;
+    els.flashScore.textContent = t.answered
+      ? `Streak ${t.streak} (best ${t.best}) · ${t.right} of ${t.answered} right (${acc}%) · ` +
+        `${Drill.perMinute(t, Date.now()).toFixed(1)} cards a minute`
+      : 'Answer with the buttons or H, S, D, P, R.';
+  }
+
+  function dealFlash() {
+    clearTimeout(advanceTimer);
+    flash = Drill.nextCard(game.rules, { misses: stats.misses, withCount: els.flashCount.checked });
+    flashAnswered = false;
+    els.flashUp.replaceChildren(cardEl(flash.upcard, false));
+    els.flashHand.replaceChildren(...flash.cards.map((c) => cardEl(c, false)));
+    els.flashTotal.textContent = `(${formatTotal(flash.cards)})`;
+    els.flashTc.hidden = flash.tc === null;
+    els.flashTc.textContent = flash.tc === null ? '' : `True count ${Counting.formatTrue(flash.tc)} (plays as ${Counting.wholeTrue(flash.tc)})`;
+    const pair = flash.cards[0].rank === flash.cards[1].rank;
+    for (const b of els.flashAnswers.querySelectorAll('button')) {
+      const a = b.dataset.answer;
+      b.disabled = (a === 'split' && !pair) || (a === 'surrender' && !game.rules.lateSurrender);
+      b.classList.remove('suggested');
+    }
+    els.flashFeedback.textContent = '';
+    delete els.flashFeedback.dataset.outcome;
+    els.flashNext.hidden = true;
+    renderFlashScore();
+    els.flashAnswers.querySelector('button:not(:disabled)').focus();
+  }
+
+  function answerFlash(answer) {
+    if (!flash || flashAnswered) return;
+    const btn = els.flashAnswers.querySelector(`[data-answer="${answer}"]`);
+    if (!btn || btn.disabled) return;
+    flashAnswered = true;
+    const { correct, want } = Drill.check(flash, answer, game.rules);
+    flashTally = Drill.tally(flashTally, correct);
+    const source = want.deviation ? 'Count play' : 'Basic strategy';
+    els.flashFeedback.dataset.outcome = correct ? 'win' : 'lose';
+    els.flashFeedback.textContent = correct
+      ? `Right: ${want.label}. ${want.reason}.`
+      : `Not quite. ${source}: ${want.label}. ${want.reason}.`;
+    els.flashAnswers.querySelector(`[data-answer="${want.action}"]`)?.classList.add('suggested');
+    renderFlashScore();
+    if (correct) advanceTimer = setTimeout(dealFlash, 900);
+    else { els.flashNext.hidden = false; els.flashNext.focus(); }
+  }
+
+  els.flashAnswers.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-answer]');
+    if (b) answerFlash(b.dataset.answer);
+  });
+  els.flashNext.addEventListener('click', dealFlash);
+  els.flashCount.addEventListener('change', dealFlash);
+
+  // Count drill
+  let cdTimer = null;
+  let cdDeck = null;
+  let cdStartedAt = 0;
+
+  function stopCountDrill() {
+    clearInterval(cdTimer);
+    cdTimer = null;
+  }
+
+  els.cdStart.addEventListener('click', () => {
+    stopCountDrill();
+    cdDeck = Drill.countDeal(Number(els.cdSize.value));
+    const every = Number(els.cdSpeed.value);
+    let i = 0;
+    els.cdForm.hidden = true;
+    els.cdResult.textContent = '';
+    delete els.cdResult.dataset.outcome;
+    cdStartedAt = Date.now();
+    const show = () => {
+      if (i >= cdDeck.cards.length) {
+        stopCountDrill();
+        els.cdCard.replaceChildren();
+        els.cdProgress.textContent = `All ${cdDeck.cards.length} cards shown. What's the running count?`;
+        els.cdForm.hidden = false;
+        els.cdGuess.value = '';
+        els.cdGuess.focus();
+        return;
+      }
+      els.cdCard.replaceChildren(cardEl(cdDeck.cards[i], false));
+      i++;
+      els.cdProgress.textContent = `Card ${i} of ${cdDeck.cards.length}`;
+    };
+    show();
+    cdTimer = setInterval(show, every);
+  });
+
+  els.cdForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!cdDeck) return;
+    const guess = Counting.parseGuess(els.cdGuess.value);
+    if (guess === null) {
+      els.cdResult.textContent = 'Enter the running count as a whole number, like +3 or -2.';
+      return;
+    }
+    const secs = (Date.now() - cdStartedAt) / 1000;
+    const right = guess === cdDeck.answer;
+    const perDeck = (secs * 52) / cdDeck.cards.length;
+    const target = Drill.COUNT_TARGET_SECONDS;
+    els.cdResult.dataset.outcome = right ? 'win' : 'lose';
+    els.cdResult.textContent = `${right ? 'Right' : 'Not quite'}: the count is ${Counting.signed(cdDeck.answer)}` +
+      `${right ? '' : `, you said ${Counting.signed(guess)}`}. ${secs.toFixed(1)} s, a pace of ${perDeck.toFixed(1)} s ` +
+      `per deck (target: under ${target} s).`;
+    els.cdForm.hidden = true;
+    els.cdStart.textContent = 'Go again';
+    els.cdStart.focus();
+  });
+
+  function openDrill() {
+    if (els.drillDialog.open) return;
+    flashTally = Drill.emptyTally(Date.now());
+    els.flashCount.checked = countShown;
+    els.drillDialog.showModal();
+    drillTab('flash');
+    dealFlash();
+  }
+
+  els.drillOpen.addEventListener('click', openDrill);
+  els.drillClose.addEventListener('click', () => els.drillDialog.close());
+  els.drillDialog.addEventListener('close', () => { stopCountDrill(); clearTimeout(advanceTimer); });
+  els.tabFlash.addEventListener('click', () => { stopCountDrill(); drillTab('flash'); dealFlash(); });
+  els.tabCount.addEventListener('click', () => { clearTimeout(advanceTimer); drillTab('count'); els.cdStart.focus(); });
+  const ANSWER_KEYS = { h: 'hit', s: 'stand', d: 'double', p: 'split', r: 'surrender' };
+  els.drillDialog.addEventListener('keydown', (e) => {
+    if (els.panelFlash.hidden || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (['INPUT', 'SELECT'].includes(e.target.tagName)) return;
+    const a = ANSWER_KEYS[e.key.toLowerCase()];
+    if (a) { e.preventDefault(); answerFlash(a); }
+    else if (e.key === 'Enter' && flashAnswered && e.target !== els.flashNext) { e.preventDefault(); dealFlash(); }
+  });
+
   // --- Settings (display and sound) ---
 
   function fillPrefs() {
@@ -1146,7 +1308,7 @@
     ]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
-      ['t', 'Table rules', els.rulesOpen], ['o', 'Settings: animation, volume, colours', els.prefsOpen],
+      ['w', 'Training drills', els.drillOpen], ['t', 'Table rules', els.rulesOpen], ['o', 'Settings: animation, volume, colours', els.prefsOpen],
       ['?', 'Rules, payouts and shortcuts', els.helpOpen], ['v', 'Strategy chart', els.chartOpenHelp],
     ]],
   ];
@@ -1217,7 +1379,7 @@
   els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
 
   document.addEventListener('keydown', (e) => {
-    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open) return; // Escape closes dialogs natively
+    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open) return; // Escape closes dialogs natively
     // Typing in any box (bet, side bets, count guess) isn't a shortcut.
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).

@@ -120,6 +120,14 @@ button starts you over with $1,000.
   2-3 spots the hands sit side by side with overlapping cards. Held
   sideways (landscape, under 500px tall), the table sits on the left and
   the controls on the right so the cards and actions share one screen
+- **Training drills (W):** practice that never touches your bankroll
+  or stats. Strategy flashcards show a hand and a dealer card; answer
+  with H, S, D, P or R and get the reason straight away. Cards lean
+  toward the cells you miss and the tricky ones (soft doubles, splits,
+  12-16), and can include a true count to drill index plays. Streak,
+  accuracy and cards a minute are shown. The count drill deals a deck,
+  half deck or 10 cards face up at 1.0, 0.5 or 0.3 s a card, then asks
+  for the running count and your pace per deck (target: under 25 s)
 - **Strategy chart (V):** the basic-strategy chart for the table's
   current rules, built from the coach so they always agree: hard totals,
   soft totals and pairs against every dealer card, colour-coded with a
@@ -173,6 +181,7 @@ and history; it doesn't touch the bankroll.
 | `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
 | `counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
 | `prefs.js` | Display and sound settings, animation timing. No DOM code |
+| `drill.js` | Flashcard picking and scoring, count drill decks. No DOM code |
 | `chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
 | `a11y.js` | Card announcements and contrast checks. No DOM code |
 | `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |

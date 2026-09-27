@@ -21,6 +21,7 @@
       <button id="mute" class="toggle" aria-pressed="false">🔊 Sound on <kbd>M</kbd></button>
       <button id="coach-toggle" class="toggle" aria-pressed="true">Coach notes on <kbd>C</kbd></button>
       <button id="count-toggle" class="toggle" aria-pressed="false">Count hidden <kbd>K</kbd></button>
+      <button id="drill-open" class="toggle" aria-haspopup="dialog">Drills <kbd>W</kbd></button>
       <button id="rules-open" class="toggle" aria-haspopup="dialog">Table rules <kbd>T</kbd></button>
       <button id="prefs-open" class="toggle" aria-haspopup="dialog">Settings <kbd>O</kbd></button>
       <button id="help-open" class="toggle" aria-haspopup="dialog">Rules &amp; help <kbd>?</kbd></button>
@@ -223,6 +224,58 @@
     </div>
   </dialog>
 
+  <dialog id="drill" class="help drill-dialog" aria-labelledby="drill-title">
+    <div class="help-body">
+      <h2 id="drill-title">Training drills</h2>
+      <p class="note">Practice only: drills don't touch your bankroll or stats.</p>
+      <div class="scope" role="tablist" aria-label="Drill">
+        <button type="button" role="tab" id="tab-flash" class="toggle" aria-selected="true" aria-controls="panel-flash">Strategy flashcards</button>
+        <button type="button" role="tab" id="tab-count" class="toggle" aria-selected="false" aria-controls="panel-count">Count drill</button>
+      </div>
+
+      <section id="panel-flash" role="tabpanel" aria-labelledby="tab-flash">
+        <label class="check"><input type="checkbox" id="flash-count"> Include count plays (a true count comes with each hand)</label>
+        <div class="flash-table">
+          <div><h3>Dealer</h3><div id="flash-up" class="cards"></div></div>
+          <div><h3>You <span id="flash-total"></span></h3><div id="flash-hand" class="cards"></div></div>
+        </div>
+        <p id="flash-tc" class="count-bet" hidden></p>
+        <div class="actions" id="flash-answers">
+          <button type="button" data-answer="hit">Hit <kbd>H</kbd></button>
+          <button type="button" data-answer="stand">Stand <kbd>S</kbd></button>
+          <button type="button" data-answer="double">Double <kbd>D</kbd></button>
+          <button type="button" data-answer="split">Split <kbd>P</kbd></button>
+          <button type="button" data-answer="surrender">Surrender <kbd>R</kbd></button>
+        </div>
+        <p id="flash-feedback" class="flash-feedback" role="status"></p>
+        <button type="button" id="flash-next" class="toggle" hidden>Next card <kbd>Enter</kbd></button>
+        <p id="flash-score" class="note"></p>
+      </section>
+
+      <section id="panel-count" role="tabpanel" aria-labelledby="tab-count" hidden>
+        <div class="count-settings">
+          <label for="cd-size">Cards
+            <select id="cd-size"><option value="52">Full deck (52)</option><option value="26">Half deck (26)</option><option value="10">10 cards</option></select>
+          </label>
+          <label for="cd-speed">Speed
+            <select id="cd-speed"><option value="1000">1.0 s per card</option><option value="500">0.5 s per card</option><option value="300">0.3 s per card</option></select>
+          </label>
+          <button type="button" id="cd-start">Start</button>
+        </div>
+        <div id="cd-card" class="cards cd-card" aria-hidden="true"></div>
+        <p id="cd-progress" class="note"></p>
+        <form id="cd-form" class="count-check" hidden novalidate>
+          <label for="cd-guess">Final count</label>
+          <input id="cd-guess" type="text" inputmode="numeric" autocomplete="off" placeholder="0" size="4">
+          <button type="submit">Check</button>
+        </form>
+        <p id="cd-result" class="flash-feedback" role="status"></p>
+      </section>
+
+      <button id="drill-close" class="link">Close</button>
+    </div>
+  </dialog>
+
   <dialog id="prefs" class="help settings prefs" aria-labelledby="prefs-title">
     <form id="prefs-form" class="help-body" method="dialog">
       <h2 id="prefs-title">Settings</h2>
@@ -272,6 +325,7 @@
   <script src="strategy.js"></script>
   <script src="counting.js"></script>
   <script src="chart.js"></script>
+  <script src="drill.js"></script>
   <script src="rules.js"></script>
   <script src="app.js"></script>
 </body>
