@@ -160,6 +160,7 @@
         <table class="paytable" id="help-payouts"><caption>Main game</caption><tbody></tbody></table>
         <table class="paytable" id="help-sides"><caption>Side bets</caption><tbody></tbody></table>
       </section>
+      <p><button type="button" id="chart-open-help" class="link">Open the strategy chart (V)</button></p>
       <h3>Keyboard shortcuts</h3>
       <div id="help-list"></div>
       <p class="note">Shortcuts only work when that button is available. Esc closes this panel.</p>
@@ -206,6 +207,20 @@
         <button type="button" id="set-payouts" class="link">See payouts</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="chart" class="help chart-dialog" aria-labelledby="chart-title">
+    <div class="help-body">
+      <h2 id="chart-title">Basic strategy chart</h2>
+      <p id="chart-rules" class="note"></p>
+      <ul id="chart-legend" class="chart-legend" aria-label="Legend"></ul>
+      <p id="chart-count-note" class="note" hidden>Cells marked • have a count play. Focus or hover one to see its index.</p>
+      <div id="chart-tables" class="chart-scroll"></div>
+      <h3>Your most missed cells</h3>
+      <ol id="chart-misses" class="chart-misses"></ol>
+      <p class="note">Your dealer card is across the top, your hand down the side. Misses count off-chart moves in all-time stats.</p>
+      <button id="chart-close" autofocus>Close</button>
+    </div>
   </dialog>
 
   <dialog id="prefs" class="help settings prefs" aria-labelledby="prefs-title">
@@ -256,6 +271,7 @@
   <script src="sound.js"></script>
   <script src="strategy.js"></script>
   <script src="counting.js"></script>
+  <script src="chart.js"></script>
   <script src="rules.js"></script>
   <script src="app.js"></script>
 </body>

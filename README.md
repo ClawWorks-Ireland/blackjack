@@ -120,6 +120,12 @@ button starts you over with $1,000.
   2-3 spots the hands sit side by side with overlapping cards. Held
   sideways (landscape, under 500px tall), the table sits on the left and
   the controls on the right so the cards and actions share one screen
+- **Strategy chart (V):** the basic-strategy chart for the table's
+  current rules, built from the coach so they always agree: hard totals,
+  soft totals and pairs against every dealer card, colour-coded with a
+  legend. With the count shown, cells with a count play are marked and
+  show their index. Cells where you've made off-chart moves are
+  outlined with a count, and your most missed cells are listed
 - **Rules, payouts and shortcuts (?):** the table's current rules and
   house edge, every main-game payout, and the side-bet pay tables with
   their edges, plus the full list of shortcuts. Table rules links to it
@@ -167,6 +173,7 @@ and history; it doesn't touch the bankroll.
 | `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
 | `counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
 | `prefs.js` | Display and sound settings, animation timing. No DOM code |
+| `chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
 | `a11y.js` | Card announcements and contrast checks. No DOM code |
 | `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |

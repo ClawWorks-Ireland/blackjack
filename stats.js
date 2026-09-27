@@ -15,6 +15,7 @@
       net: 0, bestRound: 0, worstRound: 0, streak: 0, bestStreak: 0,
       hintsShown: 0, hintsFollowed: 0, movesScored: 0, movesCorrect: 0,
       countChecks: 0, countCorrect: 0, wagered: 0, wageredNet: 0,
+      misses: {}, // off-chart moves by chart cell, "hard 12|3" -> count
     };
   }
 
@@ -65,6 +66,13 @@
     };
   }
 
+  /** Count an off-chart move in chart cell `key` (does not mutate). */
+  function recordMiss(stats, key) {
+    const misses = { ...stats.misses };
+    misses[key] = (misses[key] || 0) + 1;
+    return { ...stats, misses };
+  }
+
   /** Record one running-count check (does not mutate). */
   function recordCountCheck(stats, correct) {
     return {
@@ -107,6 +115,11 @@
       if (!data || typeof data !== 'object') return base;
       for (const key of Object.keys(base)) {
         if (Number.isFinite(data[key])) base[key] = data[key];
+      }
+      if (data.misses && typeof data.misses === 'object') {
+        for (const [k, n] of Object.entries(data.misses)) {
+          if (/^(hard|soft|pair) \d+\|\d+$/.test(k) && Number.isInteger(n) && n > 0) base.misses[k] = n;
+        }
       }
     } catch (_) { /* corrupt storage: start fresh */ }
     return base;
@@ -184,7 +197,7 @@
 
   const api = {
     bankrollSeries, sparkPoints, historyCSV, HISTORY_SHOWN,
-    emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, returnRate, HISTORY_MAX, addHistory, parseHistory,
+    recordMiss, emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, returnRate, HISTORY_MAX, addHistory, parseHistory,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackStats = api;

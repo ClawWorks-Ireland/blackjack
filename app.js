@@ -27,6 +27,7 @@
   const Side = window.BlackjackSideBets;
   const A11y = window.BlackjackA11y;
   const Prefs = window.BlackjackPrefs;
+  const Chart = window.BlackjackChart;
   const PREFS_KEY = 'blackjack.prefs';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -87,6 +88,9 @@
     prefsDialog: $('prefs'), prefsOpen: $('prefs-open'), prefsForm: $('prefs-form'), prefSpeed: $('pref-speed'),
     prefVolume: $('pref-volume'), prefVolumeValue: $('pref-volume-value'), prefTable: $('pref-table'),
     prefBack: $('pref-back'), prefsDefault: $('prefs-default'),
+    chartDialog: $('chart'), chartRules: $('chart-rules'), chartLegend: $('chart-legend'),
+    chartTables: $('chart-tables'), chartMisses: $('chart-misses'), chartCountNote: $('chart-count-note'),
+    chartClose: $('chart-close'), chartOpenHelp: $('chart-open-help'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
@@ -632,7 +636,7 @@
    * dialog is open, and not when you're typing in the count box.
    */
   function manageFocus() {
-    if (!userActed || els.help.open || els.settings.open || els.prefsDialog.open) return;
+    if (!userActed || els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open) return;
     if (document.activeElement === els.countGuess) return;
     const phase = game.phase;
     const target = A11y.focusTarget({ phase, round, focused, focusUsable: usable(document.activeElement) });
@@ -672,6 +676,11 @@
     hintFor = null;
     if (!advice) return;
     const correct = advice.action === move;
+    const hand = game.currentHand;
+    if (!correct && hand && !advice.deviation && game.phase === 'player') {
+      const key = Chart.cellKey(hand.cards, game.dealer[0], game.canSplit());
+      both((s) => Stats.recordMiss(s, key));
+    }
     if (!correct) {
       const why = advice.reason.charAt(0).toLowerCase() + advice.reason.slice(1);
       const chose = (game.evenMoneyOffered && EVEN_MONEY_LABEL[move]) || MOVE_LABEL[move];
@@ -1007,6 +1016,85 @@
   top.addEventListener('focusin', (e) => e.target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
   updateMoreHint();
 
+  // --- Strategy chart viewer ---
+
+  function renderChart() {
+    const rules = game.rules;
+    els.chartRules.textContent = Rules.describe(rules)[0];
+    els.chartLegend.replaceChildren(...Chart.LEGEND.map(([code, text]) => {
+      const li = document.createElement('li');
+      const b = document.createElement('span');
+      b.className = `cc cc-${code}`;
+      b.textContent = code;
+      li.append(b, ` ${text}`);
+      return li;
+    }));
+    const marks = countShown ? Chart.indexMarks(Counting.indexPlays(rules)) : new Map();
+    els.chartCountNote.hidden = !countShown;
+    const misses = stats.misses || {};
+    const LONG = Object.fromEntries(Chart.LEGEND);
+    els.chartTables.replaceChildren(...Chart.buildChart(rules).map((g) => {
+      const table = document.createElement('table');
+      table.className = 'strategy';
+      const cap = document.createElement('caption');
+      cap.textContent = g.title;
+      const head = document.createElement('tr');
+      const corner = document.createElement('th');
+      corner.scope = 'col';
+      corner.innerHTML = '<span class="sr-only">Your hand</span>';
+      head.append(corner, ...Chart.UPS.map((u) => {
+        const th = document.createElement('th');
+        th.scope = 'col';
+        th.textContent = Chart.upLabel(u);
+        th.setAttribute('aria-label', `Dealer ${u === 11 ? 'ace' : u}`);
+        return th;
+      }));
+      const thead = document.createElement('thead');
+      thead.append(head);
+      const tbody = document.createElement('tbody');
+      for (const r of g.rows) {
+        const tr = document.createElement('tr');
+        const th = document.createElement('th');
+        th.scope = 'row';
+        th.textContent = r.label;
+        tr.append(th);
+        for (const { up, code } of r.cells) {
+          const td = document.createElement('td');
+          td.className = `cc cc-${code}`;
+          td.textContent = code;
+          const key = `${r.row}|${up}`;
+          const notes = [LONG[code]];
+          const idx = marks.get(key);
+          if (idx) { td.classList.add('has-index'); notes.push(`count play: ${idx}`); }
+          const miss = misses[key];
+          if (miss) { td.classList.add('missed'); td.dataset.miss = String(miss); notes.push(`${miss} miss${miss > 1 ? 'es' : ''}`); }
+          td.title = notes.join('. ');
+          td.setAttribute('aria-label', `${r.label} vs ${Chart.upLabel(up)}: ${notes.join('. ')}`);
+          if (idx || miss) td.tabIndex = 0;
+          tr.append(td);
+        }
+        tbody.append(tr);
+      }
+      table.append(cap, thead, tbody);
+      return table;
+    }));
+    const top = Chart.topMisses(misses);
+    els.chartMisses.replaceChildren(...(top.length ? top.map((m) => {
+      const li = document.createElement('li');
+      li.textContent = `${m.label}: ${m.count} miss${m.count > 1 ? 'es' : ''}`;
+      return li;
+    }) : [Object.assign(document.createElement('li'), { textContent: 'No off-chart moves yet.', className: 'empty' })]));
+  }
+
+  function openChart() {
+    renderChart();
+    if (els.help.open) els.help.close();
+    if (!els.chartDialog.open) els.chartDialog.showModal();
+  }
+  els.chartOpenHelp.addEventListener('click', openChart);
+  els.chartClose.addEventListener('click', () => els.chartDialog.close());
+  els.chartDialog.addEventListener('click', (e) => { if (e.target === els.chartDialog) els.chartDialog.close(); });
+
   // --- Settings (display and sound) ---
 
   function fillPrefs() {
@@ -1059,7 +1147,7 @@
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
       ['t', 'Table rules', els.rulesOpen], ['o', 'Settings: animation, volume, colours', els.prefsOpen],
-      ['?', 'Rules, payouts and shortcuts', els.helpOpen],
+      ['?', 'Rules, payouts and shortcuts', els.helpOpen], ['v', 'Strategy chart', els.chartOpenHelp],
     ]],
   ];
   const SHORTCUTS = Object.fromEntries(
@@ -1129,7 +1217,7 @@
   els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
 
   document.addEventListener('keydown', (e) => {
-    if (els.help.open || els.settings.open || els.prefsDialog.open) return; // Escape closes dialogs natively
+    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open) return; // Escape closes dialogs natively
     // Typing in any box (bet, side bets, count guess) isn't a shortcut.
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).
@@ -1142,6 +1230,7 @@
       }
       return;
     }
+    if (e.key.toLowerCase() === 'v') { e.preventDefault(); openChart(); return; }
     const btn = SHORTCUTS[e.key.toLowerCase()];
     if (btn && !btn.disabled && !btn.closest('[hidden]')) {
       e.preventDefault();

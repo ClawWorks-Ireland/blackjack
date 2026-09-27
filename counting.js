@@ -195,8 +195,18 @@
   /** The whole-number true count bets and plays use: "+2", "0", "-1". */
   const wholeTrue = (tc) => signed(Math.floor(tc));
 
+  /** Every index play as chart cells: [{row, up, play, index, sense}]. */
+  function indexPlays({ h17 = false } = {}) {
+    const hard = (h17 ? HARD_H17 : HARD).map(([t, u, play, index, sense]) => ({ row: `hard ${t}`, up: u, play, index, sense }));
+    const pairs = PAIRS.map(([v, u, play, index, sense]) => ({ row: `pair ${v}`, up: u, play, index, sense }));
+    const surr = (h17 ? SURRENDERS_H17 : SURRENDERS).map(([t, u, index, sense]) => ({
+      row: `hard ${t}`, up: u, play: sense === 'at' ? 'surrender' : 'no surrender', index, sense,
+    }));
+    return [...hard, ...pairs, ...surr];
+  }
+
   const api = {
-    wholeTrue, hiLo, countState, trueCount, signed, formatTrue, parseGuess, countPlay, countInsurance, betUnits, suggestedBet,
+    indexPlays, wholeTrue, hiLo, countState, trueCount, signed, formatTrue, parseGuess, countPlay, countInsurance, betUnits, suggestedBet,
     INSURANCE_INDEX,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
