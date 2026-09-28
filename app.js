@@ -12,6 +12,7 @@
   const MUTE_KEY = 'blackjack.muted';
   const COACH_KEY = 'blackjack.coach';
   const COUNT_KEY = 'blackjack.showCount';
+  const SIT_KEY = 'blackjack.sitOut';
   const UNIT_KEY = 'blackjack.unit';
   const SPOTS_KEY = 'blackjack.spots';
   const GAME_KEY = 'blackjack.game'; // bankroll, shoe and any round in progress
@@ -53,6 +54,8 @@
   const both = (fn) => { stats = fn(stats); session = fn(session); };
   Sound.muted = storage('get', MUTE_KEY) === '1';
   let countShown = storage('get', COUNT_KEY) === '1'; // hidden unless turned on
+  let sitOut = storage('get', SIT_KEY) === '1'; // Wonged out: rounds are watched, not played
+  let watched = null; // the last sat-out round {seat, dealer}
   let spots = [1, 2, 3].includes(Number(storage('get', SPOTS_KEY))) ? Number(storage('get', SPOTS_KEY)) : 1;
   let countNote = null; // result of your last count check, or a new-shoe notice
 
@@ -101,6 +104,8 @@
     flashNext: $('flash-next'), flashScore: $('flash-score'),
     cdSize: $('cd-size'), cdSpeed: $('cd-speed'), cdStart: $('cd-start'), cdCard: $('cd-card'),
     cdProgress: $('cd-progress'), cdForm: $('cd-form'), cdGuess: $('cd-guess'), cdResult: $('cd-result'),
+    sitToggle: $('sit-toggle'), countPen: $('count-pen'), countWong: $('count-wong'),
+    setPen: $('set-pen'), setPenValue: $('set-pen-value'), prefWongOut: $('pref-wong-out'), prefWongIn: $('pref-wong-in'),
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
@@ -495,7 +500,7 @@
     els.clearBet.disabled = !open || !els.betInput.value;
     const one = Betting.rebetAmount(lastBet, 1, limits());
     const two = Betting.rebetAmount(lastBet, 2, limits());
-    els.rebetRow.hidden = !(open && game.phase === 'done' && lastBet > 0);
+    els.rebetRow.hidden = sitOut || !(open && game.phase === 'done' && lastBet > 0);
     els.rebet.disabled = one === null;
     els.rebet2.disabled = two === null;
     const per = spots > 1 ? ` × ${spots} spots` : '';
@@ -630,6 +635,7 @@
 
     renderStats();
     renderHistory();
+    renderWatch();
     announceCards();
     manageFocus();
   }
@@ -754,6 +760,10 @@
 
   els.betForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (sitOut) {
+      watchRound();
+      return;
+    }
     const bet = Number(els.betInput.value);
     const sides = { 'Perfect Pairs': els.sidePairs.value.trim(), '21+3': els.side213.value.trim() };
     const error = Betting.betError(bet, limits())
@@ -893,6 +903,20 @@
     els.countRunning.textContent = Counting.signed(s.running);
     els.countTrue.textContent = `${Counting.formatTrue(s.trueCount)} (plays as ${Counting.wholeTrue(s.trueCount)})`;
     els.countDecks.textContent = `${s.decksLeft.toFixed(1)} decks unseen`;
+    const shoeSize = game.decks * 52;
+    const dealtPct = Math.round(((shoeSize - game.shoe.length) / shoeSize) * 100);
+    els.countPen.textContent = `${dealtPct}% dealt, cut at ${Math.round(game.penetration * 100)}%`;
+    const betweenHands = !(game.phase === 'player' || game.phase === 'insurance');
+    const t = Math.floor(s.trueCount);
+    let wong = '';
+    if (sitOut) {
+      wong = t >= prefs.wongIn ? `Watching. Count says sit back in (true count ${Counting.signed(t)}, J).`
+        : 'Watching: rounds are dealt to an empty seat and counted; no money moves.';
+    } else if (betweenHands && t < prefs.wongOut) {
+      wong = `Count says sit out (true count ${Counting.signed(t)} is below ${Counting.signed(prefs.wongOut)}, J).`;
+    }
+    els.countWong.hidden = !wong;
+    els.countWong.textContent = wong;
     // Suggested bet under the bet box: only while the count is shown, between rounds.
     const betting = !(game.phase === 'player' || game.phase === 'insurance') && !game.isBroke;
     const units = Counting.betUnits(s.trueCount);
@@ -992,6 +1016,7 @@
       payout: Number(radio('payout').value),
       das: els.setDas.checked,
       lateSurrender: els.setLs.checked,
+      penetration: Number(els.setPen.value) / 100,
     });
   }
 
@@ -1001,12 +1026,14 @@
     els.settingsForm.querySelector(`input[name="payout"][value="${rules.payout}"]`).checked = true;
     els.setDas.checked = rules.das;
     els.setLs.checked = rules.lateSurrender;
+    els.setPen.value = String(Math.round(rules.penetration * 100));
     renderSettingsPreview();
   }
 
   /** Live house edge for what's selected, and whether it can be applied now. */
   function renderSettingsPreview() {
     const chosen = readSettings();
+    els.setPenValue.textContent = `${Math.round(chosen.penetration * 100)}%`;
     const edge = Rules.edgeText(chosen);
     const now = Rules.edgeText(game.rules);
     els.setEdge.textContent = Rules.sameRules(chosen, game.rules)
@@ -1023,6 +1050,7 @@
     els.settings.showModal();
   });
   els.settingsForm.addEventListener('change', renderSettingsPreview);
+  els.settingsForm.addEventListener('input', renderSettingsPreview);
   els.setDefault.addEventListener('click', () => fillSettings({ ...Rules.DEFAULT_RULES }));
   els.setCancel.addEventListener('click', () => els.settings.close());
   els.settings.addEventListener('click', (e) => { if (e.target === els.settings) els.settings.close(); });
@@ -1292,6 +1320,61 @@
     else if (e.key === 'Enter' && flashAnswered && e.target !== els.flashNext) { e.preventDefault(); dealFlash(); }
   });
 
+  // --- Sitting out (Wonging) ---
+
+  const seatDecide = (cards, up) => Strategy.recommend(cards, up,
+    { canDouble: cards.length === 2, canSplit: false, canSurrender: false }, game.rules).action;
+
+  /** Deal one round to an empty seat: counted, no money, no stats. */
+  function watchRound() {
+    if (inFlight || game.phase === 'player' || game.phase === 'insurance') return;
+    watched = game.watchRound(seatDecide);
+    countNote = watched.newShoe ? 'New shoe shuffled: the count starts again from 0.' : null;
+    const who = (cards) => cards.map((c) => A11y.cardName(c)).join(', ');
+    pendingAnnouncement = `Watching. Empty seat: ${who(watched.seat)}. Dealer: ${who(watched.dealer)}.`;
+    userActed = true;
+    render();
+  }
+
+  /** While sitting out, the table shows the watched round instead of your last hand. */
+  function renderWatch() {
+    els.sitToggle.setAttribute('aria-pressed', String(sitOut));
+    els.sitToggle.firstChild.textContent = sitOut ? 'Sitting out ' : 'Sit out ';
+    els.sitToggle.disabled = game.phase === 'player' || game.phase === 'insurance' || inFlight;
+    els.deal.firstChild.textContent = sitOut ? 'Watch a round ' : 'Deal ';
+    if (!sitOut) return;
+    els.rebetRow.hidden = true;
+    if (!watched) {
+      els.message.textContent = 'Sitting out. Watch rounds to keep the count, then sit back in (J).';
+      delete els.message.dataset.outcome;
+      return;
+    }
+    els.dealerCards.replaceChildren(...watched.dealer.map((c) => cardEl(c, false)));
+    els.dealerTotal.textContent = `(${formatTotal(watched.dealer)})`;
+    const h2 = document.createElement('h2');
+    h2.textContent = `Empty seat (${formatTotal(watched.seat)})`;
+    const cards = document.createElement('div');
+    cards.className = 'cards';
+    cards.append(...watched.seat.map((c) => cardEl(c, false)));
+    const wrap = document.createElement('div');
+    wrap.className = 'player-hand';
+    wrap.append(h2, cards);
+    els.playerHands.replaceChildren(wrap);
+    els.message.textContent = 'Watching: no money moved. Watch another round, or sit back in (J).';
+    delete els.message.dataset.outcome;
+    els.message.classList.remove('reveal');
+  }
+
+  els.sitToggle.addEventListener('click', () => {
+    if (els.sitToggle.disabled) return;
+    sitOut = !sitOut;
+    storage('set', SIT_KEY, sitOut ? '1' : '0');
+    watched = null;
+    shown = new WeakSet(); // redraw the table cleanly
+    render();
+    if (!sitOut) els.message.textContent = 'Back in. Place your bet.';
+  });
+
   // --- Settings (display and sound) ---
 
   function fillPrefs() {
@@ -1300,12 +1383,15 @@
     els.prefVolumeValue.textContent = `${Math.round(prefs.volume * 100)}%`;
     els.prefTable.value = prefs.table;
     els.prefBack.value = prefs.back;
+    els.prefWongOut.value = String(prefs.wongOut);
+    els.prefWongIn.value = String(prefs.wongIn);
   }
 
   function readPrefs() {
     prefs = Prefs.normalizePrefs({
       speed: els.prefSpeed.value, volume: Number(els.prefVolume.value) / 100,
       table: els.prefTable.value, back: els.prefBack.value,
+      wongOut: Number(els.prefWongOut.value), wongIn: Number(els.prefWongIn.value),
     });
     storage('set', PREFS_KEY, JSON.stringify(prefs));
     applyPrefs();
@@ -1339,7 +1425,7 @@
     ['Insurance', [['i', 'Take insurance (even money)', els.insure], ['n', 'No insurance', els.noInsure]]],
     ['Counting', [
       ['k', 'Show or hide the count', els.countToggle], ['q', 'Check your running count', els.countGuess],
-      ['b', 'Put the suggested bet in the bet box', els.suggestBet],
+      ['b', 'Put the suggested bet in the bet box', els.suggestBet], ['j', 'Sit out / sit back in', els.sitToggle],
     ]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],

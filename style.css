@@ -502,3 +502,4 @@ body { background: radial-gradient(circle at center, var(--felt), var(--felt-dar
 .count-settings select { font: inherit; padding: 0.35rem; border-radius: 6px; min-height: 44px; }
 .cd-card { min-height: 120px; justify-content: center; }
 .review { border-left-color: #ffd43b; }
+.settings fieldset input[type="number"] { width: 4rem; padding: 0.3rem; border-radius: 6px; border: none; min-height: 40px; }

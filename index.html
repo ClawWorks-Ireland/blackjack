@@ -21,6 +21,7 @@
       <button id="mute" class="toggle" aria-pressed="false">🔊 Sound on <kbd>M</kbd></button>
       <button id="coach-toggle" class="toggle" aria-pressed="true">Coach notes on <kbd>C</kbd></button>
       <button id="count-toggle" class="toggle" aria-pressed="false">Count hidden <kbd>K</kbd></button>
+      <button id="sit-toggle" class="toggle" aria-pressed="false">Sit out <kbd>J</kbd></button>
       <button id="drill-open" class="toggle" aria-haspopup="dialog">Drills <kbd>W</kbd></button>
       <button id="rules-open" class="toggle" aria-haspopup="dialog">Table rules <kbd>T</kbd></button>
       <button id="prefs-open" class="toggle" aria-haspopup="dialog">Settings <kbd>O</kbd></button>
@@ -49,6 +50,8 @@
         Running count <strong id="count-running">0</strong>
         · True count <strong id="count-true">0.0</strong>
         · <span id="count-decks">6.0 decks unseen</span>
+        · <span id="count-pen"></span>
+        <div id="count-wong" class="count-bet" hidden></div>
         <div class="count-note">Bets and plays use the true count rounded down to a whole number. With the count shown, hints and scoring use count plays.</div>
       </div>
       <form id="count-check" class="count-check bet-only" novalidate>
@@ -198,6 +201,9 @@
 
       <label class="check"><input type="checkbox" id="set-das"> Double after a split</label>
       <label class="check"><input type="checkbox" id="set-ls"> Late surrender</label>
+      <label class="row" for="set-pen">Cut card <span id="set-pen-value">75%</span>
+        <input id="set-pen" type="range" min="50" max="85" step="5" value="75">
+      </label>
 
       <p id="set-edge" class="edge" aria-live="polite"></p>
       <p id="set-note" class="note" hidden>Finish this hand to change the rules.</p>
@@ -308,6 +314,11 @@
           <option value="black">Black</option>
         </select>
       </label>
+      <fieldset>
+        <legend>Count trainer: when to sit out</legend>
+        <label for="pref-wong-out">Sit out below true count <input id="pref-wong-out" type="number" min="-5" max="2" step="1" value="-1"></label>
+        <label for="pref-wong-in">Sit back in at <input id="pref-wong-in" type="number" min="-2" max="5" step="1" value="1"></label>
+      </fieldset>
       <p class="note">Changes apply straight away and are saved in this browser. Mute is still M.</p>
       <div class="dialog-actions">
         <button type="submit" id="prefs-close">Done</button>

@@ -145,6 +145,7 @@
     get rules() {
       return {
         decks: this.decks, h17: this.h17, payout: this.payout, das: this.das, lateSurrender: this.lateSurrender,
+        penetration: this.penetration,
       };
     }
 
@@ -210,6 +211,36 @@
       });
       this.shoe = shuffle(discards, this.rng);
       this.emergencyShuffles++;
+    }
+
+    /**
+     * Sit-out ("Wong out") round: deal the dealer and an empty seat from the
+     * shoe, play the seat with `decide(cards, upcard)` (hit/stand/double;
+     * anything else stands, and a split is played as a hit), and play the
+     * dealer out. No money moves and the table (hands, results, bankroll,
+     * phase) is untouched: only the shoe changes, so the count moves just as
+     * it would at a real table. Shuffles at the cut card like deal().
+     */
+    watchRound(decide) {
+      if (this.phase === 'player' || this.phase === 'insurance') throw new Error('Round in progress');
+      const newShoe = this.cutCardReached;
+      if (newShoe) {
+        this.shoe = shuffle(createShoe(this.decks), this.rng);
+        this.shuffles++;
+      }
+      this.newShoe = newShoe;
+      const seat = [this.draw(), this.draw()];
+      const dealer = [this.draw(), this.draw()];
+      if (!isBlackjack(dealer) && !isBlackjack(seat)) {
+        for (let n = 0; n < 12 && handValue(seat).total < 21; n++) {
+          const a = decide(seat, dealer[0]);
+          if (a !== 'hit' && a !== 'double' && a !== 'split') break;
+          seat.push(this.draw());
+          if (a === 'double') break;
+        }
+        if (!isBust(seat)) while (dealerShouldHit(dealer, this.h17)) dealer.push(this.draw());
+      }
+      return { seat, dealer, newShoe };
     }
 
     /**
@@ -406,7 +437,7 @@
     toJSON() {
       return {
         bankroll: this.bankroll, decks: this.decks, minBet: this.minBet,
-        maxBet: Number.isFinite(this.maxBet) ? this.maxBet : null,
+        maxBet: Number.isFinite(this.maxBet) ? this.maxBet : null, penetration: this.penetration,
         h17: this.h17, payout: this.payout, das: this.das, lateSurrender: this.lateSurrender,
         shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
@@ -424,7 +455,7 @@
       if (!validSave(data)) return null;
       const g = new Game({
         bankroll: data.bankroll, decks: data.decks, rng,
-        minBet: data.minBet ?? 1, maxBet: data.maxBet ?? Infinity,
+        minBet: data.minBet ?? 1, maxBet: data.maxBet ?? Infinity, penetration: data.penetration ?? PENETRATION,
         h17: data.h17 ?? false, payout: data.payout ?? 1.5, das: data.das ?? true,
         lateSurrender: data.lateSurrender ?? true,
       });
@@ -468,6 +499,7 @@
     if (!Number.isInteger(d.decks) || d.decks < 1 || d.decks > 8) return false;
     // Limits were added later: older saves have neither and load with the defaults.
     if (d.minBet !== undefined && !(Number.isFinite(d.minBet) && d.minBet > 0)) return false;
+    if (d.penetration !== undefined && !(Number.isFinite(d.penetration) && d.penetration >= 0 && d.penetration < 1)) return false;
     if (d.maxBet !== undefined && d.maxBet !== null && !(Number.isFinite(d.maxBet) && d.maxBet > 0)) return false;
     for (const k of ['h17', 'das', 'lateSurrender']) if (d[k] !== undefined && !isBool(d[k])) return false;
     if (d.payout !== undefined && !PAYOUTS.includes(d.payout)) return false;

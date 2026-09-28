@@ -22,7 +22,11 @@
   'use strict';
 
   const DECKS = [1, 2, 6, 8];
-  const DEFAULT_RULES = Object.freeze({ decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true });
+  const DEFAULT_RULES = Object.freeze({
+    decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true, penetration: 0.75,
+  });
+  const PEN_MIN = 0.5;
+  const PEN_MAX = 0.85;
 
   // Percent, [decks][h17 ? 1 : 0][das ? 1 : 0].
   const BASE = {
@@ -45,6 +49,10 @@
     if (DECKS.includes(raw.decks)) r.decks = raw.decks;
     if (raw.payout === 1.5 || raw.payout === 1.2) r.payout = raw.payout;
     for (const k of ['h17', 'das', 'lateSurrender']) if (typeof raw[k] === 'boolean') r[k] = raw[k];
+    // Cut card from 50% to 85% of the shoe, in 5% steps.
+    if (Number.isFinite(raw.penetration) && raw.penetration >= PEN_MIN - 1e-9 && raw.penetration <= PEN_MAX + 1e-9) {
+      r.penetration = Math.round(raw.penetration * 20) / 20;
+    }
     return r;
   }
 
@@ -83,6 +91,7 @@
       `Blackjack pays ${r.payout === 1.5 ? '3:2' : '6:5'}`,
       r.das ? 'Double on any two cards, also after a split' : 'Double on any two cards, not after a split',
       'Split pairs up to 4 hands',
+      `Cut card at ${Math.round(r.penetration * 100)}%`,
     ];
     const second = [
       'Insurance pays 2:1',
@@ -108,7 +117,7 @@
     return rows;
   }
 
-  const api = { payoutRows, DECKS, DEFAULT_RULES, normalizeRules, houseEdge, edgeText, describe, sameRules };
+  const api = { PEN_MIN, PEN_MAX, payoutRows, DECKS, DEFAULT_RULES, normalizeRules, houseEdge, edgeText, describe, sameRules };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackRules = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

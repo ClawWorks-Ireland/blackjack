@@ -5,7 +5,7 @@ const R = require('./rules.js');
 const base = R.DEFAULT_RULES;
 
 test('default rules are the classic table', () => {
-  assert.deepEqual({ ...base }, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true });
+  assert.deepEqual({ ...base }, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true, penetration: 0.75 });
 });
 
 test('house edge for the default rules includes the cut card', () => {
@@ -48,8 +48,8 @@ test('single deck S17 with DAS still favours the player, barely, with the cut ca
 test('saved settings are validated field by field', () => {
   assert.deepEqual(R.normalizeRules(null), { ...base });
   assert.deepEqual(R.normalizeRules({ decks: 4, payout: 2, h17: 'yes' }), { ...base });
-  assert.deepEqual(R.normalizeRules({ decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false }),
-    { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false });
+  assert.deepEqual(R.normalizeRules({ decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.6 }),
+    { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.6 });
 });
 
 test('sameRules compares every setting', () => {
@@ -73,4 +73,13 @@ test('F9: payout rows follow the rules', () => {
   assert.equal(six5['Late surrender'], 'Not offered');
   assert.equal(six5['Double down'], 'Any two cards, not after a split');
   assert.ok(!Object.keys(six5).some((k) => k.startsWith('Even money')));
+});
+
+test('F15: penetration is a rule from 50% to 85%, in 5% steps', () => {
+  assert.equal(R.normalizeRules({ penetration: 0.5 }).penetration, 0.5);
+  assert.equal(R.normalizeRules({ penetration: 0.83 }).penetration, 0.85);
+  assert.equal(R.normalizeRules({ penetration: 0.9 }).penetration, 0.75);
+  assert.equal(R.normalizeRules({ penetration: 0.2 }).penetration, 0.75);
+  assert.ok(!R.sameRules(base, { ...base, penetration: 0.6 }));
+  assert.match(R.describe({ ...base, penetration: 0.6 })[0], /Cut card at 60%/);
 });

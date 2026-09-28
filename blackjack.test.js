@@ -564,10 +564,10 @@ test('surrender can be turned off', () => {
 test('rules are saved with the game; older saves load with the defaults', () => {
   const g = new BJ.Game({ decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false });
   const back = BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
-  assert.deepEqual(back.rules, { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false });
+  assert.deepEqual(back.rules, { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.75 });
   const old = JSON.parse(JSON.stringify(new BJ.Game()));
   for (const k of ['h17', 'payout', 'das', 'lateSurrender']) delete old[k];
-  assert.deepEqual(BJ.Game.fromJSON(old).rules, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true });
+  assert.deepEqual(BJ.Game.fromJSON(old).rules, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true, penetration: 0.75 });
   assert.equal(BJ.Game.fromJSON({ ...old, payout: 2 }), null);
   assert.equal(BJ.Game.fromJSON({ ...old, h17: 'yes' }), null);
 });
@@ -722,4 +722,59 @@ test('F5: two spots, one split: every hand settles and return counts every bet',
   const st = S.recordRound(S.emptyStats(), g.results, g.net, g.wagered);
   assert.deepEqual([st.hands, st.wins, st.wagered], [3, 3, 50]);
   assert.equal(S.returnRate(st), 2);
+});
+
+// --- F15: penetration and sitting out ---
+
+test('F15: the shoe is replaced at the chosen cut card (50% of 6 decks)', () => {
+  const g = new BJ.Game({ bankroll: 1e9, decks: 6, penetration: 0.5, rng: Math.random });
+  const total = 312;
+  let maxDealtAtDeal = 0;
+  let shuffles = 0;
+  for (let i = 0; i < 400; i++) {
+    const dealtBefore = total - g.shoe.length;
+    g.deal(10);
+    if (g.newShoe) shuffles++;
+    else maxDealtAtDeal = Math.max(maxDealtAtDeal, dealtBefore);
+    if (g.phase === 'insurance') g.declineInsurance();
+    while (g.phase === 'player') g.stand();
+  }
+  // A round only starts from the old shoe while fewer than 156 of 312 cards are out.
+  assert.ok(maxDealtAtDeal < 156, `started a round with ${maxDealtAtDeal} dealt`);
+  assert.ok(maxDealtAtDeal > 140, 'deals right up to the cut');
+  assert.ok(shuffles > 5);
+});
+
+test('F15: penetration is saved with the game and is part of the rules', () => {
+  const g = new BJ.Game({ penetration: 0.6 });
+  assert.equal(g.rules.penetration, 0.6);
+  assert.equal(BJ.Game.fromJSON(JSON.parse(JSON.stringify(g))).penetration, 0.6);
+  const old = JSON.parse(JSON.stringify(g));
+  delete old.penetration;
+  assert.equal(BJ.Game.fromJSON(old).penetration, 0.75);
+  assert.equal(BJ.Game.fromJSON({ ...old, penetration: 2 }), null);
+});
+
+test('F15: a sat-out round moves no money and leaves the table as it was', () => {
+  const K = require('./counting.js');
+  const g = riggedGame([c('10'), c('9'), c('10'), c('7'), c('5'), c('3'), c('K'), c('4'), c('6')]);
+  g.deal(10);
+  g.stand();
+  const snap = () => JSON.stringify({ b: g.bankroll, h: g.hands, r: g.results, d: g.dealer, p: g.phase, n: g.net });
+  const before = snap();
+  const countBefore = K.countState(g).running;
+  const w = g.watchRound(() => 'stand');
+  assert.equal(snap(), before);
+  const seen = [...w.seat, ...w.dealer].reduce((s, x) => s + K.hiLo(x), 0);
+  assert.equal(K.countState(g).running - countBefore, seen, 'the count includes the watched cards');
+  g.phase = 'player';
+  assert.throws(() => g.watchRound(() => 'stand'), /Round in progress/);
+});
+
+test('F15: the empty seat follows the decide function', () => {
+  // Seat 5,4 vs dealer 10,7; the seat hits to 12 or more: draws 2 (11), 3 (14).
+  const g = riggedGame([c('5'), c('4'), c('10'), c('7'), c('2'), c('3'), c('K')]);
+  const w = g.watchRound((cards) => (BJ.handValue(cards).total < 12 ? 'hit' : 'stand'));
+  assert.equal(BJ.handValue(w.seat).total, 14);
+  assert.equal(BJ.handValue(w.dealer).total, 17);
 });

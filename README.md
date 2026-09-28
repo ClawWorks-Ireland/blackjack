@@ -79,6 +79,12 @@ button starts you over with $1,000.
   trips, 10:1 straight and 5:1 flush. The table shows each bet's exact
   house edge for the current deck count (6.11% and 4.62% at 6 decks).
   Results appear in the message and the hand history
+- **Penetration and sitting out:** Table rules sets the cut card from
+  50% to 85% of the shoe (default 75%); the count panel shows how much
+  has been dealt. Sit out (J) deals rounds to an empty seat played by
+  basic strategy: you watch and count, no money moves, and nothing goes
+  into stats. With the count shown, the panel suggests sitting out below
+  a true count of -1 and sitting back in at +1 (both set in Settings)
 - **Card-counting trainer (Hi-Lo):** press K to show or hide the
   running count, true count and decks unseen. The dealer's hole card
   isn't counted until it's turned over, and the count restarts with each
