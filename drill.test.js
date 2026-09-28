@@ -105,3 +105,45 @@ test('F17: flashcard answers follow the rule variants', () => {
     }
   }
 });
+
+// --- B14: count drill clock ---
+
+test('B14: cards come from elapsed time, not ticks, so a late tick can\'t stretch the drill', () => {
+  const clock = D.countClock(52, 500);
+  clock.start(1000);
+  assert.equal(clock.card(1000), 0);
+  assert.equal(clock.card(1499), 0);
+  assert.equal(clock.card(1500), 1);
+  // One tick that arrives 3 s late jumps straight to the card that is due.
+  assert.equal(clock.card(1000 + 3500 + 200), 7);
+  assert.equal(clock.nextIn(1000 + 3500 + 200), 300);
+  assert.equal(clock.card(1000 + 52 * 500), 52, 'all shown on schedule');
+  assert.equal(clock.card(1000 + 99999), 52, 'never past the end');
+});
+
+test('B14: a 60 s hidden gap reports the same time as a run without it', () => {
+  const plain = D.countClock(52, 500);
+  plain.start(0);
+  const gap = D.countClock(52, 500);
+  gap.start(0);
+  gap.pause(10000);
+  assert.equal(gap.card(40000), gap.card(10000), 'no cards advance while hidden');
+  assert.equal(gap.elapsed(40000), 10000);
+  gap.resume(70000);
+  assert.equal(gap.card(70000), plain.card(10000), 'resumes on the same card');
+  // Answer 30 s after the last card would have been due.
+  assert.equal(gap.elapsed(60000 + 26000 + 3000), plain.elapsed(26000 + 3000));
+  assert.equal((gap.elapsed(89000) / 1000).toFixed(1), '29.0');
+});
+
+test('B14: pausing is idempotent and a hidden answer wait is not scored either', () => {
+  const clock = D.countClock(10, 500);
+  clock.start(0);
+  clock.pause(6000); // all 10 cards shown by 5 s; hidden while typing the answer
+  clock.pause(7000);
+  assert.equal(clock.paused, true);
+  clock.resume(300000);
+  clock.resume(301000);
+  assert.equal(clock.paused, false);
+  assert.equal(clock.elapsed(302000), 8000);
+});

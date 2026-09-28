@@ -1253,41 +1253,66 @@
   els.flashNext.addEventListener('click', dealFlash);
   els.flashCount.addEventListener('change', dealFlash);
 
-  // Count drill
+  // Count drill. Timing comes from Drill.countClock: a hidden tab pauses
+  // the drill (browsers throttle timers there), and the pause isn't scored.
   let cdTimer = null;
   let cdDeck = null;
-  let cdStartedAt = 0;
+  let cdClock = null;
+  let cdShown = -1; // index of the card on screen
+  let cdAsking = false; // all cards shown, waiting for the answer
 
   function stopCountDrill() {
-    clearInterval(cdTimer);
+    clearTimeout(cdTimer);
     cdTimer = null;
+  }
+
+  /** Show whichever card is due now, then sleep until the next one. */
+  function countTick() {
+    stopCountDrill();
+    if (!cdDeck || cdAsking || cdClock.paused) return;
+    const now = Date.now();
+    const i = cdClock.card(now);
+    if (i >= cdDeck.cards.length) {
+      cdAsking = true;
+      els.cdCard.replaceChildren();
+      els.cdProgress.textContent = `All ${cdDeck.cards.length} cards shown. What's the running count?`;
+      els.cdForm.hidden = false;
+      els.cdGuess.value = '';
+      els.cdGuess.focus();
+      return;
+    }
+    if (i !== cdShown) {
+      cdShown = i;
+      els.cdCard.replaceChildren(cardEl(cdDeck.cards[i], false));
+      els.cdProgress.textContent = `Card ${i + 1} of ${cdDeck.cards.length}`;
+    }
+    cdTimer = setTimeout(countTick, cdClock.nextIn(now));
   }
 
   els.cdStart.addEventListener('click', () => {
     stopCountDrill();
     cdDeck = Drill.countDeal(Number(els.cdSize.value));
-    const every = Number(els.cdSpeed.value);
-    let i = 0;
+    cdClock = Drill.countClock(cdDeck.cards.length, Number(els.cdSpeed.value));
+    cdShown = -1;
+    cdAsking = false;
     els.cdForm.hidden = true;
     els.cdResult.textContent = '';
     delete els.cdResult.dataset.outcome;
-    cdStartedAt = Date.now();
-    const show = () => {
-      if (i >= cdDeck.cards.length) {
-        stopCountDrill();
-        els.cdCard.replaceChildren();
-        els.cdProgress.textContent = `All ${cdDeck.cards.length} cards shown. What's the running count?`;
-        els.cdForm.hidden = false;
-        els.cdGuess.value = '';
-        els.cdGuess.focus();
-        return;
-      }
-      els.cdCard.replaceChildren(cardEl(cdDeck.cards[i], false));
-      i++;
-      els.cdProgress.textContent = `Card ${i} of ${cdDeck.cards.length}`;
-    };
-    show();
-    cdTimer = setInterval(show, every);
+    cdClock.start(Date.now());
+    countTick();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!cdDeck || !cdClock || !els.drillDialog.open) return;
+    if (document.hidden) {
+      cdClock.pause(Date.now());
+      stopCountDrill();
+      if (!cdAsking) els.cdProgress.textContent = `Paused at card ${cdShown + 1} of ${cdDeck.cards.length}: come back to continue.`;
+    } else if (cdClock.paused) {
+      cdClock.resume(Date.now());
+      if (!cdAsking && cdShown >= 0) els.cdProgress.textContent = `Card ${cdShown + 1} of ${cdDeck.cards.length}`;
+      countTick();
+    }
   });
 
   els.cdForm.addEventListener('submit', (e) => {
@@ -1298,7 +1323,7 @@
       els.cdResult.textContent = 'Enter the running count as a whole number, like +3 or -2.';
       return;
     }
-    const secs = (Date.now() - cdStartedAt) / 1000;
+    const secs = cdClock.elapsed(Date.now()) / 1000; // time away from the tab isn't counted
     const right = guess === cdDeck.answer;
     const perDeck = (secs * 52) / cdDeck.cards.length;
     const target = Drill.COUNT_TARGET_SECONDS;

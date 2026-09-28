@@ -125,9 +125,44 @@
 
   const COUNT_TARGET_SECONDS = 25; // the usual goal for a full deck
 
+  /**
+   * Count-drill clock. Which card is showing comes from the time played so
+   * far (card i is due at start + i * every), never from counting timer
+   * ticks, so a late or throttled tick can't stretch the drill. Time while
+   * paused (the tab was hidden) doesn't count toward the pace.
+   *
+   *   const clock = countClock(52, 500); clock.start(now);
+   *   clock.card(now)    -> index of the card to show (n once all are shown)
+   *   clock.nextIn(now)  -> ms until the next card is due
+   *   clock.pause(now) / clock.resume(now); clock.elapsed(now) -> ms played
+   */
+  function countClock(n, every) {
+    let startedAt = null;
+    let pausedAt = null;
+    let pausedTotal = 0;
+    const elapsed = (now) => {
+      if (startedAt === null) return 0;
+      const end = pausedAt === null ? now : pausedAt;
+      return Math.max(0, end - startedAt - pausedTotal);
+    };
+    return {
+      start(now) { startedAt = now; pausedAt = null; pausedTotal = 0; },
+      pause(now) { if (startedAt !== null && pausedAt === null) pausedAt = now; },
+      resume(now) {
+        if (pausedAt === null) return;
+        pausedTotal += now - pausedAt;
+        pausedAt = null;
+      },
+      get paused() { return pausedAt !== null; },
+      elapsed,
+      card: (now) => Math.min(n, Math.floor(elapsed(now) / every)),
+      nextIn: (now) => every - (elapsed(now) % every),
+    };
+  }
+
   const api = {
     dealRow, isTricky, cellWeights, pickCell, nextCard, expected, check,
-    emptyTally, tally, perMinute, countDeal, COUNT_TARGET_SECONDS,
+    emptyTally, tally, perMinute, countDeal, countClock, COUNT_TARGET_SECONDS,
   };
   if (node) module.exports = api;
   else root.BlackjackDrill = api;
