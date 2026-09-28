@@ -116,6 +116,7 @@
     helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
     settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
+    setDouble: $('set-double'), setRsa: $('set-rsa'), setEnhc: $('set-enhc'), setObo: $('set-obo'),
     setEdge: $('set-edge'), setNote: $('set-note'), setApply: $('set-apply'), setCancel: $('set-cancel'),
     setDefault: $('set-default'),
     stat: {
@@ -439,7 +440,7 @@
     const h = game.currentHand;
     if (!h) return null;
     const allowed = {
-      canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(),
+      canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(), canHit: game.canHit(),
     };
     const basic = Strategy.recommend(h.cards, game.dealer[0], allowed, game.rules);
     return tc === null ? basic : Counting.countPlay(h.cards, game.dealer[0], allowed, basic, tc, game.rules);
@@ -580,7 +581,7 @@
     renderCount();
     renderSide();
 
-    els.hit.disabled = !inRound;
+    els.hit.disabled = !inRound || !game.canHit();
     els.stand.disabled = !inRound;
     els.double.disabled = !game.canDouble();
     els.split.disabled = !game.canSplit();
@@ -1023,6 +1024,8 @@
       das: els.setDas.checked,
       lateSurrender: els.setLs.checked,
       penetration: Number(els.setPen.value) / 100,
+      doubleOn: els.setDouble.value, rsa: els.setRsa.checked, enhc: els.setEnhc.checked,
+      obo: els.setEnhc.checked && els.setObo.checked,
     });
   }
 
@@ -1033,6 +1036,10 @@
     els.setDas.checked = rules.das;
     els.setLs.checked = rules.lateSurrender;
     els.setPen.value = String(Math.round(rules.penetration * 100));
+    els.setDouble.value = rules.doubleOn;
+    els.setRsa.checked = rules.rsa;
+    els.setEnhc.checked = rules.enhc;
+    els.setObo.checked = rules.obo;
     renderSettingsPreview();
   }
 
@@ -1040,6 +1047,7 @@
   function renderSettingsPreview() {
     const chosen = readSettings();
     els.setPenValue.textContent = `${Math.round(chosen.penetration * 100)}%`;
+    els.setObo.disabled = !els.setEnhc.checked;
     const edge = Rules.edgeText(chosen);
     const now = Rules.edgeText(game.rules);
     els.setEdge.textContent = Rules.sameRules(chosen, game.rules)
@@ -1335,8 +1343,10 @@
   let simId = 0;
   let lastSim = null; // { key, sim } so changing only the money inputs doesn't re-simulate
 
+  /** The dialog's rules; resplitting aces, ENHC and doubling come from the table. */
   function bankRules() {
     return Rules.normalizeRules({
+      rsa: game.rules.rsa, enhc: game.rules.enhc, obo: game.rules.obo, doubleOn: game.rules.doubleOn,
       decks: Number(els.bankDecks.value), h17: els.bankH17.checked, payout: els.bank65.checked ? 1.2 : 1.5,
       das: els.bankDas.checked, lateSurrender: els.bankLs.checked, penetration: Number(els.bankPen.value) / 100,
     });

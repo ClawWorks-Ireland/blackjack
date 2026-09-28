@@ -84,6 +84,15 @@
     return total < DEALER_STAND || (h17 && total === DEALER_STAND && soft);
   }
   const PAYOUTS = [1.5, 1.2]; // 3:2 and 6:5
+  const DOUBLE_ON = ['any', '9-11', '10-11']; // any two cards, or hard 9-11 / 10-11 only
+
+  /** Whether a two-card hand may double under the table's doubling rule. */
+  function canDoubleOn(cards, doubleOn = 'any') {
+    if (doubleOn === 'any') return true;
+    const { total, soft } = handValue(cards);
+    if (soft) return false;
+    return doubleOn === '10-11' ? total === 10 || total === 11 : total >= 9 && total <= 11;
+  }
 
   /**
    * Settle one finished hand against the dealer. Returns the outcome and the
@@ -115,6 +124,7 @@
     constructor({
       bankroll = 1000, decks = 6, minBet = 1, maxBet = Infinity, penetration = PENETRATION, rng = Math.random,
       h17 = false, payout = 1.5, das = true, lateSurrender = true,
+      rsa = false, enhc = false, obo = false, doubleOn = 'any',
     } = {}) {
       this.bankroll = bankroll;
       this.decks = decks;
@@ -122,6 +132,10 @@
       this.payout = payout;
       this.das = das;
       this.lateSurrender = lateSurrender;
+      this.rsa = rsa; // resplit aces
+      this.enhc = enhc; // European no hole card: no peek, a dealer blackjack takes doubles and splits
+      this.obo = enhc && obo; // ENHC, but only the original bet is lost to a dealer blackjack
+      this.doubleOn = DOUBLE_ON.includes(doubleOn) ? doubleOn : 'any';
       this.minBet = minBet;
       this.maxBet = maxBet; // table limit
       this.penetration = penetration;
@@ -145,7 +159,7 @@
     get rules() {
       return {
         decks: this.decks, h17: this.h17, payout: this.payout, das: this.das, lateSurrender: this.lateSurrender,
-        penetration: this.penetration,
+        penetration: this.penetration, rsa: this.rsa, enhc: this.enhc, obo: this.obo, doubleOn: this.doubleOn,
       };
     }
 
@@ -257,9 +271,16 @@
       return this.phase === 'insurance' && (this.evenMoneyOffered || this.bankroll >= this.insuranceCost);
     }
 
+    /** Split aces take one card each, so they can't hit (with RSA they can still split again). */
+    canHit() {
+      const h = this.currentHand;
+      return this.phase === 'player' && !!h && !h.splitAces;
+    }
+
     canDouble() {
       const h = this.currentHand;
-      return !!h && h.cards.length === 2 && (this.das || !h.fromSplit) && this.bankroll >= h.bet;
+      return !!h && h.cards.length === 2 && !h.splitAces && (this.das || !h.fromSplit) &&
+        canDoubleOn(h.cards, this.doubleOn) && this.bankroll >= h.bet;
     }
 
     canSplit() {
@@ -337,8 +358,17 @@
       this.peek();
     }
 
-    /** Dealer checks for blackjack; settles insurance; naturals end the round. */
+    /**
+     * Dealer checks for blackjack; settles insurance; naturals end the round.
+     * Under ENHC nobody looks: play goes on and insurance settles at the end.
+     */
     peek() {
+      if (this.enhc) {
+        this.phase = 'player';
+        for (const h of this.hands) if (isNatural(h)) h.done = true;
+        this.advance();
+        return;
+      }
       const dBJ = isBlackjack(this.dealer);
       if (this.insurance > 0) {
         this.insuranceNet = dBJ ? this.insurance * 2 : -this.insurance;
@@ -356,6 +386,7 @@
 
     hit() {
       const h = this.requireHand();
+      if (!this.canHit()) throw new Error('Split aces take one card');
       h.cards.push(this.draw());
       if (handValue(h.cards).total >= 21) h.done = true;
       this.advance();
@@ -408,7 +439,13 @@
     prepare(i) {
       const h = this.hands[i];
       if (h.cards.length === 1) h.cards.push(this.draw());
+      if (h.splitAces && this.canResplitAces(h)) return; // RSA: split again or stand
       if (h.splitAces || handValue(h.cards).total >= 21) h.done = true;
+    }
+
+    canResplitAces(h) {
+      return this.rsa && h.cards.length === 2 && h.cards[1].rank === 'A' &&
+        this.hands.filter((x) => x.spot === h.spot).length < MAX_HANDS && this.bankroll >= h.bet;
     }
 
     /** Move past finished hands; once none remain, the dealer plays. */
@@ -428,9 +465,38 @@
 
     finish() {
       this.results = this.hands.map((h) => settle(h.cards, this.dealer, h.bet, { ...h, payout: this.payout }));
+      if (this.enhc) this.settleENHC();
       // Stakes were removed when placed, so return stake + net per hand.
       this.hands.forEach((h, i) => { this.bankroll += h.bet + this.results[i].net; });
       this.phase = 'done';
+    }
+
+    /**
+     * ENHC: the dealer's blackjack shows up only now. It takes the full bet
+     * of a surrendered hand (surrender is only against a non-blackjack), and
+     * with OBO a spot loses just its original bet, however much was added
+     * by doubling and splitting. Insurance settles here too.
+     */
+    settleENHC() {
+      const dBJ = isBlackjack(this.dealer);
+      if (this.insurance > 0) {
+        this.insuranceNet = dBJ ? this.insurance * 2 : -this.insurance;
+        if (dBJ) this.bankroll += this.insurance * 3;
+      }
+      if (!dBJ) return;
+      this.hands.forEach((h, i) => {
+        if (h.surrendered) this.results[i] = { outcome: 'lose', net: -h.bet };
+      });
+      if (!this.obo) return;
+      const charged = new Set();
+      this.hands.forEach((h, i) => {
+        if (isNatural(h)) return;
+        const first = !charged.has(h.spot);
+        charged.add(h.spot);
+        this.results[i] = first
+          ? { outcome: 'lose', net: -this.spotBets[h.spot] }
+          : { outcome: 'push', net: 0 };
+      });
     }
 
     /** Plain-data snapshot for saving. Restore it with Game.fromJSON. */
@@ -439,6 +505,7 @@
         bankroll: this.bankroll, decks: this.decks, minBet: this.minBet,
         maxBet: Number.isFinite(this.maxBet) ? this.maxBet : null, penetration: this.penetration,
         h17: this.h17, payout: this.payout, das: this.das, lateSurrender: this.lateSurrender,
+        rsa: this.rsa, enhc: this.enhc, obo: this.obo, doubleOn: this.doubleOn,
         shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
         insurance: this.insurance, insuranceNet: this.insuranceNet, tookEvenMoney: this.tookEvenMoney,
@@ -457,7 +524,8 @@
         bankroll: data.bankroll, decks: data.decks, rng,
         minBet: data.minBet ?? 1, maxBet: data.maxBet ?? Infinity, penetration: data.penetration ?? PENETRATION,
         h17: data.h17 ?? false, payout: data.payout ?? 1.5, das: data.das ?? true,
-        lateSurrender: data.lateSurrender ?? true,
+        lateSurrender: data.lateSurrender ?? true, rsa: data.rsa ?? false, enhc: data.enhc ?? false,
+        obo: data.obo ?? false, doubleOn: data.doubleOn ?? 'any',
       });
       const copy = (cards) => cards.map(({ rank, suit }) => ({ rank, suit }));
       g.shoe = copy(data.shoe);
@@ -501,7 +569,8 @@
     if (d.minBet !== undefined && !(Number.isFinite(d.minBet) && d.minBet > 0)) return false;
     if (d.penetration !== undefined && !(Number.isFinite(d.penetration) && d.penetration >= 0 && d.penetration < 1)) return false;
     if (d.maxBet !== undefined && d.maxBet !== null && !(Number.isFinite(d.maxBet) && d.maxBet > 0)) return false;
-    for (const k of ['h17', 'das', 'lateSurrender']) if (d[k] !== undefined && !isBool(d[k])) return false;
+    for (const k of ['h17', 'das', 'lateSurrender', 'rsa', 'enhc', 'obo']) if (d[k] !== undefined && !isBool(d[k])) return false;
+    if (d.doubleOn !== undefined && !DOUBLE_ON.includes(d.doubleOn)) return false;
     if (d.payout !== undefined && !PAYOUTS.includes(d.payout)) return false;
     if (!validCards(d.shoe) || !validCards(d.dealer)) return false;
     if (!Array.isArray(d.hands) || !d.hands.every(validHand) || d.hands.length > MAX_HANDS * MAX_SPOTS) return false;
@@ -520,7 +589,7 @@
   }
 
   const api = {
-    SUITS, RANKS, MAX_HANDS, MAX_SPOTS, PAYOUTS, SIDE_MAX, createShoe, shuffle, cardValue, handValue,
+    SUITS, RANKS, MAX_HANDS, MAX_SPOTS, PAYOUTS, DOUBLE_ON, SIDE_MAX, createShoe, shuffle, cardValue, handValue, canDoubleOn,
     isBlackjack, isBust, dealerShouldHit, settle, Game,
   };
 

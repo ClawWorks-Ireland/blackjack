@@ -76,3 +76,32 @@ test('F13: the count drill answer is the Hi-Lo sum of the cards shown', () => {
   assert.equal(D.COUNT_TARGET_SECONDS, 25);
   assert.ok(BJ.createShoe(1).length === 52);
 });
+
+test('F17: flashcard answers follow the rule variants', () => {
+  const card = (r) => ({ rank: r, suit: '♠' });
+  const flash = (a, b, up, tc = null) => ({ cards: [card(a), card(b)], upcard: card(up), tc });
+  const want = (f, rules) => D.expected(f, { decks: 6, lateSurrender: true, ...rules }).action;
+  assert.equal(want(flash('6', '5', '10'), {}), 'double');
+  assert.equal(want(flash('6', '5', '10'), { enhc: true }), 'hit');
+  assert.equal(want(flash('6', '5', '10'), { enhc: true, obo: true }), 'double');
+  assert.equal(want(flash('A', 'A', 'A'), { enhc: true }), 'hit');
+  assert.equal(want(flash('8', '8', '10'), { enhc: true }), 'surrender');
+  assert.equal(want(flash('A', '7', '4'), { doubleOn: '10-11' }), 'stand');
+  assert.equal(want(flash('5', '4', '4'), { doubleOn: '10-11' }), 'hit');
+  assert.equal(want(flash('5', '4', '4'), { doubleOn: '9-11' }), 'double');
+  // A count play can't double where the table doesn't allow it: 9 vs 2 doubles at +1.
+  assert.equal(want(flash('5', '4', '2', 3), {}), 'double');
+  assert.equal(want(flash('5', '4', '2', 3), { doubleOn: '10-11' }), 'hit');
+  // Every flashcard the drill deals is graded as the chart shows it.
+  for (const rules of [{ enhc: true }, { doubleOn: '9-11' }, { doubleOn: '10-11', enhc: true, h17: true }]) {
+    const r = { decks: 6, lateSurrender: true, ...rules };
+    const codes = new Map(Chart.buildChart(r).flatMap((g) => g.rows.flatMap((row) => row.cells.map((c) => [`${row.row}|${c.up}`, c.code]))));
+    const ACTION = { H: 'hit', S: 'stand', D: 'double', Ds: 'double', P: 'split', R: 'surrender', Rs: 'surrender', Rp: 'surrender' };
+    const g = rng(5);
+    for (let i = 0; i < 300; i++) {
+      const f = D.nextCard(r, { rng: g });
+      const key = Chart.cellKey(f.cards, f.upcard);
+      assert.equal(D.expected(f, r).action, ACTION[codes.get(key)], `${key} under ${JSON.stringify(rules)}`);
+    }
+  }
+});

@@ -110,7 +110,8 @@
    * and returns an index play when one applies, else `basic` unchanged.
    * Only moves you can actually make are suggested.
    */
-  function countPlay(cards, upcard, allowed, basic, tc, { h17 = false } = {}) {
+  function countPlay(cards, upcard, allowed, basic, tc, rules = {}) {
+    const h17 = !!rules.h17;
     const HARD_SET = h17 ? HARD_H17 : HARD;
     const SURR_SET = h17 ? SURRENDERS_H17 : SURRENDERS;
     const t = Math.floor(tc);
@@ -148,7 +149,7 @@
 
     for (const [tot, u, play, index, sense] of HARD_SET) {
       if (tot !== total || u !== up || !applies(t, index, sense)) continue;
-      if (play === 'double' && !(allowed.canDouble && twoCards)) continue;
+      if (play === 'double' && !(allowed.canDouble && twoCards && BJ.canDoubleOn(cards, rules.doubleOn || 'any'))) continue;
       if (play === basic.action) return basic;
       return dev(play, `Hard ${total}`, index);
     }

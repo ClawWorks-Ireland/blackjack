@@ -54,3 +54,34 @@ test('F14: only open plays are compared; unknown cells return null', () => {
   assert.equal(EV.moveCost(r, 'hard 4|6', 'hit'), null);
   assert.equal(EV.moveCost({ ...r, lateSurrender: false }, 'hard 16|10', 'surrender'), null);
 });
+
+test('F17: a basic-strategy move costs 0 under every rule variant (ENHC, OBO, doubling), every cell', () => {
+  const bad = [];
+  for (const decks of [1, 2, 6, 8]) for (const h17 of [false, true]) for (const das of [false, true]) {
+    for (const [enhc, obo] of [[false, false], [true, false], [true, true]]) {
+      for (const doubleOn of ['any', '9-11', '10-11']) for (const lateSurrender of [true, false]) {
+        const rules = { decks, h17, das, lateSurrender, enhc, obo, doubleOn, rsa: true };
+        for (const g of Chart.buildChart(rules)) for (const r of g.rows) for (const { up, code } of r.cells) {
+          const c = EV.moveCost(rules, `${r.row}|${up}`, ACTION[code], { canSurrender: lateSurrender });
+          if (!c || c.cost > 1e-9) bad.push(`${EV.ruleKey(rules)} ${r.row}|${up} ${code}: ${c && c.cost}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(bad.slice(0, 20), []);
+});
+
+test('F17: ENHC prices the dealer blackjack in; restricted doubling closes the double', () => {
+  const peek = { decks: 6, lateSurrender: true };
+  const enhc = { ...peek, enhc: true };
+  // 11 vs 10: doubling is right in the peek game and a mistake without a hole card.
+  assert.equal(EV.moveCost(peek, 'hard 11|10', 'double').cost, 0);
+  assert.ok(EV.moveCost(enhc, 'hard 11|10', 'double').cost > 0);
+  assert.equal(EV.moveCost({ ...enhc, obo: true }, 'hard 11|10', 'double').cost, 0, 'OBO prices like the peek game');
+  assert.ok(EV.cellEV(enhc, 'hard 16|10').surrender < -0.5, 'surrender can lose the whole bet to a blackjack');
+  assert.equal(EV.cellEV({ ...peek, doubleOn: '10-11' }, 'hard 9|4').double, undefined);
+  assert.equal(EV.moveCost({ ...peek, doubleOn: '10-11' }, 'hard 9|4', 'double'), null);
+  assert.ok(EV.cellEV({ ...peek, doubleOn: '9-11' }, 'hard 9|4').double > 0);
+  // Fewer doubles after a split makes splitting 2s worth a little less.
+  assert.ok(EV.cellEV({ ...peek, doubleOn: '10-11' }, 'pair 2|4').split < EV.cellEV(peek, 'pair 2|4').split);
+});

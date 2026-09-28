@@ -1,6 +1,10 @@
 /**
  * Basic strategy for the table's rules: 1, 2, 6 or 8 decks, dealer stands
- * or hits soft 17, double after split on or off, late surrender on or off.
+ * or hits soft 17, double after split on or off, late surrender on or off,
+ * European no hole card (ENHC) or not, and doubling on any two cards or
+ * on hard 9-11 / 10-11 only. Resplitting aces changes no decision, and
+ * ENHC with OBO (only the original bet lost to a dealer blackjack) plays
+ * exactly like the peek game.
  * Pure and DOM-free (window.BlackjackStrategy in the browser,
  * module.exports under Node).
  *
@@ -11,8 +15,9 @@
  * every rule set against tools/charts.json.
  *
  * recommend() returns the best move among those actually available, so a
- * "double" hand falls back to hit (or stand) when doubling isn't allowed,
- * and an unsplittable pair plays as its total.
+ * "double" hand falls back to hit (or stand) when doubling isn't allowed
+ * (by the moment or by the table's doubling rule), an unsplittable pair
+ * plays as its total, and split aces that can't hit stand.
  */
 (function (root) {
   'use strict';
@@ -23,7 +28,9 @@
   const LABEL = {
     hit: 'Hit', stand: 'Stand', double: 'Double', split: 'Split', surrender: 'Surrender',
   };
-  const DEFAULT_RULES = { decks: 6, h17: false, das: true };
+  const DEFAULT_RULES = { decks: 6, h17: false, das: true, enhc: false, obo: false, doubleOn: 'any' };
+  /** ENHC without OBO: a dealer blackjack takes doubles and splits, so play safer against 10 and A. */
+  const noHole = (r) => !!r.enhc && !r.obo;
 
   /** Dealer upcard as 2-11 (ace = 11, tens and faces = 10). */
   const upValue = (card) => BJ.cardValue(card);
@@ -31,14 +38,17 @@
   const inRange = (up, lo, hi) => up >= lo && up <= hi;
 
   /** What to do with a splittable pair: 'split', 'stand', or null to play the total. */
-  function pairMove(v, up, { decks, h17, das }) {
+  function pairMove(v, up, r) {
+    const { decks, h17, das, doubleOn } = r;
     const few = decks <= 2; // single and double deck
+    const enhc = noHole(r);
     switch (v) {
-      case 11: case 8: return 'split';
+      case 11: return enhc && up === 11 ? null : 'split'; // ENHC: A,A vs A plays as soft 12
+      case 8: return enhc && up >= 10 ? null : 'split';   // ENHC: hit (surrender first when allowed)
       case 10: return 'stand';
       case 9:
         if (up === 7 || up === 10) return 'stand';
-        if (up === 11) return decks === 1 && h17 && das ? 'split' : 'stand';
+        if (up === 11) return decks === 1 && h17 && das && !enhc ? 'split' : 'stand';
         return 'split';
       case 7:
         if (up <= 7) return 'split';
@@ -50,6 +60,11 @@
         return inRange(up, few ? 2 : 3, 6) ? 'split' : null;
       case 4:
         if (!das) return null; // plays as hard 8
+        if (doubleOn === '10-11') {
+          // Fewer doubles after the split: the marginal 4,4 splits go.
+          if (decks === 1 && !h17 && up === 4) return null;
+          if (decks === 8 && !h17 && up === 5) return null;
+        }
         return inRange(up, decks === 1 ? 4 : 5, 6) ? 'split' : null;
       case 3:
         if (!das) return inRange(up, 4, 7) ? 'split' : null;
@@ -78,11 +93,15 @@
     return 'hit'; // soft 12 = an unsplit pair of aces
   }
 
-  function hardMove(total, up, { decks, h17 }) {
+  function hardMove(total, up, r) {
+    const { decks, h17 } = r;
     if (total >= 17) return 'stand';
     if (total >= 13) return up <= 6 ? 'stand' : 'hit';
     if (total === 12) return inRange(up, 4, 6) ? 'stand' : 'hit';
-    if (total === 11) return up <= 10 || decks <= 2 || h17 ? 'double' : 'hit';
+    if (total === 11) {
+      if (noHole(r)) return up <= 9 ? 'double' : 'hit';
+      return up <= 10 || decks <= 2 || h17 ? 'double' : 'hit';
+    }
     if (total === 10) return up <= 9 ? 'double' : 'hit';
     if (total === 9) return inRange(up, decks <= 2 ? 2 : 3, 6) ? 'double' : 'hit';
     if (total === 8) return decks === 1 && inRange(up, 5, 6) ? 'double' : 'hit';
@@ -90,8 +109,10 @@
   }
 
   /** Late surrender spots. `pairOf` is the pair's value when it could be split. */
-  function shouldSurrender(total, soft, up, pairOf, { decks, h17, das }) {
+  function shouldSurrender(total, soft, up, pairOf, r) {
+    const { decks, h17, das } = r;
     if (soft) return false;
+    if (pairOf === 8 && noHole(r)) return up === 10 || (up === 11 && (h17 || decks > 1));
     if (pairOf === 8) return up === 11 && h17 && (decks > 2 || (decks === 2 && !das));
     if (pairOf === 7) return decks === 1 && (up === 10 || (up === 11 && h17));
     if (pairOf) return false;
@@ -105,13 +126,14 @@
   /**
    * @param {Array} cards  the player's hand
    * @param {Object} upcard  the dealer's face-up card
-   * @param {Object} allowed {canDouble, canSplit, canSurrender}
-   * @param {Object} rules {decks, h17, das}
+   * @param {Object} allowed {canDouble, canSplit, canSurrender, canHit}
+   * @param {Object} rules {decks, h17, das, enhc, obo, doubleOn}
    * @returns {{action, label, reason}}
    */
-  function recommend(cards, upcard, { canDouble = false, canSplit = false, canSurrender = false } = {},
+  function recommend(cards, upcard, { canDouble = false, canSplit = false, canSurrender = false, canHit = true } = {},
     rules = DEFAULT_RULES) {
     const r = { ...DEFAULT_RULES, ...rules };
+    canDouble = canDouble && BJ.canDoubleOn(cards, r.doubleOn);
     const up = upValue(upcard);
     const { total, soft } = BJ.handValue(cards);
     const isPair = cards.length === 2 && cards[0].rank === cards[1].rank;
@@ -133,6 +155,7 @@
     let move = soft ? softMove(total, up, r) : hardMove(total, up, r);
     if (move === 'double-or-stand') move = canDouble ? 'double' : 'stand';
     if (move === 'double' && !canDouble) move = 'hit';
+    if (move === 'hit' && !canHit) move = 'stand'; // split aces (RSA) that can't split again
     return done(move, desc);
   }
 

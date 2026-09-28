@@ -13,7 +13,14 @@
  * handled exactly, and your decisions never depend on it. The one
  * approximation: a split is valued as two independent hands, no resplit.
  *
- * Usage: node tools/solver.js [decks] [s17|h17] [das|nodas]
+ * Rule variants: `doubleOn` ('any', '9-11' or '10-11' hard totals) limits
+ * doubling, after a split too. European no hole card (ENHC) is derived
+ * from the peek values hand by hand: with probability p the dealer has
+ * blackjack and every chip you put out loses (1 for stand/hit/surrender,
+ * 2 for double or split), so EV = (1 - p) * EV(no blackjack) - p * stake.
+ * (Doubles after a split under ENHC are valued as in the peek game.)
+ *
+ * Usage: node tools/solver.js [decks] [s17|h17] [das|nodas] [enhc] [d911|d1011]
  */
 'use strict';
 
@@ -31,7 +38,15 @@ const best = (total, hasAce) => (hasAce && total + 10 <= 21 ? total + 10 : total
 const isSoft = (total, hasAce) => hasAce && total + 10 <= 21;
 const size = (c) => c.reduce((a, b) => a + b, 0);
 
-function makeSolver({ h17 = false, das = true, decks = 6 } = {}) {
+/** Whether a hand (card values, ace = 1) may double under `doubleOn`. */
+function mayDouble(cards, doubleOn = 'any') {
+  if (doubleOn === 'any') return true;
+  const total = cards.reduce((a, b) => a + b, 0);
+  if (isSoft(total, cards.includes(1))) return false;
+  return doubleOn === '10-11' ? total === 10 || total === 11 : total >= 9 && total <= 11;
+}
+
+function makeSolver({ h17 = false, das = true, decks = 6, doubleOn = 'any' } = {}) {
   const deck = fullDeck(decks);
   const dealerMemo = new Map();
   const playMemo = new Map();
@@ -149,8 +164,22 @@ function makeSolver({ h17 = false, das = true, decks = 6 } = {}) {
     const half = drawEV(up, [v], [v, v], (hand, removed) => {
       if (v === 1) return standEV(up, hand, removed); // split aces: one card
       let ev = Math.max(standEV(up, hand, removed), hitEV(up, hand, removed));
-      if (das) ev = Math.max(ev, doubleEV(up, hand, removed));
+      if (das && mayDouble(hand, doubleOn)) ev = Math.max(ev, doubleEV(up, hand, removed));
       return ev;
+    });
+    return 2 * half;
+  }
+
+  /**
+   * EV of splitting aces (both hands, one card each). With `rsa`, a hand
+   * that draws another ace may split again (one level, to three hands);
+   * deeper resplits are rare enough to leave out.
+   */
+  function splitAcesEV(up, rsa = false) {
+    const oneCard = (removed) => drawEV(up, [1], removed, (hand, r) => standEV(up, hand, r));
+    const half = drawEV(up, [1], [1, 1], (hand, removed) => {
+      const stand = standEV(up, hand, removed);
+      return rsa && hand[1] === 1 ? Math.max(stand, 2 * oneCard(removed)) : stand;
     });
     return 2 * half;
   }
@@ -168,14 +197,42 @@ function makeSolver({ h17 = false, das = true, decks = 6 } = {}) {
     return ev;
   }
 
-  return { actions, standEV };
+  return { actions, standEV, splitAcesEV };
 }
 
-/** Weighted (total-dependent) EVs for every chart row against every upcard. */
-function chart(decks, rules) {
-  const s = makeSolver({ ...rules, decks });
+/** Chance the dealer has blackjack given the up card and your two cards. */
+function dealerBJChance(deck, up, a, b) {
+  if (up !== 1 && up !== 10) return 0;
+  const c = deck.slice();
+  c[up]--;
+  c[a]--;
+  c[b]--;
+  return c[up === 1 ? 10 : 1] / size(c);
+}
+
+/** Peek-game EVs to ENHC EVs (see the header). */
+function toENHC(ev, p) {
+  const stake = { stand: 1, hit: 1, double: 2, split: 2, surrender: 1 };
+  const out = {};
+  for (const k in ev) out[k] = (1 - p) * ev[k] - p * stake[k];
+  return out;
+}
+
+/**
+ * Weighted (total-dependent) EVs for every chart row against every upcard.
+ * `rules`: {h17, das, doubleOn, enhc}. Plays that are not allowed (a double
+ * outside `doubleOn`) are left out of the cell.
+ */
+function chart(decks, rules = {}) {
+  return charts(decks, rules)[rules.enhc ? 'enhc' : 'peek'];
+}
+
+/** Both the peek and the ENHC chart from one solver run: {peek, enhc}. */
+function charts(decks, rules = {}) {
+  const doubleOn = rules.doubleOn || 'any';
+  const s = makeSolver({ h17: rules.h17, das: rules.das, doubleOn, decks });
   const deck = fullDeck(decks);
-  const rows = {};
+  const both = { peek: {}, enhc: {} };
   for (const up of VALUES) {
     for (let a = 1; a <= 10; a++) {
       for (let b = a; b <= 10; b++) {
@@ -188,27 +245,42 @@ function chart(decks, rules) {
         // 10+10 feeds both the pair row (same rank) and hard 20 (mixed).
         const ace = a === 1;
         if (ace && b === 10) continue; // blackjack, no decision
-        const ev = s.actions(a, b, up);
-        const add = (row, weight, evs) => {
-          const r = (rows[row] ||= {});
-          const cell = (r[up] ||= { w: 0, ev: {} });
-          cell.w += weight;
-          for (const k in evs) cell.ev[k] = (cell.ev[k] || 0) + weight * evs[k];
-        };
-        const { split, ...noSplit } = ev;
-        if (a === b) {
-          add(`pair ${a}`, w, ev);
-          // Unsplittable pairs play as their total (aces as soft 12).
-          if (a === 10) add('hard 20', w * 0.75, noSplit); // J-Q etc. differ in rank
-        } else if (ace) add(`soft ${b + 11}`, w, noSplit);
-        else add(`hard ${a + b}`, w, noSplit);
+        const peekEV = s.actions(a, b, up);
+        if (!mayDouble([a, b], doubleOn)) delete peekEV.double;
+        const p = dealerBJChance(deck, up, a, b);
+        for (const [name, ev] of [['peek', peekEV], ['enhc', toENHC(peekEV, p)]]) {
+          const rows = both[name];
+          const add = (row, weight, evs) => {
+            const r = (rows[row] ||= {});
+            const cell = (r[up] ||= { w: 0, ev: {} });
+            cell.w += weight;
+            for (const k in evs) cell.ev[k] = (cell.ev[k] || 0) + weight * evs[k];
+          };
+          const { split, ...noSplit } = ev;
+          if (a === b) {
+            add(`pair ${a}`, w, ev);
+            // Unsplittable pairs play as their total (aces as soft 12).
+            if (a === 10) add('hard 20', w * 0.75, noSplit); // J-Q etc. differ in rank
+          } else if (ace) add(`soft ${b + 11}`, w, noSplit);
+          else add(`hard ${a + b}`, w, noSplit);
+        }
       }
     }
   }
-  for (const r of Object.values(rows)) {
-    for (const cell of Object.values(r)) for (const k in cell.ev) cell.ev[k] /= cell.w;
+  for (const rows of Object.values(both)) {
+    for (const r of Object.values(rows)) {
+      for (const cell of Object.values(r)) for (const k in cell.ev) cell.ev[k] /= cell.w;
+    }
   }
-  return rows;
+  return both;
+}
+
+/** Key for a rule set in charts.json and ev-data.js: "6-s17-das", "6-s17-das-enhc-d911". */
+function ruleKey({ decks = 6, h17 = false, das = true, enhc = false, doubleOn = 'any' }) {
+  let k = `${decks}-${h17 ? 'h17' : 's17'}-${das ? 'das' : 'nodas'}`;
+  if (enhc) k += '-enhc';
+  if (doubleOn !== 'any') k += `-d${doubleOn.replace('-', '')}`;
+  return k;
 }
 
 /** Best action code for a cell: H S D(h) Ds P R. */
@@ -223,15 +295,17 @@ function bestCode(ev) {
   return { stand: 'S', hit: 'H', split: 'P' }[top];
 }
 
-module.exports = { chart, bestCode, makeSolver, fullDeck };
+module.exports = { chart, charts, bestCode, makeSolver, fullDeck, mayDouble, dealerBJChance, toENHC, ruleKey };
 
 if (require.main === module) {
   const decks = Number(process.argv[2] || 6);
   const h17 = process.argv[3] === 'h17';
   const das = process.argv[4] !== 'nodas';
-  const rows = chart(decks, { h17, das });
+  const enhc = process.argv.includes('enhc');
+  const doubleOn = process.argv.includes('d911') ? '9-11' : process.argv.includes('d1011') ? '10-11' : 'any';
+  const rows = chart(decks, { h17, das, enhc, doubleOn });
   const ups = [2, 3, 4, 5, 6, 7, 8, 9, 10, 1];
-  console.log(`${decks} deck(s) ${h17 ? 'H17' : 'S17'} ${das ? 'DAS' : 'no DAS'}`);
+  console.log(`${decks} deck(s) ${h17 ? 'H17' : 'S17'} ${das ? 'DAS' : 'no DAS'}${enhc ? ' ENHC' : ''} double ${doubleOn}`);
   console.log('row        ' + ups.map((u) => (u === 1 ? 'A' : String(u)).padStart(3)).join(''));
   const order = [
     ...Array.from({ length: 16 }, (_, i) => `hard ${i + 5}`),

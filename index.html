@@ -202,6 +202,16 @@
 
       <label class="check"><input type="checkbox" id="set-das"> Double after a split</label>
       <label class="check"><input type="checkbox" id="set-ls"> Late surrender</label>
+      <label class="row" for="set-double">Double down on
+        <select id="set-double">
+          <option value="any">Any two cards</option>
+          <option value="9-11">Hard 9, 10 or 11</option>
+          <option value="10-11">Hard 10 or 11</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="set-rsa"> Resplit aces (still one card each)</label>
+      <label class="check"><input type="checkbox" id="set-enhc"> European no hole card: the dealer doesn't check for blackjack, which then takes doubles and splits too</label>
+      <label class="check sub"><input type="checkbox" id="set-obo"> Original bets only (OBO): a dealer blackjack takes only your first bet</label>
       <label class="row" for="set-pen">Cut card <span id="set-pen-value">75%</span>
         <input id="set-pen" type="range" min="50" max="85" step="5" value="75">
       </label>
@@ -300,7 +310,7 @@
         <label><input type="radio" name="bank-ramp" value="flat"> Flat: 1 unit every round (basic strategy)</label>
       </fieldset>
       <fieldset class="bank-rules">
-        <legend>Rules (start from the table rules)</legend>
+        <legend>Rules (start from the table rules; doubling, ENHC and resplitting aces are as at the table)</legend>
         <label for="bank-decks">Decks
           <select id="bank-decks">
             <option value="1">1</option><option value="2">2</option><option value="6">6</option><option value="8">8</option>

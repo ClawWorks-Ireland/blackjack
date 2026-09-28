@@ -4,7 +4,8 @@
  * (window.BlackjackEV in the browser, module.exports under Node).
  *
  * cost = EV(best play you could make) - EV(the play you made), per unit
- * bet. EVs are for two-card hands after the dealer has peeked; for a hand
+ * bet. EVs are for two-card hands after the dealer has peeked (under ENHC,
+ * including the dealer's blackjack; OBO prices as the peek game); for a hand
  * of three or more cards the same total's hit/stand values are used as an
  * estimate. Returns null when a cell isn't in the table (an unsplittable
  * pair played as its total, e.g. 2,2 as hard 4).
@@ -14,18 +15,38 @@
 
   const node = typeof module !== 'undefined' && module.exports;
   const DATA = node ? require('./ev-data.js') : root.BlackjackEVData;
+  const BJ = node ? require('./blackjack.js') : root.Blackjack;
 
   const UPS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  const ruleKey = (r) => `${r.decks || 6}-${r.h17 ? 'h17' : 's17'}-${r.das === false ? 'nodas' : 'das'}`;
+  /** OBO plays and prices exactly like the peek game. */
+  const plainENHC = (r) => !!r.enhc && !r.obo;
+  const baseKey = (r) => `${r.decks || 6}-${r.h17 ? 'h17' : 's17'}-${r.das === false ? 'nodas' : 'das'}` +
+    (plainENHC(r) ? '-enhc' : '');
+  /** Key in ev-data.js: "6-s17-das", "6-s17-das-enhc-d911", ... */
+  const ruleKey = (r) => baseKey(r) + (r.doubleOn && r.doubleOn !== 'any' ? `-d${r.doubleOn.replace('-', '')}` : '');
 
-  /** EV of each play in a cell: {stand, hit, double, split?, surrender}. */
+  /** A two-card hand for a row, to check the doubling rule. */
+  function rowCards(row) {
+    const [kind, n] = [row.split(' ')[0], Number(row.split(' ')[1])];
+    const c = (v) => ({ rank: v === 11 ? 'A' : String(v), suit: '♠' });
+    if (kind === 'pair') return [c(n), c(n)];
+    if (kind === 'soft') return [c(11), c(n - 11)];
+    return n > 11 ? [c(10), c(n - 10)] : [c(2), c(n - 2)];
+  }
+
+  /** EV of each play in a cell: {stand, hit, double?, split?, surrender}. */
   function cellEV(rules, key) {
     const [row, up] = key.split('|');
-    const table = DATA[ruleKey(rules)];
-    const cell = table && table[row] && table[row][UPS.indexOf(Number(up))];
+    const i = UPS.indexOf(Number(up));
+    // Restricted-doubling keys hold only the pair rows.
+    const variant = DATA[ruleKey(rules)];
+    const table = variant && variant[row] ? variant : DATA[baseKey(rules)];
+    const cell = table && table[row] && table[row][i];
     if (!cell) return null;
-    const ev = { stand: cell[0] / 1e4, hit: cell[1] / 1e4, double: cell[2] / 1e4, surrender: -0.5 };
-    if (cell.length > 3) ev.split = cell[3] / 1e4;
+    const enhc = plainENHC(rules);
+    const ev = { stand: cell[0] / 1e4, hit: cell[1] / 1e4, surrender: enhc ? cell[cell.length - 1] / 1e4 : -0.5 };
+    if (cell[2] !== null && BJ.canDoubleOn(rowCards(row), rules.doubleOn || 'any')) ev.double = cell[2] / 1e4;
+    if (cell.length > (enhc ? 4 : 3)) ev.split = cell[3] / 1e4;
     return ev;
   }
 
@@ -37,7 +58,7 @@
     const ev = cellEV(rules, key);
     if (!ev || !(move in ev)) return null;
     const open = ['stand', 'hit'];
-    if (canDouble) open.push('double');
+    if (canDouble && ev.double !== undefined) open.push('double');
     if (canSplit && ev.split !== undefined) open.push('split');
     if (canSurrender && rules.lateSurrender !== false) open.push('surrender');
     if (!open.includes(move)) return null;

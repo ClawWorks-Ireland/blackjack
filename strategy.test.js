@@ -109,9 +109,20 @@ const EXPECT = {
 };
 const NO_SURRENDER = { Rh: 'hit', Rs: 'stand', Rp: 'split' };
 
-for (const [key, rows] of Object.entries(CHARTS)) {
-  const [d, soft17, dbl] = key.split('-');
-  const rules = { decks: Number(d), h17: soft17 === 'h17', das: dbl === 'das' };
+/** "6-s17-das-enhc-d911" -> rules. */
+function rulesFor(key) {
+  const [d, soft17, dbl, ...rest] = key.split('-');
+  const doubleOn = rest.includes('d911') ? '9-11' : rest.includes('d1011') ? '10-11' : 'any';
+  return { decks: Number(d), h17: soft17 === 'h17', das: dbl === 'das', enhc: rest.includes('enhc'), doubleOn };
+}
+
+test('F17: the fixture covers every rule set: decks x S17/H17 x DAS x ENHC x doubling', () => {
+  assert.equal(Object.keys(CHARTS).length, 4 * 2 * 2 * 2 * 3);
+});
+
+for (const [key, lines] of Object.entries(CHARTS)) {
+  const rules = rulesFor(key);
+  const rows = Object.fromEntries(Object.entries(lines).map(([row, s]) => [row, s.split(' ')]));
   test(`chart ${key}: every cell matches the solver`, () => {
     const wrong = [];
     for (const [row, codes] of Object.entries(rows)) {

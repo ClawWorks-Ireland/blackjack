@@ -53,7 +53,9 @@
       }
       while (game.phase === 'player') {
         const h = game.currentHand;
-        const allowed = { canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender() };
+        const allowed = {
+          canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(), canHit: game.canHit(),
+        };
         const basic = Strategy.recommend(h.cards, game.dealer[0], allowed, r);
         const play = counting
           ? Counting.countPlay(h.cards, game.dealer[0], allowed, basic, Counting.countState(game).trueCount, r)

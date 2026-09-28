@@ -33,7 +33,10 @@ runner.
 
 These are the defaults. **Table rules (T)** lets you change the deck
 count (1, 2, 6 or 8), whether the dealer hits or stands on soft 17,
-3:2 or 6:5 blackjack, double after split, and late surrender. It shows
+3:2 or 6:5 blackjack, double after split, late surrender, the cut card
+(50% to 85%), doubling on any two cards or on hard 9-11 or 10-11 only,
+resplitting aces, and European no hole card (ENHC), optionally with
+original bets only (OBO). It shows
 the house edge for your choice, and the coach switches to the matching
 basic strategy. Rules change between hands only, with a fresh shoe;
 your bankroll and stats carry over. The choice is saved.
@@ -53,6 +56,15 @@ your bankroll and stats carry over. The choice is saved.
   half your bet
 - The dealer checks for blackjack before you play. If every one of your
   hands busts or is surrendered, the dealer doesn't draw
+- With ENHC nobody checks: you play your hand first, and a dealer
+  blackjack then takes everything you put out, doubles and splits
+  included, and the whole bet on a surrendered hand. With OBO it takes
+  only your original bet, which plays exactly like the peek game.
+  Insurance is still offered and settles at the end. (The second dealer
+  card is still dealt face down up front; it is only looked at after
+  you play, which is the same game)
+- With resplit aces, a split ace that draws another ace can be split
+  again (up to 4 hands); split aces still get one card each
 
 You start with $1,000. Table limits are $1 to $500 per hand, in whole
 dollars. When you have less than the minimum left between rounds, a
@@ -239,14 +251,25 @@ starting hand, removing cards from the shoe as they're dealt and
 handling the dealer's unseen hole card exactly. A chart cell is the best
 play averaged over every two-card hand with that total. For 4 to 8 decks
 this reproduces Wizard of Odds' published S17 and H17 charts cell for
-cell. `tools/make_charts.js` writes `tools/charts.json` for all 16 rule
-combinations, and `strategy.test.js` checks `strategy.js` against every
-cell. Splits are valued without resplitting, a small approximation.
+cell. `tools/make_charts.js` writes `tools/charts.json` for all 96 rule
+combinations (decks, S17/H17, DAS, peek or ENHC, and doubling on any
+two cards, 9-11 or 10-11), and `strategy.test.js` checks `strategy.js`
+against every cell. Splits are valued without resplitting, a small
+approximation. ENHC values each play as (1 - p) times its peek-game EV
+minus p times the chips at risk, with p the chance of a dealer
+blackjack given your cards. Resplitting aces and OBO change no cell.
+`tools/make_ev.js` writes the matching EV table (`ev-data.js`) that
+prices mistakes.
 
 The house edge uses Wizard of Odds' published figures for these rules
-without surrender, plus late-surrender and 6:5 adjustments from
-`tools/house_edge.js`. It assumes basic strategy. It also includes the
+without surrender, plus adjustments from `tools/house_edge.js` for late
+surrender, 6:5, ENHC (about +0.11 points), doubling on 9-11 (+0.09 to
++0.15) or 10-11 (+0.17 to +0.30), and resplitting aces (-0.03 to
+-0.06, one extra split valued). It assumes basic strategy. It also includes the
 cost of the cut card (the shoe is dealt to 75% and only shuffled
 between rounds): 0.13 points at 1 deck, 0.07 at 2 decks and 0.03 at 6
 or 8, measured by simulating about 60 million rounds of this game per
 rule set. Without it the default table would show 0.33%; with it, 0.36%.
+The cut-card figure is for 75% penetration whatever the slider says, and
+the count indices (Illustrious 18, Fab 4) are the standard peek-game
+ones under every rule variant.

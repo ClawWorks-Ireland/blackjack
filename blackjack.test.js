@@ -564,10 +564,10 @@ test('surrender can be turned off', () => {
 test('rules are saved with the game; older saves load with the defaults', () => {
   const g = new BJ.Game({ decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false });
   const back = BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
-  assert.deepEqual(back.rules, { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.75 });
+  assert.deepEqual(back.rules, { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.75, rsa: false, enhc: false, obo: false, doubleOn: 'any' });
   const old = JSON.parse(JSON.stringify(new BJ.Game()));
   for (const k of ['h17', 'payout', 'das', 'lateSurrender']) delete old[k];
-  assert.deepEqual(BJ.Game.fromJSON(old).rules, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true, penetration: 0.75 });
+  assert.deepEqual(BJ.Game.fromJSON(old).rules, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true, penetration: 0.75, rsa: false, enhc: false, obo: false, doubleOn: 'any' });
   assert.equal(BJ.Game.fromJSON({ ...old, payout: 2 }), null);
   assert.equal(BJ.Game.fromJSON({ ...old, h17: 'yes' }), null);
 });
@@ -777,4 +777,139 @@ test('F15: the empty seat follows the decide function', () => {
   const w = g.watchRound((cards) => (BJ.handValue(cards).total < 12 ? 'hit' : 'stand'));
   assert.equal(BJ.handValue(w.seat).total, 14);
   assert.equal(BJ.handValue(w.dealer).total, 17);
+});
+
+// --- F17: resplit aces, ENHC / OBO, restricted doubling ---
+
+function riggedWith(opts, cards, bankroll = 1000) {
+  const g = new BJ.Game({ bankroll, ...opts });
+  g.shoe = Array.from({ length: 100 }, () => c('2')).concat(cards.slice().reverse());
+  return g;
+}
+
+test('F17: doubling on hard 9-11 or 10-11 only', () => {
+  const nine = [c('4'), c('5'), c('10'), c('7')];
+  const at = (doubleOn, cards) => { const g = riggedWith({ doubleOn }, cards); g.deal(10); return g.canDouble(); };
+  assert.equal(at('any', nine), true);
+  assert.equal(at('9-11', nine), true);
+  assert.equal(at('10-11', nine), false);
+  assert.equal(at('10-11', [c('4'), c('6'), c('10'), c('7')]), true);
+  assert.equal(at('9-11', [c('3'), c('5'), c('10'), c('7')]), false, 'hard 8');
+  assert.equal(at('9-11', [c('A'), c('8'), c('10'), c('7')]), false, 'soft 19 is not 9');
+  assert.equal(at('9-11', [c('A'), c('6'), c('10'), c('7')]), false, 'soft 17');
+  assert.equal(BJ.canDoubleOn([c('A'), c('6')], 'any'), true);
+  assert.throws(() => { const g = riggedWith({ doubleOn: '10-11' }, nine); g.deal(10); g.double(); }, /Cannot double/);
+});
+
+test('F17: restricted doubling applies after a split too', () => {
+  // 4,4 vs 6; split: 4+5 = 9 may double under 9-11, 4+3 = 7 may not.
+  const g = riggedWith({ doubleOn: '9-11', das: true }, [c('4'), c('4'), c('6'), c('10'), c('5'), c('3')]);
+  g.deal(10);
+  g.split();
+  assert.equal(g.canDouble(), true);
+  g.double();
+  assert.equal(g.canDouble(), false);
+});
+
+test('F17: without RSA, a split ace that draws an ace is finished', () => {
+  const g = riggedWith({}, [c('A'), c('A'), c('10'), c('7'), c('A'), c('9')]);
+  g.deal(10);
+  g.split();
+  assert.equal(g.phase, 'done');
+  assert.equal(g.hands.length, 2);
+});
+
+test('F17: with RSA, split aces may split again but never hit or double', () => {
+  // A,A vs 10-7: split; first ace draws A (resplit), then 9, 8, K.
+  const g = riggedWith({ rsa: true }, [c('A'), c('A'), c('10'), c('7'), c('A'), c('9'), c('8'), c('K')]);
+  g.deal(10);
+  g.split();
+  assert.equal(g.phase, 'player');
+  assert.deepEqual(g.currentHand.cards.map((x) => x.rank), ['A', 'A']);
+  assert.equal(g.canSplit(), true);
+  assert.equal(g.canHit(), false);
+  assert.equal(g.canDouble(), false);
+  assert.throws(() => g.hit(), /Split aces/);
+  g.split();
+  assert.equal(g.hands.length, 3);
+  assert.equal(g.phase, 'done', 'each ace got one card: A9, A8, AK');
+  assert.deepEqual(g.hands.map((h) => BJ.handValue(h.cards).total), [20, 19, 21]);
+  assert.equal(g.bankroll, 1000 - 30 + 20 + 20 + 20, 'three wins vs 17 (A,K after a split is 21, not blackjack)');
+});
+
+test('F17: with RSA, standing on two split aces is allowed', () => {
+  const g = riggedWith({ rsa: true }, [c('A'), c('A'), c('10'), c('7'), c('A'), c('9'), c('5')]);
+  g.deal(10);
+  g.split();
+  g.stand();
+  assert.equal(g.phase, 'done');
+});
+
+test('F17: ENHC plays on against an ace and takes the double when the dealer has blackjack', () => {
+  // You 5,6 vs A,K: no peek. Decline insurance, double 11 (draw 9), dealer blackjack.
+  const g = riggedWith({ enhc: true }, [c('5'), c('6'), c('A'), c('K'), c('9')]);
+  g.deal(10);
+  assert.equal(g.phase, 'insurance');
+  g.declineInsurance();
+  assert.equal(g.phase, 'player', 'nobody peeks');
+  g.double();
+  assert.equal(g.phase, 'done');
+  assert.equal(g.net, -20);
+  assert.equal(g.bankroll, 980);
+});
+
+test('F17: OBO: only the original bet is lost to a dealer blackjack', () => {
+  const g = riggedWith({ enhc: true, obo: true }, [c('5'), c('6'), c('A'), c('K'), c('9')]);
+  g.deal(10);
+  g.declineInsurance();
+  g.double();
+  assert.equal(g.net, -10);
+  assert.equal(g.bankroll, 990);
+  // Split 8s vs 10 with an ace in the hole: both hands lose, OBO charges 10.
+  const s = riggedWith({ enhc: true, obo: true }, [c('8'), c('8'), c('10'), c('A'), c('3'), c('K')]);
+  s.deal(10);
+  assert.equal(s.phase, 'player');
+  s.split();
+  s.stand();
+  s.stand();
+  assert.equal(s.net, -10);
+  assert.deepEqual(s.results.map((r) => r.outcome), ['lose', 'push']);
+  const e = riggedWith({ enhc: true }, [c('8'), c('8'), c('10'), c('A'), c('3'), c('K')]);
+  e.deal(10);
+  e.split();
+  e.stand();
+  e.stand();
+  assert.equal(e.net, -20, 'plain ENHC loses both split bets');
+});
+
+test('F17: ENHC: surrender does not save half against a dealer blackjack; insurance settles at the end', () => {
+  const g = riggedWith({ enhc: true }, [c('10'), c('6'), c('10'), c('A')]);
+  g.deal(10);
+  g.surrender();
+  assert.equal(g.net, -10);
+  const w = riggedWith({ enhc: true }, [c('10'), c('6'), c('10'), c('7')]);
+  w.deal(10);
+  w.surrender();
+  assert.equal(w.net, -5, 'still half back against a non-blackjack');
+  const ins = riggedWith({ enhc: true }, [c('10'), c('9'), c('A'), c('K')]);
+  ins.deal(10);
+  ins.takeInsurance();
+  assert.equal(ins.insuranceNet, null, 'not settled yet');
+  ins.stand();
+  assert.equal(ins.insuranceNet, 10);
+  assert.equal(ins.bankroll, 1000 - 10 - 5 + 15);
+  const bj = riggedWith({ enhc: true }, [c('A'), c('K'), c('A'), c('Q')]);
+  bj.deal(10);
+  bj.declineInsurance();
+  assert.equal(bj.phase, 'done');
+  assert.equal(bj.results[0].outcome, 'push', 'blackjack against blackjack');
+});
+
+test('F17: new rules are saved and checked', () => {
+  const g = new BJ.Game({ rsa: true, enhc: true, obo: true, doubleOn: '10-11' });
+  const back = BJ.Game.fromJSON(JSON.parse(JSON.stringify(g)));
+  assert.deepEqual([back.rsa, back.enhc, back.obo, back.doubleOn], [true, true, true, '10-11']);
+  assert.equal(BJ.Game.fromJSON({ ...JSON.parse(JSON.stringify(g)), doubleOn: '8-11' }), null);
+  assert.equal(BJ.Game.fromJSON({ ...JSON.parse(JSON.stringify(g)), rsa: 1 }), null);
+  assert.equal(new BJ.Game({ obo: true }).obo, false, 'OBO only means something under ENHC');
 });

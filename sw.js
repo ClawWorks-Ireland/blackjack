@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const CACHE = 'blackjack-v5';
+const CACHE = 'blackjack-v6';
 const FILES = [
   './', './index.html', './style.css', './manifest.webmanifest',
   './format.js', './prefs.js', './a11y.js', './betting.js', './sidebets.js', './blackjack.js',

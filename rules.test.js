@@ -5,7 +5,7 @@ const R = require('./rules.js');
 const base = R.DEFAULT_RULES;
 
 test('default rules are the classic table', () => {
-  assert.deepEqual({ ...base }, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true, penetration: 0.75 });
+  assert.deepEqual({ ...base }, { decks: 6, h17: false, payout: 1.5, das: true, lateSurrender: true, penetration: 0.75, rsa: false, enhc: false, obo: false, doubleOn: 'any' });
 });
 
 test('house edge for the default rules includes the cut card', () => {
@@ -49,7 +49,7 @@ test('saved settings are validated field by field', () => {
   assert.deepEqual(R.normalizeRules(null), { ...base });
   assert.deepEqual(R.normalizeRules({ decks: 4, payout: 2, h17: 'yes' }), { ...base });
   assert.deepEqual(R.normalizeRules({ decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.6 }),
-    { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.6 });
+    { decks: 2, h17: true, payout: 1.2, das: false, lateSurrender: false, penetration: 0.6, rsa: false, enhc: false, obo: false, doubleOn: 'any' });
 });
 
 test('sameRules compares every setting', () => {
@@ -82,4 +82,51 @@ test('F15: penetration is a rule from 50% to 85%, in 5% steps', () => {
   assert.equal(R.normalizeRules({ penetration: 0.2 }).penetration, 0.75);
   assert.ok(!R.sameRules(base, { ...base, penetration: 0.6 }));
   assert.match(R.describe({ ...base, penetration: 0.6 })[0], /Cut card at 60%/);
+});
+
+// --- F17: rule variants ---
+
+test('F17: new rules are validated; OBO needs ENHC', () => {
+  assert.deepEqual(
+    [R.normalizeRules({ rsa: true }).rsa, R.normalizeRules({ enhc: true, obo: true }).obo, R.normalizeRules({ obo: true }).obo],
+    [true, true, false]);
+  assert.equal(R.normalizeRules({ doubleOn: '9-11' }).doubleOn, '9-11');
+  assert.equal(R.normalizeRules({ doubleOn: '8-11' }).doubleOn, 'any');
+  assert.equal(R.normalizeRules({ rsa: 'yes' }).rsa, false);
+  assert.ok(!R.sameRules(base, { ...base, enhc: true }));
+  assert.ok(!R.sameRules(base, { ...base, doubleOn: '10-11' }));
+});
+
+test('F17: the house edge moves the right way for each rule, at every deck count', () => {
+  for (const decks of R.DECKS) {
+    for (const h17 of [false, true]) {
+      const r = { ...base, decks, h17 };
+      const e = R.houseEdge(r, { cutCard: false });
+      const at = (x) => R.houseEdge({ ...r, ...x }, { cutCard: false });
+      assert.ok(at({ rsa: true }) < e, `${decks}D RSA lowers the edge`);
+      assert.ok(at({ enhc: true }) > e, `${decks}D ENHC raises it`);
+      assert.equal(at({ enhc: true, obo: true }), e, 'OBO plays like the peek game');
+      assert.ok(at({ doubleOn: '9-11' }) > e, `${decks}D 9-11 raises it`);
+      assert.ok(at({ doubleOn: '10-11' }) > at({ doubleOn: '9-11' }), `${decks}D 10-11 raises it more`);
+    }
+  }
+  // Sizes line up with published rule-variation tables (6 decks).
+  const six = R.houseEdge(base, { cutCard: false });
+  const d = (x) => Math.round((R.houseEdge({ ...base, ...x }, { cutCard: false }) - six) * 100) / 100;
+  assert.equal(d({ enhc: true }), 0.11);
+  assert.equal(d({ doubleOn: '10-11' }), 0.19);
+  assert.equal(d({ doubleOn: '9-11' }), 0.1);
+  assert.equal(d({ rsa: true }), -0.06);
+});
+
+test('F17: the rules line and payouts describe the variants', () => {
+  const [one, two] = R.describe({ ...base, rsa: true, enhc: true, doubleOn: '10-11' });
+  assert.match(one, /Double on hard 10 or 11, also after a split/);
+  assert.match(one, /Split pairs up to 4 hands, aces too/);
+  assert.match(two, /No hole card: a dealer blackjack takes doubles and splits too/);
+  assert.match(R.describe({ ...base, enhc: true, obo: true })[1], /original bet \(OBO\)/);
+  assert.match(R.describe(base)[0], /Double on any two cards, also after a split/);
+  const rows = Object.fromEntries(R.payoutRows({ ...base, doubleOn: '9-11', enhc: true }));
+  assert.equal(rows['Double down'], 'Hard 9, 10 or 11, also after a split');
+  assert.equal(rows['Dealer blackjack (no hole card)'], 'You lose doubles and splits too');
 });
