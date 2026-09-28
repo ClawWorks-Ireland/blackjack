@@ -106,6 +106,17 @@ button starts you over with $1,000.
   +1.4 units per 100 rounds; flat betting loses about the house edge
   and its risk of ruin is 100%. They are estimates, shown with their
   standard error.
+- **Counter's report card (E):** when the cut card comes out, a shoe
+  report grades you against a perfect Hi-Lo counter playing the same
+  rounds: how your bets correlate with the 1-2-4-8-12 ramp on your unit
+  (Pearson r, and the share within one unit), index plays taken and
+  missed (hand, upcard, true count, index), your count checks and your
+  running count at the cut card, and money: your result, what your bets
+  and play were expected to make (luck is the difference), what the
+  perfect counter expected (the skill gap), and EV given away. E shows
+  the same report for the whole session. It works with the count hidden;
+  the last 20 shoe reports are saved and added to the CSV export. Turn
+  the automatic report off in Settings.
 - **Card-counting trainer (Hi-Lo):** press K to show or hide the
   running count, true count and decks unseen. The dealer's hole card
   isn't counted until it's turned over, and the count restarts with each
@@ -204,6 +215,7 @@ and history; it doesn't touch the bankroll.
 | B | Put the suggested bet in the bet box |
 | J | Sit out / sit back in |
 | U | Bankroll and risk of ruin |
+| E | Counter's report card |
 | W | Training drills |
 | O | Settings |
 | V | Strategy chart |
@@ -224,6 +236,7 @@ and history; it doesn't touch the bankroll.
 | `drill.js` | Flashcard picking and scoring, count drill decks. No DOM code |
 | `chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
 | `a11y.js` | Card announcements and contrast checks. No DOM code |
+| `report.js` | Counter's report card: bet correlation, index plays, luck vs skill. No DOM code |
 | `bankroll.js` | Seeded bankroll simulation: EV, SD, N0, risk of ruin. No DOM code |
 | `sim-worker.js` | Runs the bankroll simulation off the main thread |
 | `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |

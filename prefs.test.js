@@ -6,9 +6,9 @@ const P = require('./prefs.js');
 const A = require('./a11y.js');
 
 test('F8: defaults, and saved prefs are checked field by field', () => {
-  assert.deepEqual(P.normalizePrefs(null), { speed: 'auto', volume: 0.8, table: 'green', back: 'blue', wongOut: -1, wongIn: 1 });
+  assert.deepEqual(P.normalizePrefs(null), { speed: 'auto', volume: 0.8, table: 'green', back: 'blue', wongOut: -1, wongIn: 1, shoeReport: true });
   assert.deepEqual(P.normalizePrefs({ speed: 'warp', volume: 7, table: 'pink', back: 'red' }),
-    { speed: 'auto', volume: 1, table: 'green', back: 'red', wongOut: -1, wongIn: 1 });
+    { speed: 'auto', volume: 1, table: 'green', back: 'red', wongOut: -1, wongIn: 1, shoeReport: true });
   assert.equal(P.normalizePrefs({ volume: -1 }).volume, 0);
 });
 
@@ -41,4 +41,9 @@ test('F15: sit-out thresholds are settings, and "in" can never be below "out"', 
   assert.equal(P.normalizePrefs({ wongOut: 1.5 }).wongOut, -1);
   const bad = P.normalizePrefs({ wongOut: 2, wongIn: -2 });
   assert.deepEqual([bad.wongOut, bad.wongIn], [-1, 1]);
+});
+
+test('F18: the shoe report can be turned off', () => {
+  assert.equal(P.normalizePrefs({ shoeReport: false }).shoeReport, false);
+  assert.equal(P.normalizePrefs({ shoeReport: 'no' }).shoeReport, true);
 });

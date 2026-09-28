@@ -153,6 +153,7 @@
     <h3 id="history-label">Recent hands</h3>
     <ol id="history" class="history" aria-labelledby="history-label" tabindex="0"></ol>
     <p class="note">Pushes don't count toward win rate. Return is money back per $1 bet, counting doubles, splits, insurance and side bets; above 100% means you're ahead. Accuracy scores every decision, hinted or not. Last 20 rounds shown; the graph and CSV cover up to 500. Session stats reset when you reload. Saved in this browser.</p>
+    <button id="report-open" class="link" aria-haspopup="dialog">Counter's report <kbd>E</kbd></button>
     <button id="export-csv" class="link">Export history (CSV)</button>
     <button id="reset-stats" class="link">Reset stats and history</button>
   </aside>
@@ -295,6 +296,36 @@
     </div>
   </dialog>
 
+  <dialog id="report" class="help report-dialog" aria-labelledby="report-title">
+    <div class="help-body">
+      <h2 id="report-title">Shoe report</h2>
+      <p id="report-sub" class="note"></p>
+      <dl class="bank-results">
+        <div><dt>Bet correlation with the count</dt><dd id="rep-r"></dd></div>
+        <div><dt>Bets within one unit of the ramp</dt><dd id="rep-within"></dd></div>
+        <div><dt>Index plays taken</dt><dd id="rep-index"></dd></div>
+        <div><dt>Count checks right</dt><dd id="rep-checks"></dd></div>
+        <div><dt>Your result</dt><dd id="rep-net"></dd></div>
+        <div><dt>Expected for your bets and play</dt><dd id="rep-expected"></dd></div>
+        <div><dt>Luck</dt><dd id="rep-luck"></dd></div>
+        <div><dt>Perfect counter expected</dt><dd id="rep-perfect"></dd></div>
+        <div><dt>Skill gap</dt><dd id="rep-gap"></dd></div>
+        <div><dt>EV given away on basic strategy</dt><dd id="rep-ev"></dd></div>
+      </dl>
+      <p id="rep-note" class="note" hidden></p>
+      <h3 id="rep-missed-label" hidden>Missed index plays</h3>
+      <ul id="rep-missed" class="history" hidden></ul>
+      <form id="rep-count" class="count-check" novalidate hidden>
+        <label for="rep-guess">Your running count at the end of the shoe</label>
+        <input id="rep-guess" inputmode="numeric" autocomplete="off" placeholder="+3">
+        <button type="submit" class="toggle">Check</button>
+      </form>
+      <p id="rep-count-result" class="note" aria-live="polite"></p>
+      <p class="note">A perfect Hi-Lo counter bets the 1-2-4-8-12 ramp on your unit and takes every index play. Expected results use an edge of minus the house edge plus 0.5% per point of true count; luck is your result minus what your bets and play were expected to make, and the skill gap is what the perfect counter expected minus that. Works with the count hidden. The last 20 shoe reports are saved and go into the CSV export.</p>
+      <div class="dialog-actions"><button type="button" id="report-close">Close</button></div>
+    </div>
+  </dialog>
+
   <dialog id="bank" class="help settings bank-dialog" aria-labelledby="bank-title">
     <form id="bank-form" class="help-body" novalidate>
       <h2 id="bank-title">Bankroll</h2>
@@ -378,6 +409,7 @@
         <legend>Count trainer: when to sit out</legend>
         <label for="pref-wong-out">Sit out below true count <input id="pref-wong-out" type="number" min="-5" max="2" step="1" value="-1"></label>
         <label for="pref-wong-in">Sit back in at <input id="pref-wong-in" type="number" min="-2" max="5" step="1" value="1"></label>
+        <label class="check"><input type="checkbox" id="pref-shoe-report" checked> Show the counter's report at each reshuffle</label>
       </fieldset>
       <p class="note">Changes apply straight away and are saved in this browser. Mute is still M.</p>
       <div class="dialog-actions">
@@ -403,6 +435,7 @@
   <script src="ev.js"></script>
   <script src="rules.js"></script>
   <script src="bankroll.js"></script>
+  <script src="report.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

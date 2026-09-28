@@ -9,6 +9,7 @@
   const RULES_KEY = 'blackjack.rules';
   const STATS_KEY = 'blackjack.stats';
   const HISTORY_KEY = 'blackjack.history';
+  const REPORTS_KEY = 'blackjack.shoeReports';
   const MUTE_KEY = 'blackjack.muted';
   const COACH_KEY = 'blackjack.coach';
   const COUNT_KEY = 'blackjack.showCount';
@@ -32,6 +33,11 @@
   const Drill = window.BlackjackDrill;
   const EV = window.BlackjackEV;
   let roundMistakes = []; // this round's off-chart plays with their cost
+  const Report = window.BlackjackReport;
+  let shoeTracker = Report.newShoe(); // F18: this shoe's bets, index spots and count checks
+  let sessionShoes = []; // finished shoes this session
+  let reports = [];      // saved shoe summaries, newest first (set after storage is ready)
+  let reportShown = null; // the shoe the report dialog is showing (for the end-count check)
   const PREFS_KEY = 'blackjack.prefs';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -98,6 +104,12 @@
     chartTables: $('chart-tables'), chartMisses: $('chart-misses'), chartCountNote: $('chart-count-note'),
     chartClose: $('chart-close'), chartOpenHelp: $('chart-open-help'),
     drillDialog: $('drill'), drillOpen: $('drill-open'), drillClose: $('drill-close'),
+    reportDialog: $('report'), reportOpen: $('report-open'), reportClose: $('report-close'),
+    reportTitle: $('report-title'), reportSub: $('report-sub'), repR: $('rep-r'), repNote: $('rep-note'),
+    repWithin: $('rep-within'), repIndex: $('rep-index'), repChecks: $('rep-checks'), repNet: $('rep-net'),
+    repExpected: $('rep-expected'), repLuck: $('rep-luck'), repPerfect: $('rep-perfect'), repGap: $('rep-gap'),
+    repEv: $('rep-ev'), repMissedLabel: $('rep-missed-label'), repMissed: $('rep-missed'), repCount: $('rep-count'),
+    repGuess: $('rep-guess'), repCountResult: $('rep-count-result'), prefShoeReport: $('pref-shoe-report'),
     bankDialog: $('bank'), bankOpen: $('bank-open'), bankClose: $('bank-close'), bankForm: $('bank-form'),
     bankRoll: $('bank-roll'), bankUnit: $('bank-unit'), bankHph: $('bank-hph'), bankDecks: $('bank-decks'),
     bankH17: $('bank-h17'), bank65: $('bank-65'), bankDas: $('bank-das'), bankLs: $('bank-ls'),
@@ -470,6 +482,11 @@
     storage('set', STATS_KEY, JSON.stringify(stats));
     history = Stats.addHistory(history, historyEntry());
     storage('set', HISTORY_KEY, JSON.stringify(history));
+    Report.recordResult(shoeTracker, { net: game.net, evLost: roundMistakes.reduce((s, m) => s + m.dollars, 0) });
+    if (game.cutCardReached) {
+      const done = finishShoe(true);
+      if (done && prefs.shoeReport) setTimeout(() => showReport(done), settleAt + 700);
+    }
     const outcome = netOutcome();
     const cue = outcome === 'blackjack' ? 'blackjack'
       : outcome === 'win' ? 'win' : outcome === 'push' ? 'push' : 'lose';
@@ -715,6 +732,8 @@
   function scoreMove(move) {
     coachNote = null;
     if (!move) return;
+    const spot = Report.countSpot(game); // graded with the count hidden too
+    if (spot) Report.recordSpot(shoeTracker, { ...spot, move });
     const advice = currentAdvice();
     const hinted = hintFor === decisionKey();
     hintFor = null;
@@ -780,6 +799,13 @@
       delete els.message.dataset.outcome;
       return;
     }
+    // F18: what the ramp says for this round (a shoe that is due to be replaced starts at 0).
+    if (game.cutCardReached && shoeTracker.rounds.length) finishShoe(false);
+    const tcAtBet = game.cutCardReached ? 0 : Counting.countState(game).trueCount;
+    const unitAtBet = betUnit();
+    const suggestedAtBet = Counting.suggestedBet(tcAtBet, {
+      min: game.minBet, unit: unitAtBet, max: game.maxBet, bankroll: game.bankroll / spots,
+    });
     act(() => {
       game.deal(Array(spots).fill(bet), {
         pairs: Number(els.sidePairs.value) || 0,
@@ -788,6 +814,7 @@
       round++;
       coachNote = null;
       roundMistakes = [];
+      Report.recordBet(shoeTracker, { bet, suggested: suggestedAtBet, unit: unitAtBet, spots, tc: tcAtBet });
       countNote = game.newShoe ? 'New shoe shuffled: the count starts again from 0.' : null;
       lastBet = bet;
       storage('set', LAST_BET_KEY, String(bet));
@@ -834,6 +861,7 @@
   els.insure.addEventListener('click', () => act(() => game.takeInsurance(), 'chip', 'insurance'));
   els.noInsure.addEventListener('click', () => act(() => game.declineInsurance(), null, 'no-insurance'));
   els.reset.addEventListener('click', () => {
+    finishShoe(false);
     game = newGame(START_BANKROLL, game.rules);
     shown = new WeakSet();
     els.message.textContent = 'Place your bet to start.';
@@ -875,7 +903,8 @@
   els.scopeAll.addEventListener('click', () => { statsScope = 'all'; renderStats(); });
 
   els.exportCsv.addEventListener('click', () => {
-    const blob = new Blob([Stats.historyCSV(history)], { type: 'text/csv;charset=utf-8' });
+    const csv = `${Stats.historyCSV(history)}\nShoe reports\n${Report.reportsCSV(reports, Stats.csvField)}`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -982,6 +1011,7 @@
     const { running, trueCount } = Counting.countState(game);
     const right = guess === running;
     both((s) => Stats.recordCountCheck(s, right));
+    Report.recordCheck(shoeTracker, right);
     storage('set', STATS_KEY, JSON.stringify(stats));
     countNote = right
       ? `Right: the running count is ${Counting.signed(running)} (true count ${Counting.formatTrue(trueCount)}).`
@@ -1076,6 +1106,7 @@
     els.settings.close();
     if (Rules.sameRules(chosen, game.rules)) return;
     // New rules mean a new table: same bankroll, fresh shoe, empty felt.
+    finishShoe(false);
     game = newGame(game.bankroll, chosen);
     shown = new WeakSet();
     hintFor = null;
@@ -1359,6 +1390,93 @@
     else if (e.key === 'Enter' && flashAnswered && e.target !== els.flashNext) { e.preventDefault(); dealFlash(); }
   });
 
+  // --- Counter's report card (F18) ---
+
+  reports = Report.parseReports(storage('get', REPORTS_KEY));
+  const houseEdgeNow = () => Rules.houseEdge(game.rules);
+
+  /** Close out the current shoe: save its summary and start a new tracker. */
+  function finishShoe(atCut) {
+    const shoe = shoeTracker;
+    shoeTracker = Report.newShoe();
+    if (!shoe.rounds.length) return null;
+    if (atCut) shoe.endRunning = Counting.countState(game).running;
+    shoe.houseEdge = houseEdgeNow();
+    shoe.summary = Report.summary(shoe, { houseEdge: shoe.houseEdge });
+    sessionShoes.push(shoe);
+    reports = Report.addReport(reports, shoe.summary);
+    storage('set', REPORTS_KEY, JSON.stringify(reports));
+    return shoe;
+  }
+
+  const moneyDelta = (n) => signedMoney(Math.round(n * 100) / 100);
+
+  /** Fill the report dialog: one shoe (with the end-count check) or the session so far. */
+  function showReport(shoe) {
+    const session = !shoe;
+    const shoes = session ? [...sessionShoes, shoeTracker].filter((s) => s.rounds.length) : [shoe];
+    reportShown = shoe || null;
+    const g = Report.grade(shoes, { houseEdge: houseEdgeNow() });
+    els.reportTitle.textContent = session ? "Counter's report: this session" : 'Shoe report';
+    els.reportSub.textContent = g.rounds
+      ? `${g.rounds} round${g.rounds === 1 ? '' : 's'}${session ? ` over ${g.shoes} shoe${g.shoes === 1 ? '' : 's'}` : ' in this shoe'}, graded against a perfect Hi-Lo counter.`
+      : 'No rounds yet this session. Play a few, then check back.';
+    els.repR.textContent = g.r === null ? 'Not measurable' : g.r.toFixed(2);
+    els.repNote.hidden = !g.betNote;
+    els.repNote.textContent = g.betNote || '';
+    els.repWithin.textContent = g.within === null ? '–' : `${Math.round(g.within * 100)}%`;
+    els.repIndex.textContent = g.spots ? `${g.taken} of ${g.spots}` : 'None came up';
+    els.repChecks.textContent = g.checks ? `${g.checksRight} of ${g.checks}` : 'None (Q checks your count)';
+    els.repNet.textContent = moneyDelta(g.net);
+    els.repExpected.textContent = moneyDelta(g.expected);
+    els.repLuck.textContent = moneyDelta(g.luck);
+    els.repPerfect.textContent = moneyDelta(g.perfect);
+    els.repGap.textContent = moneyDelta(g.skillGap);
+    els.repEv.textContent = money(Math.round(g.evLost * 100) / 100);
+    const missed = g.missed.slice(0, 12);
+    els.repMissedLabel.hidden = !missed.length;
+    els.repMissed.hidden = !missed.length;
+    els.repMissed.replaceChildren(...missed.map((m) => {
+      const li = document.createElement('li');
+      const verb = { insurance: 'take insurance', surrender: 'surrender' }[m.play] || m.play;
+      li.textContent = `${m.hand} vs ${m.up} at true count ${Counting.signed(m.tc)}: the index (${Counting.signed(m.index)}) says ${verb}`;
+      return li;
+    }));
+    els.repCount.hidden = session || !shoe || shoe.endRunning === null || shoe.endGuess !== null;
+    els.repCountResult.textContent = shoe && shoe.endGuess !== null
+      ? endCountText(shoe) : '';
+    els.repGuess.value = '';
+    if (!els.reportDialog.open) els.reportDialog.showModal();
+    if (!els.repCount.hidden) els.repGuess.focus();
+  }
+
+  function endCountText(shoe) {
+    const err = shoe.endGuess - shoe.endRunning;
+    return err === 0
+      ? `Right: the running count at the cut card was ${Counting.signed(shoe.endRunning)}.`
+      : `The running count at the cut card was ${Counting.signed(shoe.endRunning)}; you were off by ${Counting.signed(err)}.`;
+  }
+
+  els.repCount.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const shoe = reportShown;
+    const guess = Counting.parseGuess(els.repGuess.value);
+    if (!shoe || guess === null) {
+      els.repCountResult.textContent = 'Enter the running count as a whole number, like +3 or -2.';
+      return;
+    }
+    shoe.endGuess = guess;
+    shoe.summary = Report.summary(shoe, { houseEdge: shoe.houseEdge }, shoe.summary.when);
+    const i = reports.findIndex((r) => r.when === shoe.summary.when);
+    if (i >= 0) reports[i] = shoe.summary;
+    storage('set', REPORTS_KEY, JSON.stringify(reports));
+    els.repCount.hidden = true;
+    els.repCountResult.textContent = endCountText(shoe);
+  });
+  els.reportOpen.addEventListener('click', () => showReport(null));
+  els.reportClose.addEventListener('click', () => els.reportDialog.close());
+  els.reportDialog.addEventListener('click', (e) => { if (e.target === els.reportDialog) els.reportDialog.close(); });
+
   // --- Bankroll estimates (F16) ---
 
   const Bankroll = window.BlackjackBankroll;
@@ -1538,6 +1656,7 @@
     els.prefBack.value = prefs.back;
     els.prefWongOut.value = String(prefs.wongOut);
     els.prefWongIn.value = String(prefs.wongIn);
+    els.prefShoeReport.checked = prefs.shoeReport;
   }
 
   function readPrefs() {
@@ -1545,6 +1664,7 @@
       speed: els.prefSpeed.value, volume: Number(els.prefVolume.value) / 100,
       table: els.prefTable.value, back: els.prefBack.value,
       wongOut: Number(els.prefWongOut.value), wongIn: Number(els.prefWongIn.value),
+      shoeReport: els.prefShoeReport.checked,
     });
     storage('set', PREFS_KEY, JSON.stringify(prefs));
     applyPrefs();
@@ -1579,6 +1699,7 @@
     ['Counting', [
       ['k', 'Show or hide the count', els.countToggle], ['q', 'Check your running count', els.countGuess],
       ['b', 'Put the suggested bet in the bet box', els.suggestBet], ['j', 'Sit out / sit back in', els.sitToggle],
+      ['e', 'Counter\'s report card', els.reportOpen],
     ]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
@@ -1653,7 +1774,7 @@
   els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
 
   document.addEventListener('keydown', (e) => {
-    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open || els.bankDialog.open) return; // Escape closes dialogs natively
+    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open || els.bankDialog.open || els.reportDialog.open) return; // Escape closes dialogs natively
     // Typing in any box (bet, side bets, count guess) isn't a shortcut.
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).

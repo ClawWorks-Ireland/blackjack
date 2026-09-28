@@ -119,7 +119,7 @@
     const { total, soft } = BJ.handValue(cards);
     const vs = `vs dealer ${upName(up)} at true count ${formatTrue(tc)}`;
     const dev = (action, desc, index) => ({
-      action, label: LABEL[action], deviation: true, basicLabel: basic.label,
+      action, label: LABEL[action], deviation: true, index, basicLabel: basic.label,
       reason: `${desc} ${vs}, index ${signed(index)}`,
     });
     if (soft) return basic;
@@ -161,7 +161,7 @@
     const name = evenMoney ? 'even money' : 'insurance';
     if (Math.floor(tc) >= INSURANCE_INDEX) {
       return {
-        action: 'insurance', label: evenMoney ? 'Even money' : 'Take insurance', deviation: true,
+        action: 'insurance', label: evenMoney ? 'Even money' : 'Take insurance', deviation: true, index: INSURANCE_INDEX,
         reason: `True count ${formatTrue(tc)} is at least ${signed(INSURANCE_INDEX)}: the ${name} bet now pays on average`,
       };
     }

@@ -209,6 +209,7 @@
   }
 
   const api = {
+    csvField,
     bankrollSeries, sparkPoints, historyCSV, HISTORY_SHOWN,
     recordEvLost, evLostRate, recordMiss, emptyStats, recordRound, winRate, parseStats, recordHint, hintRate, recordMove, accuracy, recordCountCheck, countRate, returnRate, HISTORY_MAX, addHistory, parseHistory,
   };
