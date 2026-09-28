@@ -53,6 +53,45 @@
     return out;
   }
 
+  /** Small, fast seeded generator (mulberry32): the same seed gives the same numbers. */
+  function seededRng(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /** 32-bit FNV-1a hash of a string, to seed a shuffle from text. */
+  function hashSeed(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h >>> 0;
+  }
+
+  /**
+   * A shoe seed as typed: "lucky" starts at shoe 1, "lucky-7" at shoe 7.
+   * Returns {seed, shoeNo}, or null for blank or unusable text.
+   */
+  function parseSeed(text) {
+    const t = String(text ?? '').trim();
+    if (!t || t.length > 40 || /[^\w.-]/.test(t)) return null;
+    const m = t.match(/^(.+)-(\d{1,6})$/);
+    return m && Number(m[2]) >= 1 ? { seed: m[1], shoeNo: Number(m[2]) } : { seed: t, shoeNo: 1 };
+  }
+
+  /** A random seed for a table the player didn't seed, so every shoe can still be replayed. */
+  const randomSeed = (rng = Math.random) => Math.floor(rng() * 36 ** 6).toString(36).padStart(6, '0');
+
+  /** Shoe number `shoeNo` of a seed: the same cards every time for the same deck count. */
+  const seededShoe = (decks, seed, shoeNo) => shuffle(createShoe(decks), seededRng(hashSeed(`${seed}-${shoeNo}`)));
+
   function cardValue(card) {
     if (card.rank === 'A') return 11;
     if (['J', 'Q', 'K'].includes(card.rank)) return 10;
@@ -124,7 +163,7 @@
     constructor({
       bankroll = 1000, decks = 6, minBet = 1, maxBet = Infinity, penetration = PENETRATION, rng = Math.random,
       h17 = false, payout = 1.5, das = true, lateSurrender = true,
-      rsa = false, enhc = false, obo = false, doubleOn = 'any',
+      rsa = false, enhc = false, obo = false, doubleOn = 'any', seed = null, shoeNo = 1,
     } = {}) {
       this.bankroll = bankroll;
       this.decks = decks;
@@ -140,7 +179,13 @@
       this.maxBet = maxBet; // table limit
       this.penetration = penetration;
       this.rng = rng;
-      this.shoe = shuffle(createShoe(decks), rng);
+      // F19: with a seed, shoe n is always the same cards (seed "x", shoe 3 = "x-3").
+      this.seed = seed === null || seed === undefined ? null : String(seed);
+      this.shoeNo = Number.isInteger(shoeNo) && shoeNo >= 1 ? shoeNo : 1;
+      this.shoe = this.seed === null ? shuffle(createShoe(decks), rng) : seededShoe(decks, this.seed, this.shoeNo);
+      this.drawLog = []; // cards drawn this round, in order (for replay)
+      this.actionLog = []; // decisions this round, in order (for replay)
+      this.logging = false;
       this.shuffles = 0; // new shoes started at the cut card (between rounds)
       this.emergencyShuffles = 0; // shoe ran dry mid-round (tiny shoes only)
       this.phase = 'betting';
@@ -204,7 +249,21 @@
 
     draw() {
       if (!this.shoe.length) this.refillFromDiscards();
-      return this.shoe.pop();
+      const card = this.shoe.pop();
+      if (this.logging) this.drawLog.push({ rank: card.rank, suit: card.suit });
+      return card;
+    }
+
+    /** "x-3" for shoe 3 of seed x, or null for an unseeded game. */
+    get shoeSeed() {
+      return this.seed === null ? null : `${this.seed}-${this.shoeNo}`;
+    }
+
+    /** Replace the shoe at the cut card: the next seeded shoe, or a random one. */
+    freshShoe() {
+      if (this.seed === null) this.shoe = shuffle(createShoe(this.decks), this.rng);
+      else this.shoe = seededShoe(this.decks, this.seed, ++this.shoeNo);
+      this.shuffles++;
     }
 
     /**
@@ -238,23 +297,32 @@
     watchRound(decide) {
       if (this.phase === 'player' || this.phase === 'insurance') throw new Error('Round in progress');
       const newShoe = this.cutCardReached;
-      if (newShoe) {
-        this.shoe = shuffle(createShoe(this.decks), this.rng);
-        this.shuffles++;
-      }
+      if (newShoe) this.freshShoe();
       this.newShoe = newShoe;
-      const seat = [this.draw(), this.draw()];
+      const first = [this.draw(), this.draw()];
       const dealer = [this.draw(), this.draw()];
-      if (!isBlackjack(dealer) && !isBlackjack(seat)) {
-        for (let n = 0; n < 12 && handValue(seat).total < 21; n++) {
-          const a = decide(seat, dealer[0]);
-          if (a !== 'hit' && a !== 'double' && a !== 'split') break;
-          seat.push(this.draw());
-          if (a === 'double') break;
+      let seats = [first];
+      if (!isBlackjack(dealer) && !isBlackjack(first)) {
+        // A pair the seat splits becomes two hands (no resplit; split aces take one card).
+        const pair = first[0].rank === first[1].rank;
+        if (pair && decide(first, dealer[0]) === 'split') {
+          seats = [[first[0], this.draw()], [first[1], this.draw()]];
         }
-        if (!isBust(seat)) while (dealerShouldHit(dealer, this.h17)) dealer.push(this.draw());
+        const aces = seats.length > 1 && first[0].rank === 'A';
+        if (!aces) {
+          for (const seat of seats) {
+            for (let n = 0; n < 12 && handValue(seat).total < 21; n++) {
+              let a = decide(seat, dealer[0]);
+              if (a === 'split') a = 'hit'; // no resplitting at the empty seat
+              if (a !== 'hit' && a !== 'double') break;
+              seat.push(this.draw());
+              if (a === 'double') break;
+            }
+          }
+        }
+        if (seats.some((s) => !isBust(s))) while (dealerShouldHit(dealer, this.h17)) dealer.push(this.draw());
       }
-      return { seat, dealer, newShoe };
+      return { seat: seats[0], seats, dealer, newShoe };
     }
 
     /**
@@ -320,10 +388,10 @@
       if (total > this.bankroll) throw new Error('Bet exceeds bankroll');
       // Between rounds is the only time the shoe is replaced.
       this.newShoe = this.cutCardReached;
-      if (this.newShoe) {
-        this.shoe = shuffle(createShoe(this.decks), this.rng);
-        this.shuffles++;
-      }
+      if (this.newShoe) this.freshShoe();
+      this.drawLog = [];
+      this.actionLog = [];
+      this.logging = true;
       this.bankroll -= main;
       this.spotBets = bets.slice();
       this.results = [];
@@ -350,11 +418,13 @@
       this.tookEvenMoney = this.evenMoneyOffered;
       this.insurance = this.insuranceCost;
       this.bankroll -= this.insurance;
+      this.actionLog.push('insurance');
       this.peek();
     }
 
     declineInsurance() {
       if (this.phase !== 'insurance') throw new Error('Insurance is not on offer');
+      this.actionLog.push('no-insurance');
       this.peek();
     }
 
@@ -387,6 +457,7 @@
     hit() {
       const h = this.requireHand();
       if (!this.canHit()) throw new Error('Split aces take one card');
+      this.actionLog.push('hit');
       h.cards.push(this.draw());
       if (handValue(h.cards).total >= 21) h.done = true;
       this.advance();
@@ -394,11 +465,13 @@
 
     stand() {
       this.requireHand().done = true;
+      this.actionLog.push('stand');
       this.advance();
     }
 
     double() {
       if (!this.canDouble()) throw new Error('Cannot double now');
+      this.actionLog.push('double');
       const h = this.currentHand;
       this.bankroll -= h.bet;
       h.bet *= 2;
@@ -409,6 +482,7 @@
 
     split() {
       if (!this.canSplit()) throw new Error('Cannot split now');
+      this.actionLog.push('split');
       const h = this.currentHand;
       const aces = h.cards[0].rank === 'A';
       this.bankroll -= h.bet;
@@ -424,6 +498,7 @@
 
     surrender() {
       if (!this.canSurrender()) throw new Error('Cannot surrender now');
+      this.actionLog.push('surrender');
       const h = this.currentHand;
       h.surrendered = true;
       h.done = true;
@@ -466,6 +541,7 @@
     finish() {
       this.results = this.hands.map((h) => settle(h.cards, this.dealer, h.bet, { ...h, payout: this.payout }));
       if (this.enhc) this.settleENHC();
+      this.logging = false;
       // Stakes were removed when placed, so return stake + net per hand.
       this.hands.forEach((h, i) => { this.bankroll += h.bet + this.results[i].net; });
       this.phase = 'done';
@@ -506,6 +582,7 @@
         maxBet: Number.isFinite(this.maxBet) ? this.maxBet : null, penetration: this.penetration,
         h17: this.h17, payout: this.payout, das: this.das, lateSurrender: this.lateSurrender,
         rsa: this.rsa, enhc: this.enhc, obo: this.obo, doubleOn: this.doubleOn,
+        seed: this.seed, shoeNo: this.shoeNo, drawLog: this.drawLog, actionLog: this.actionLog, logging: this.logging,
         shoe: this.shoe, phase: this.phase,
         hands: this.hands, active: this.active, dealer: this.dealer, results: this.results,
         insurance: this.insurance, insuranceNet: this.insuranceNet, tookEvenMoney: this.tookEvenMoney,
@@ -525,8 +602,11 @@
         minBet: data.minBet ?? 1, maxBet: data.maxBet ?? Infinity, penetration: data.penetration ?? PENETRATION,
         h17: data.h17 ?? false, payout: data.payout ?? 1.5, das: data.das ?? true,
         lateSurrender: data.lateSurrender ?? true, rsa: data.rsa ?? false, enhc: data.enhc ?? false,
-        obo: data.obo ?? false, doubleOn: data.doubleOn ?? 'any',
+        obo: data.obo ?? false, doubleOn: data.doubleOn ?? 'any', seed: data.seed ?? null, shoeNo: data.shoeNo ?? 1,
       });
+      g.drawLog = Array.isArray(data.drawLog) ? data.drawLog.filter(validCard).map(({ rank, suit }) => ({ rank, suit })) : [];
+      g.actionLog = Array.isArray(data.actionLog) ? data.actionLog.filter((a) => typeof a === 'string') : [];
+      g.logging = data.logging === true;
       const copy = (cards) => cards.map(({ rank, suit }) => ({ rank, suit }));
       g.shoe = copy(data.shoe);
       g.phase = data.phase;
@@ -571,6 +651,8 @@
     if (d.maxBet !== undefined && d.maxBet !== null && !(Number.isFinite(d.maxBet) && d.maxBet > 0)) return false;
     for (const k of ['h17', 'das', 'lateSurrender', 'rsa', 'enhc', 'obo']) if (d[k] !== undefined && !isBool(d[k])) return false;
     if (d.doubleOn !== undefined && !DOUBLE_ON.includes(d.doubleOn)) return false;
+    if (d.seed !== undefined && d.seed !== null && !(typeof d.seed === 'string' && d.seed.length <= 40)) return false;
+    if (d.shoeNo !== undefined && !(Number.isInteger(d.shoeNo) && d.shoeNo >= 1)) return false;
     if (d.payout !== undefined && !PAYOUTS.includes(d.payout)) return false;
     if (!validCards(d.shoe) || !validCards(d.dealer)) return false;
     if (!Array.isArray(d.hands) || !d.hands.every(validHand) || d.hands.length > MAX_HANDS * MAX_SPOTS) return false;
@@ -590,7 +672,7 @@
 
   const api = {
     SUITS, RANKS, MAX_HANDS, MAX_SPOTS, PAYOUTS, DOUBLE_ON, SIDE_MAX, createShoe, shuffle, cardValue, handValue, canDoubleOn,
-    isBlackjack, isBust, dealerShouldHit, settle, Game,
+    isBlackjack, isBust, dealerShouldHit, settle, Game, seededRng, hashSeed, parseSeed, randomSeed, seededShoe,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

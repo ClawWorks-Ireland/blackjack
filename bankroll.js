@@ -18,17 +18,8 @@
   const Counting = load('BlackjackCounting', './counting.js');
   const Rules = load('BlackjackRules', './rules.js');
 
-  /** Small, fast seeded generator (mulberry32). */
-  function seededRng(seed) {
-    let a = seed >>> 0;
-    return function () {
-      a = (a + 0x6d2b79f5) >>> 0;
-      let t = a;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
+  /** Small, fast seeded generator (mulberry32), shared with the engine. */
+  const seededRng = BJ.seededRng;
 
   /**
    * Play `rounds` rounds and return per-round statistics in units.

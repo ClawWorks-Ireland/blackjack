@@ -117,6 +117,15 @@ button starts you over with $1,000.
   the same report for the whole session. It works with the count hidden;
   the last 20 shoe reports are saved and added to the CSV export. Turn
   the automatic report off in Settings.
+- **Seeded shoes and hand replay (L):** every table is seeded, and the
+  current shoe's seed ("lucky-3" = shoe 3 of "lucky") shows under the
+  rules line with a Copy button. Type a seed in Table rules to get the
+  same shoes card for card (same rules, cut card and number of spots);
+  leave it blank for a random one. The shoe report's "Play this shoe
+  again" restarts the reported shoe from its first card. Replay (L) steps
+  through any of the last 20 rounds card by card (← →), rebuilt by the
+  engine from the logged cards and decisions, with the coach's move, the
+  count a counter could see at that moment and the cost of any mistake.
 - **Card-counting trainer (Hi-Lo):** press K to show or hide the
   running count, true count and decks unseen. The dealer's hole card
   isn't counted until it's turned over, and the count restarts with each
@@ -216,6 +225,7 @@ and history; it doesn't touch the bankroll.
 | J | Sit out / sit back in |
 | U | Bankroll and risk of ruin |
 | E | Counter's report card |
+| L | Replay one of the last 20 hands |
 | W | Training drills |
 | O | Settings |
 | V | Strategy chart |
@@ -237,6 +247,7 @@ and history; it doesn't touch the bankroll.
 | `chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
 | `a11y.js` | Card announcements and contrast checks. No DOM code |
 | `report.js` | Counter's report card: bet correlation, index plays, luck vs skill. No DOM code |
+| `replay.js` | Rebuilds a logged round step by step for replay. No DOM code |
 | `bankroll.js` | Seeded bankroll simulation: EV, SD, N0, risk of ruin. No DOM code |
 | `sim-worker.js` | Runs the bankroll simulation off the main thread |
 | `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |

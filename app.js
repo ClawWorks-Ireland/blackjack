@@ -10,6 +10,7 @@
   const STATS_KEY = 'blackjack.stats';
   const HISTORY_KEY = 'blackjack.history';
   const REPORTS_KEY = 'blackjack.shoeReports';
+  const SEED_KEY = 'blackjack.seed'; // the seed typed in Table rules; blank = random
   const MUTE_KEY = 'blackjack.muted';
   const COACH_KEY = 'blackjack.coach';
   const COUNT_KEY = 'blackjack.showCount';
@@ -34,15 +35,21 @@
   const EV = window.BlackjackEV;
   let roundMistakes = []; // this round's off-chart plays with their cost
   const Report = window.BlackjackReport;
+  const Replay = window.BlackjackReplay;
   let shoeTracker = Report.newShoe(); // F18: this shoe's bets, index spots and count checks
   let sessionShoes = []; // finished shoes this session
   let reports = [];      // saved shoe summaries, newest first (set after storage is ready)
   let reportShown = null; // the shoe the report dialog is showing (for the end-count check)
+  let roundBefore = null; // F19: bankroll and count at this round's deal, for its replay record
+  const REPLAY_KEEP = 20; // rounds that keep a replay record
   const PREFS_KEY = 'blackjack.prefs';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  const newGame = (bankroll, rules) =>
-    new Game({ bankroll, minBet: TABLE_MIN, maxBet: TABLE_MAX, ...Rules.normalizeRules(rules) });
+  /** A new table. Every game is seeded (a random seed unless you typed one), so any shoe can be replayed. */
+  const newGame = (bankroll, rules, seedText = storage('get', SEED_KEY)) => {
+    const parsed = Blackjack.parseSeed(seedText) || { seed: Blackjack.randomSeed(), shoeNo: 1 };
+    return new Game({ bankroll, minBet: TABLE_MIN, maxBet: TABLE_MAX, ...Rules.normalizeRules(rules), ...parsed });
+  };
   // A saved game carries its own rules; otherwise use the saved settings.
   let game = loadGame() || newGame(START_BANKROLL, Rules.normalizeRules(parseJSON(storage('get', RULES_KEY))));
   // Saves from before table limits load without them; apply today's limits.
@@ -127,6 +134,12 @@
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
+    seedText: $('seed-text'), seedCopy: $('seed-copy'), seedCopied: $('seed-copied'), setSeed: $('set-seed'),
+    reportAgain: $('report-again'), replayDialog: $('replay'), replayOpen: $('replay-open'), replayClose: $('replay-close'),
+    replayPick: $('replay-pick'), replayEmpty: $('replay-empty'), replayStage: $('replay-stage'),
+    replayDealer: $('replay-dealer'), replayDealerTotal: $('replay-dealer-total'), replayHands: $('replay-hands'),
+    replayText: $('replay-text'), replayCoach: $('replay-coach'), replayPrev: $('replay-prev'), replayNext: $('replay-next'),
+    replayStep: $('replay-step'),
     settingsForm: $('settings-form'), setDecks: $('set-decks'), setDas: $('set-das'), setLs: $('set-ls'),
     setDouble: $('set-double'), setRsa: $('set-rsa'), setEnhc: $('set-enhc'), setObo: $('set-obo'),
     setEdge: $('set-edge'), setNote: $('set-note'), setApply: $('set-apply'), setCancel: $('set-cancel'),
@@ -480,7 +493,10 @@
     recordedRound = round;
     both((s) => Stats.recordRound(s, game.results, game.net, game.wagered));
     storage('set', STATS_KEY, JSON.stringify(stats));
-    history = Stats.addHistory(history, historyEntry());
+    const entry = historyEntry();
+    if (roundBefore) entry.replay = Replay.recordOf(game, roundBefore);
+    history = Stats.addHistory(history, entry);
+    for (const old of history.slice(REPLAY_KEEP)) delete old.replay;
     storage('set', HISTORY_KEY, JSON.stringify(history));
     Report.recordResult(shoeTracker, { net: game.net, evLost: roundMistakes.reduce((s, m) => s + m.dollars, 0) });
     if (game.cutCardReached) {
@@ -802,6 +818,8 @@
     // F18: what the ramp says for this round (a shoe that is due to be replaced starts at 0).
     if (game.cutCardReached && shoeTracker.rounds.length) finishShoe(false);
     const tcAtBet = game.cutCardReached ? 0 : Counting.countState(game).trueCount;
+    const seenAtBet = game.cutCardReached ? { running: 0, unseen: game.decks * 52 } : Counting.countState(game);
+    const beforeDeal = { bankroll: game.bankroll, running: seenAtBet.running, unseen: seenAtBet.unseen };
     const unitAtBet = betUnit();
     const suggestedAtBet = Counting.suggestedBet(tcAtBet, {
       min: game.minBet, unit: unitAtBet, max: game.maxBet, bankroll: game.bankroll / spots,
@@ -815,6 +833,7 @@
       coachNote = null;
       roundMistakes = [];
       Report.recordBet(shoeTracker, { bet, suggested: suggestedAtBet, unit: unitAtBet, spots, tc: tcAtBet });
+      roundBefore = beforeDeal;
       countNote = game.newShoe ? 'New shoe shuffled: the count starts again from 0.' : null;
       lastBet = bet;
       storage('set', LAST_BET_KEY, String(bet));
@@ -1042,7 +1061,19 @@
   function renderRulesText() {
     const [one, two] = Rules.describe(game.rules);
     els.rulesText.replaceChildren(one, document.createElement('br'), two);
+    els.seedText.textContent = game.shoeSeed ? `Shoe seed ${game.shoeSeed}` : 'Shoe seed: random (older save)';
+    els.seedCopy.hidden = !game.shoeSeed;
   }
+
+  els.seedCopy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(game.shoeSeed);
+      els.seedCopied.textContent = 'Copied';
+    } catch {
+      els.seedCopied.textContent = `Copy failed: the seed is ${game.shoeSeed}`;
+    }
+    setTimeout(() => { els.seedCopied.textContent = ''; }, 2000);
+  });
 
   const radio = (name) => els.settingsForm.querySelector(`input[name="${name}"]:checked`);
 
@@ -1070,6 +1101,7 @@
     els.setRsa.checked = rules.rsa;
     els.setEnhc.checked = rules.enhc;
     els.setObo.checked = rules.obo;
+    els.setSeed.value = storage('get', SEED_KEY) || '';
     renderSettingsPreview();
   }
 
@@ -1102,9 +1134,18 @@
     e.preventDefault();
     if (els.setApply.disabled) return;
     const chosen = readSettings();
+    const seedText = els.setSeed.value.trim();
+    if (seedText && !Blackjack.parseSeed(seedText)) {
+      els.setSeed.setCustomValidity('Letters, digits, dots, dashes and underscores only, up to 40.');
+      els.setSeed.reportValidity();
+      return;
+    }
+    els.setSeed.setCustomValidity('');
+    const seedChanged = seedText !== (storage('get', SEED_KEY) || '');
+    storage('set', SEED_KEY, seedText);
     storage('set', RULES_KEY, JSON.stringify(chosen));
     els.settings.close();
-    if (Rules.sameRules(chosen, game.rules)) return;
+    if (Rules.sameRules(chosen, game.rules) && !seedChanged) return;
     // New rules mean a new table: same bankroll, fresh shoe, empty felt.
     finishShoe(false);
     game = newGame(game.bankroll, chosen);
@@ -1401,6 +1442,7 @@
     shoeTracker = Report.newShoe();
     if (!shoe.rounds.length) return null;
     if (atCut) shoe.endRunning = Counting.countState(game).running;
+    shoe.shoeSeed = game.shoeSeed;
     shoe.houseEdge = houseEdgeNow();
     shoe.summary = Report.summary(shoe, { houseEdge: shoe.houseEdge });
     sessionShoes.push(shoe);
@@ -1446,6 +1488,7 @@
     els.repCountResult.textContent = shoe && shoe.endGuess !== null
       ? endCountText(shoe) : '';
     els.repGuess.value = '';
+    els.reportAgain.hidden = !(shoe && shoe.shoeSeed);
     if (!els.reportDialog.open) els.reportDialog.showModal();
     if (!els.repCount.hidden) els.repGuess.focus();
   }
@@ -1474,6 +1517,93 @@
     els.repCountResult.textContent = endCountText(shoe);
   });
   els.reportOpen.addEventListener('click', () => showReport(null));
+  // Re-run the reported shoe from its first card: same seed, rules and bankroll.
+  els.reportAgain.addEventListener('click', () => {
+    const shoe = reportShown;
+    if (!shoe || !shoe.shoeSeed || game.phase === 'player' || game.phase === 'insurance') return;
+    els.reportDialog.close();
+    finishShoe(false);
+    game = newGame(game.bankroll, game.rules, shoe.shoeSeed);
+    shown = new WeakSet();
+    hintFor = null;
+    coachNote = null;
+    render();
+    els.message.textContent = `Shoe ${shoe.shoeSeed} again, from the first card. Place your bet.`;
+  });
+
+  // --- Hand replay (F19) ---
+
+  let replaySteps = [];
+  let replayAt = 0;
+  const replayable = () => history.filter((e) => e.replay).slice(0, REPLAY_KEEP);
+
+  function renderReplayStep() {
+    const step = replaySteps[replayAt];
+    if (!step) return;
+    const card = (c) => (c ? cardEl(c, false) : cardEl({ rank: 'A', suit: '♠' }, true));
+    els.replayDealer.replaceChildren(...step.dealer.map(card));
+    const up = step.dealer.filter(Boolean);
+    els.replayDealerTotal.textContent = up.length ? `(${formatTotal(up)}${step.dealer.includes(null) ? ' showing' : ''})` : '';
+    els.replayHands.replaceChildren(...step.hands.map((h, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'player-hand';
+      const h2 = document.createElement('h2');
+      h2.textContent = `${step.hands.length > 1 ? `Hand ${i + 1}` : 'You'}${h.total ? ` (${h.total})` : ''} · ${money(h.bet)}`;
+      const cards = document.createElement('div');
+      cards.className = 'cards';
+      cards.append(...h.cards.map((c) => cardEl(c, false)));
+      wrap.append(h2, cards);
+      return wrap;
+    }));
+    els.replayText.textContent = step.text;
+    const d = step.decision;
+    if (d) {
+      const name = (a) => MOVE_LABEL[a] || a;
+      let text = `Count: running ${Counting.signed(d.running)}, true ${Counting.formatTrue(d.tc)}. ` +
+        `Basic strategy: ${name(d.basic)}.${d.count !== d.basic ? ` Count play: ${name(d.count)}.` : ''}`;
+      if (d.move === d.basic || d.move === d.count) text += ' You followed it.';
+      else text += d.cost ? ` Mistake: it cost ${money(d.cost.dollars)} (${(d.cost.fraction * 100).toFixed(1)}% of the bet).` : ' Off the chart.';
+      els.replayCoach.textContent = text;
+    } else els.replayCoach.textContent = '';
+    els.replayStep.textContent = `Step ${replayAt + 1} of ${replaySteps.length}`;
+    els.replayPrev.disabled = replayAt === 0;
+    els.replayNext.disabled = replayAt === replaySteps.length - 1;
+  }
+
+  function loadReplay() {
+    const e = replayable().find((x) => String(x.round) === els.replayPick.value);
+    replaySteps = e ? Replay.replayRound(e.replay).steps : [];
+    replayAt = 0;
+    renderReplayStep();
+  }
+
+  function openReplay() {
+    if (els.replayDialog.open) return;
+    const list = replayable();
+    els.replayEmpty.hidden = list.length > 0;
+    els.replayStage.hidden = !list.length;
+    els.replayPick.disabled = !list.length;
+    els.replayPick.replaceChildren(...list.map((e) => {
+      const o = document.createElement('option');
+      o.value = String(e.round);
+      o.textContent = `Round ${e.round}: ${e.hands.map((h) => `${h.cards} (${h.total})`).join(' | ')} vs ${e.dealerCards} · ${signedMoney(e.net)}`;
+      return o;
+    }));
+    els.replayDialog.showModal();
+    if (list.length) { loadReplay(); els.replayNext.focus(); }
+  }
+
+  els.replayOpen.addEventListener('click', openReplay);
+  els.replayPick.addEventListener('change', loadReplay);
+  els.replayPrev.addEventListener('click', () => { if (replayAt > 0) { replayAt--; renderReplayStep(); } });
+  els.replayNext.addEventListener('click', () => { if (replayAt < replaySteps.length - 1) { replayAt++; renderReplayStep(); } });
+  els.replayClose.addEventListener('click', () => els.replayDialog.close());
+  els.replayDialog.addEventListener('click', (e) => { if (e.target === els.replayDialog) els.replayDialog.close(); });
+  // ← and → always step, even from the round picker (↑ and ↓ still change rounds there).
+  els.replayDialog.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); els.replayNext.click(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); els.replayPrev.click(); }
+  });
   els.reportClose.addEventListener('click', () => els.reportDialog.close());
   els.reportDialog.addEventListener('click', (e) => { if (e.target === els.reportDialog) els.reportDialog.close(); });
 
@@ -1593,8 +1723,9 @@
 
   // --- Sitting out (Wonging) ---
 
-  const seatDecide = (cards, up) => Strategy.recommend(cards, up,
-    { canDouble: cards.length === 2, canSplit: false, canSurrender: false }, game.rules).action;
+  const seatDecide = (cards, up) => Strategy.recommend(cards, up, {
+    canDouble: cards.length === 2, canSplit: cards.length === 2 && cards[0].rank === cards[1].rank, canSurrender: false,
+  }, game.rules).action;
 
   /** Deal one round to an empty seat: counted, no money, no stats. */
   function watchRound() {
@@ -1602,7 +1733,7 @@
     watched = game.watchRound(seatDecide);
     countNote = watched.newShoe ? 'New shoe shuffled: the count starts again from 0.' : null;
     const who = (cards) => cards.map((c) => A11y.cardName(c)).join(', ');
-    pendingAnnouncement = `Watching. Empty seat: ${who(watched.seat)}. Dealer: ${who(watched.dealer)}.`;
+    pendingAnnouncement = `Watching. Empty seat: ${watched.seats.map(who).join('; ')}. Dealer: ${who(watched.dealer)}.`;
     userActed = true;
     render();
   }
@@ -1622,15 +1753,17 @@
     }
     els.dealerCards.replaceChildren(...watched.dealer.map((c) => cardEl(c, false)));
     els.dealerTotal.textContent = `(${formatTotal(watched.dealer)})`;
-    const h2 = document.createElement('h2');
-    h2.textContent = `Empty seat (${formatTotal(watched.seat)})`;
-    const cards = document.createElement('div');
-    cards.className = 'cards';
-    cards.append(...watched.seat.map((c) => cardEl(c, false)));
-    const wrap = document.createElement('div');
-    wrap.className = 'player-hand';
-    wrap.append(h2, cards);
-    els.playerHands.replaceChildren(wrap);
+    els.playerHands.replaceChildren(...watched.seats.map((seat, i) => {
+      const h2 = document.createElement('h2');
+      h2.textContent = `Empty seat${watched.seats.length > 1 ? `, hand ${i + 1}` : ''} (${formatTotal(seat)})`;
+      const cards = document.createElement('div');
+      cards.className = 'cards';
+      cards.append(...seat.map((c) => cardEl(c, false)));
+      const wrap = document.createElement('div');
+      wrap.className = 'player-hand';
+      wrap.append(h2, cards);
+      return wrap;
+    }));
     els.message.textContent = 'Watching: no money moved. Watch another round, or sit back in (J).';
     delete els.message.dataset.outcome;
     els.message.classList.remove('reveal');
@@ -1699,7 +1832,7 @@
     ['Counting', [
       ['k', 'Show or hide the count', els.countToggle], ['q', 'Check your running count', els.countGuess],
       ['b', 'Put the suggested bet in the bet box', els.suggestBet], ['j', 'Sit out / sit back in', els.sitToggle],
-      ['e', 'Counter\'s report card', els.reportOpen],
+      ['e', 'Counter\'s report card', els.reportOpen], ['l', 'Replay one of the last 20 hands', els.replayOpen],
     ]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
@@ -1774,7 +1907,7 @@
   els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
 
   document.addEventListener('keydown', (e) => {
-    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open || els.bankDialog.open || els.reportDialog.open) return; // Escape closes dialogs natively
+    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open || els.bankDialog.open || els.reportDialog.open || els.replayDialog.open) return; // Escape closes dialogs natively
     // Typing in any box (bet, side bets, count guess) isn't a shortcut.
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).

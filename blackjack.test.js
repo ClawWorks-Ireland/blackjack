@@ -913,3 +913,20 @@ test('F17: new rules are saved and checked', () => {
   assert.equal(BJ.Game.fromJSON({ ...JSON.parse(JSON.stringify(g)), rsa: 1 }), null);
   assert.equal(new BJ.Game({ obo: true }).obo, false, 'OBO only means something under ENHC');
 });
+
+test('N2: the sit-out seat splits a pair into two hands', () => {
+  // Seat 8,8 vs dealer 10,7: split; hands draw 3 and 10, then hit 8,3 = 11 once (K = 21).
+  const g = riggedGame([c('8'), c('8'), c('10'), c('7'), c('3'), c('10'), c('K')]);
+  const decide = (cards) => {
+    if (cards.length === 2 && cards[0].rank === cards[1].rank) return 'split';
+    return BJ.handValue(cards).total < 17 ? 'hit' : 'stand';
+  };
+  const w = g.watchRound(decide);
+  assert.equal(w.seats.length, 2);
+  assert.deepEqual(w.seats.map((s) => BJ.handValue(s).total), [21, 18]);
+  assert.equal(w.seat, w.seats[0]);
+  // Split aces take one card each.
+  const a = riggedGame([c('A'), c('A'), c('10'), c('7'), c('5'), c('9'), c('K')]);
+  const wa = a.watchRound((cards) => (cards.length === 2 && cards[0].rank === 'A' && cards[1].rank === 'A' ? 'split' : 'hit'));
+  assert.deepEqual(wa.seats.map((s) => s.length), [2, 2]);
+});

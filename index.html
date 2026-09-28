@@ -29,6 +29,7 @@
       <button id="help-open" class="toggle" aria-haspopup="dialog">Rules &amp; help <kbd>?</kbd></button>
     </header>
     <p id="rules-text" class="rules"></p>
+    <p class="rules seed-line"><span id="seed-text"></span> <button type="button" id="seed-copy" class="link">Copy</button> <span id="seed-copied" class="note" aria-live="polite"></span></p>
 
     <section class="hand" aria-labelledby="dealer-label">
       <h2 id="dealer-label">Dealer <span id="dealer-total" class="total"></span></h2>
@@ -154,6 +155,7 @@
     <ol id="history" class="history" aria-labelledby="history-label" tabindex="0"></ol>
     <p class="note">Pushes don't count toward win rate. Return is money back per $1 bet, counting doubles, splits, insurance and side bets; above 100% means you're ahead. Accuracy scores every decision, hinted or not. Last 20 rounds shown; the graph and CSV cover up to 500. Session stats reset when you reload. Saved in this browser.</p>
     <button id="report-open" class="link" aria-haspopup="dialog">Counter's report <kbd>E</kbd></button>
+    <button id="replay-open" class="link" aria-haspopup="dialog">Replay a hand <kbd>L</kbd></button>
     <button id="export-csv" class="link">Export history (CSV)</button>
     <button id="reset-stats" class="link">Reset stats and history</button>
   </aside>
@@ -217,6 +219,10 @@
         <input id="set-pen" type="range" min="50" max="85" step="5" value="75">
       </label>
 
+      <label class="row" for="set-seed">Shoe seed
+        <input id="set-seed" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="blank for random">
+      </label>
+      <p class="note">The same seed deals the same shoes card for card, with the same rules, cut card and number of spots. "lucky-3" starts at shoe 3 of "lucky". Each shoe's seed is shown under the rules line.</p>
       <p id="set-edge" class="edge" aria-live="polite"></p>
       <p id="set-note" class="note" hidden>Finish this hand to change the rules.</p>
       <p class="note">The house edge assumes basic strategy and includes the cut card this game deals to. Changing the rules shuffles a new shoe. Your bankroll and stats carry over, and the coach follows the new rules.</p>
@@ -296,6 +302,28 @@
     </div>
   </dialog>
 
+  <dialog id="replay" class="help replay-dialog" aria-labelledby="replay-title">
+    <div class="help-body">
+      <h2 id="replay-title">Replay a hand</h2>
+      <label class="row" for="replay-pick">Round <select id="replay-pick"></select></label>
+      <p id="replay-empty" class="note" hidden>No rounds to replay yet: the last 20 rounds you play can be replayed here.</p>
+      <div id="replay-stage">
+        <h3>Dealer <span id="replay-dealer-total"></span></h3>
+        <div id="replay-dealer" class="cards"></div>
+        <div id="replay-hands" class="player-hands"></div>
+        <p id="replay-text" class="message" aria-live="polite"></p>
+        <p id="replay-coach" class="note"></p>
+        <div class="dialog-actions">
+          <button type="button" id="replay-prev" class="toggle" aria-label="Previous step">← Back</button>
+          <span id="replay-step" class="note"></span>
+          <button type="button" id="replay-next" class="toggle" aria-label="Next step">Next →</button>
+        </div>
+      </div>
+      <p class="note">Use ← and → to step. The count shown is what a counter at the table could see at that moment.</p>
+      <div class="dialog-actions"><button type="button" id="replay-close">Close</button></div>
+    </div>
+  </dialog>
+
   <dialog id="report" class="help report-dialog" aria-labelledby="report-title">
     <div class="help-body">
       <h2 id="report-title">Shoe report</h2>
@@ -322,7 +350,10 @@
       </form>
       <p id="rep-count-result" class="note" aria-live="polite"></p>
       <p class="note">A perfect Hi-Lo counter bets the 1-2-4-8-12 ramp on your unit and takes every index play. Expected results use an edge of minus the house edge plus 0.5% per point of true count; luck is your result minus what your bets and play were expected to make, and the skill gap is what the perfect counter expected minus that. Works with the count hidden. The last 20 shoe reports are saved and go into the CSV export.</p>
-      <div class="dialog-actions"><button type="button" id="report-close">Close</button></div>
+      <div class="dialog-actions">
+        <button type="button" id="report-close">Close</button>
+        <button type="button" id="report-again" class="toggle" hidden>Play this shoe again</button>
+      </div>
     </div>
   </dialog>
 
@@ -436,6 +467,7 @@
   <script src="rules.js"></script>
   <script src="bankroll.js"></script>
   <script src="report.js"></script>
+  <script src="replay.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

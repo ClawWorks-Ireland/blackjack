@@ -152,7 +152,7 @@
   function summary(shoe, opts, when = Date.now()) {
     const g = grade(shoe, opts);
     return {
-      when, rounds: g.rounds, r: g.r, within: g.within, spots: g.spots, taken: g.taken,
+      when, shoeSeed: shoe.shoeSeed || null, rounds: g.rounds, r: g.r, within: g.within, spots: g.spots, taken: g.taken,
       missed: g.missed.map((m) => `${m.hand} vs ${m.up} at ${m.tc >= 0 ? '+' : ''}${m.tc} (index ${m.index >= 0 ? '+' : ''}${m.index}: ${m.play})`),
       checks: g.checks, checksRight: g.checksRight, endError: g.endError,
       net: round2(g.net), expected: round2(g.expected), perfect: round2(g.perfect), luck: round2(g.luck),
@@ -174,14 +174,14 @@
     }
   }
 
-  const REPORT_COLUMNS = ['shoe_ended', 'rounds', 'bet_correlation', 'within_one_unit', 'index_spots', 'index_taken',
+  const REPORT_COLUMNS = ['shoe_ended', 'shoe_seed', 'rounds', 'bet_correlation', 'within_one_unit', 'index_spots', 'index_taken',
     'index_missed', 'count_checks', 'count_checks_right', 'end_count_error', 'net', 'expected', 'perfect_counter',
     'luck', 'skill_gap', 'ev_given_away'];
 
   /** Shoe reports as CSV rows (newest last), for the history export. */
   function reportsCSV(reports, field) {
     const rows = reports.slice().reverse().map((s) => [
-      new Date(s.when).toISOString(), s.rounds, s.r === null ? '' : s.r.toFixed(3),
+      new Date(s.when).toISOString(), s.shoeSeed || '', s.rounds, s.r === null ? '' : s.r.toFixed(3),
       s.within === null ? '' : `${Math.round(s.within * 100)}%`, s.spots, s.taken, s.missed.join('; '),
       s.checks, s.checksRight, s.endError === null ? '' : s.endError, s.net, s.expected, s.perfect, s.luck,
       s.skillGap, s.evLost,
