@@ -23,6 +23,7 @@
       <button id="count-toggle" class="toggle" aria-pressed="false">Count hidden <kbd>K</kbd></button>
       <button id="sit-toggle" class="toggle" aria-pressed="false">Sit out <kbd>J</kbd></button>
       <button id="drill-open" class="toggle" aria-haspopup="dialog">Drills <kbd>W</kbd></button>
+      <button id="bank-open" class="toggle" aria-haspopup="dialog">Bankroll <kbd>U</kbd></button>
       <button id="rules-open" class="toggle" aria-haspopup="dialog">Table rules <kbd>T</kbd></button>
       <button id="prefs-open" class="toggle" aria-haspopup="dialog">Settings <kbd>O</kbd></button>
       <button id="help-open" class="toggle" aria-haspopup="dialog">Rules &amp; help <kbd>?</kbd></button>
@@ -284,6 +285,55 @@
     </div>
   </dialog>
 
+  <dialog id="bank" class="help settings bank-dialog" aria-labelledby="bank-title">
+    <form id="bank-form" class="help-body" novalidate>
+      <h2 id="bank-title">Bankroll</h2>
+      <p class="note">What a bankroll and bet spread are worth over the long run, from a simulation of this game.</p>
+      <div class="bank-inputs">
+        <label for="bank-roll">Bankroll ($) <input id="bank-roll" type="number" min="1" step="1" value="10000" inputmode="numeric"></label>
+        <label for="bank-unit">Betting unit ($) <input id="bank-unit" type="number" min="1" step="1" value="25" inputmode="numeric"></label>
+        <label for="bank-hph">Hands per hour <input id="bank-hph" type="number" min="1" max="1000" step="1" value="100" inputmode="numeric"></label>
+      </div>
+      <fieldset>
+        <legend>Betting</legend>
+        <label><input type="radio" name="bank-ramp" value="ramp" checked> Count ramp: 1, 2, 4, 8, 12 units at true count +1 or less, +2, +3, +4, +5 and up (plays the count)</label>
+        <label><input type="radio" name="bank-ramp" value="flat"> Flat: 1 unit every round (basic strategy)</label>
+      </fieldset>
+      <fieldset class="bank-rules">
+        <legend>Rules (start from the table rules)</legend>
+        <label for="bank-decks">Decks
+          <select id="bank-decks">
+            <option value="1">1</option><option value="2">2</option><option value="6">6</option><option value="8">8</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="bank-h17"> Dealer hits soft 17</label>
+        <label class="check"><input type="checkbox" id="bank-65"> Blackjack pays 6:5</label>
+        <label class="check"><input type="checkbox" id="bank-das"> Double after a split</label>
+        <label class="check"><input type="checkbox" id="bank-ls"> Late surrender</label>
+        <label class="row" for="bank-pen">Cut card <span id="bank-pen-value">75%</span>
+          <input id="bank-pen" type="range" min="50" max="85" step="5" value="75">
+        </label>
+      </fieldset>
+      <div class="dialog-actions">
+        <button type="submit" id="bank-run">Recalculate</button>
+        <button type="button" id="bank-close" class="toggle">Close</button>
+      </div>
+      <progress id="bank-progress" max="1" value="0" hidden aria-label="Simulation progress"></progress>
+      <div id="bank-out" aria-live="polite">
+        <dl id="bank-results" class="bank-results" hidden>
+          <div><dt>EV per 100 rounds</dt><dd id="bank-ev"></dd></div>
+          <div><dt>EV per hour</dt><dd id="bank-ev-hour"></dd></div>
+          <div><dt>SD per 100 rounds</dt><dd id="bank-sd"></dd></div>
+          <div><dt>Average bet</dt><dd id="bank-avg"></dd></div>
+          <div><dt>N0 (rounds to overcome one SD)</dt><dd id="bank-n0"></dd></div>
+          <div><dt>Risk of ruin</dt><dd id="bank-ror"></dd></div>
+        </dl>
+        <p id="bank-status" class="note"></p>
+      </div>
+      <p class="note">These are estimates. They come from a seeded simulation of this game's engine playing the coach's advice, so the same inputs give the same numbers; ± is one standard error. Risk of ruin assumes you keep the same unit and spread forever and never stop, so it is the chance of ever losing the whole bankroll.</p>
+    </form>
+  </dialog>
+
   <dialog id="prefs" class="help settings prefs" aria-labelledby="prefs-title">
     <form id="prefs-form" class="help-body" method="dialog">
       <h2 id="prefs-title">Settings</h2>
@@ -342,6 +392,7 @@
   <script src="ev-data.js"></script>
   <script src="ev.js"></script>
   <script src="rules.js"></script>
+  <script src="bankroll.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

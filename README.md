@@ -84,7 +84,16 @@ button starts you over with $1,000.
   has been dealt. Sit out (J) deals rounds to an empty seat played by
   basic strategy: you watch and count, no money moves, and nothing goes
   into stats. With the count shown, the panel suggests sitting out below
-  a true count of -1 and sitting back in at +1 (both set in Settings)
+  a true count of -1 and sitting back in at +1 (both set in Settings).
+- **Bankroll (U):** enter a bankroll, betting unit and hands per hour,
+  pick the 1-2-4-8-12 count ramp or flat betting, and adjust the rules
+  and cut card. A seeded simulation of the real engine (1,000,000
+  rounds in a Web Worker, a few seconds) gives EV and SD per 100
+  rounds in units and dollars, EV per hour, N0 and risk of ruin. Under
+  6 decks S17 DAS LS with 75% penetration the ramp shows about +1.2 to
+  +1.4 units per 100 rounds; flat betting loses about the house edge
+  and its risk of ruin is 100%. They are estimates, shown with their
+  standard error.
 - **Card-counting trainer (Hi-Lo):** press K to show or hide the
   running count, true count and decks unseen. The dealer's hole card
   isn't counted until it's turned over, and the count restarts with each
@@ -180,6 +189,12 @@ and history; it doesn't touch the bankroll.
 | ? | Show shortcuts |
 | Enter | Deal, or deal again with the same bet |
 | X | Rebet ×2 after a round |
+| B | Put the suggested bet in the bet box |
+| J | Sit out / sit back in |
+| U | Bankroll and risk of ruin |
+| W | Training drills |
+| O | Settings |
+| V | Strategy chart |
 
 ## Project layout
 
@@ -197,18 +212,20 @@ and history; it doesn't touch the bankroll.
 | `drill.js` | Flashcard picking and scoring, count drill decks. No DOM code |
 | `chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
 | `a11y.js` | Card announcements and contrast checks. No DOM code |
+| `bankroll.js` | Seeded bankroll simulation: EV, SD, N0, risk of ruin. No DOM code |
+| `sim-worker.js` | Runs the bankroll simulation off the main thread |
 | `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |
 | `sound.js` | Sounds made with the Web Audio API |
 | `app.js` | UI: rendering, animations, controls and shortcuts |
 | `index.html`, `style.css` | Page structure and styling |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Install and offline support |
-| `*.test.js` | Tests for the ten DOM-free modules |
+| `*.test.js` | Tests for the DOM-free modules, the service worker and the shortcut keys |
 | `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
-The ten DOM-free modules work in both the browser (as
+The DOM-free modules work in both the browser (as
 `window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
 `window.BlackjackFormat`, `window.BlackjackBetting`, `window.BlackjackRules`,
-`window.BlackjackCounting`, `window.BlackjackSideBets`, `window.BlackjackA11y` and `window.BlackjackPrefs`) and Node (via `module.exports`). That's
+`window.BlackjackCounting`, `window.BlackjackSideBets`, `window.BlackjackA11y`, `window.BlackjackPrefs`, `window.BlackjackBankroll` and the rest) and Node (via `module.exports`). That's
 why they can be tested without a browser.
 
 ## Not included

@@ -7,11 +7,11 @@
  */
 'use strict';
 
-const CACHE = 'blackjack-v4';
+const CACHE = 'blackjack-v5';
 const FILES = [
   './', './index.html', './style.css', './manifest.webmanifest',
   './format.js', './prefs.js', './a11y.js', './betting.js', './sidebets.js', './blackjack.js',
-  './stats.js', './sound.js', './strategy.js', './counting.js', './chart.js', './drill.js', './ev-data.js', './ev.js', './rules.js', './app.js',
+  './stats.js', './sound.js', './strategy.js', './counting.js', './chart.js', './drill.js', './ev-data.js', './ev.js', './rules.js', './bankroll.js', './sim-worker.js', './app.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
 ];
 

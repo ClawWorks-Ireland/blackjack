@@ -98,6 +98,12 @@
     chartTables: $('chart-tables'), chartMisses: $('chart-misses'), chartCountNote: $('chart-count-note'),
     chartClose: $('chart-close'), chartOpenHelp: $('chart-open-help'),
     drillDialog: $('drill'), drillOpen: $('drill-open'), drillClose: $('drill-close'),
+    bankDialog: $('bank'), bankOpen: $('bank-open'), bankClose: $('bank-close'), bankForm: $('bank-form'),
+    bankRoll: $('bank-roll'), bankUnit: $('bank-unit'), bankHph: $('bank-hph'), bankDecks: $('bank-decks'),
+    bankH17: $('bank-h17'), bank65: $('bank-65'), bankDas: $('bank-das'), bankLs: $('bank-ls'),
+    bankPen: $('bank-pen'), bankPenValue: $('bank-pen-value'), bankRun: $('bank-run'), bankProgress: $('bank-progress'),
+    bankResults: $('bank-results'), bankStatus: $('bank-status'), bankEv: $('bank-ev'), bankEvHour: $('bank-ev-hour'),
+    bankSd: $('bank-sd'), bankAvg: $('bank-avg'), bankN0: $('bank-n0'), bankRor: $('bank-ror'),
     tabFlash: $('tab-flash'), tabCount: $('tab-count'), panelFlash: $('panel-flash'), panelCount: $('panel-count'),
     flashCount: $('flash-count'), flashUp: $('flash-up'), flashHand: $('flash-hand'), flashTotal: $('flash-total'),
     flashTc: $('flash-tc'), flashAnswers: $('flash-answers'), flashFeedback: $('flash-feedback'),
@@ -1320,6 +1326,118 @@
     else if (e.key === 'Enter' && flashAnswered && e.target !== els.flashNext) { e.preventDefault(); dealFlash(); }
   });
 
+  // --- Bankroll estimates (F16) ---
+
+  const Bankroll = window.BlackjackBankroll;
+  const SIM_ROUNDS = 1000000;
+  const SIM_SEED = 1;
+  let simWorker = null;
+  let simId = 0;
+  let lastSim = null; // { key, sim } so changing only the money inputs doesn't re-simulate
+
+  function bankRules() {
+    return Rules.normalizeRules({
+      decks: Number(els.bankDecks.value), h17: els.bankH17.checked, payout: els.bank65.checked ? 1.2 : 1.5,
+      das: els.bankDas.checked, lateSurrender: els.bankLs.checked, penetration: Number(els.bankPen.value) / 100,
+    });
+  }
+  const bankRamp = () => els.bankForm.querySelector('input[name="bank-ramp"]:checked').value;
+  const whole = (n) => Math.max(1, Math.floor(Number(n)) || 1);
+
+  function fillBankRules(r) {
+    els.bankDecks.value = String(r.decks);
+    els.bankH17.checked = r.h17;
+    els.bank65.checked = r.payout === 1.2;
+    els.bankDas.checked = r.das;
+    els.bankLs.checked = r.lateSurrender;
+    els.bankPen.value = String(Math.round(r.penetration * 100));
+    els.bankPenValue.textContent = `${els.bankPen.value}%`;
+  }
+
+  const signedNum = (n, digits) => `${n < 0 ? '-' : n > 0 ? '+' : ''}${Math.abs(n).toFixed(digits)}`;
+
+  function showBankResults(sim) {
+    const unit = whole(els.bankUnit.value);
+    const m = Bankroll.summarize(sim, {
+      bankroll: whole(els.bankRoll.value), unit, handsPerHour: whole(els.bankHph.value),
+    });
+    els.bankEv.textContent = `${signedNum(m.ev100, 2)} ± ${m.ev100Error.toFixed(2)} units (${signedMoney(m.ev100Dollars)})`;
+    els.bankEvHour.textContent = signedMoney(m.evHourDollars);
+    els.bankSd.textContent = `${m.sd100.toFixed(1)} units (${money(Math.round(m.sd100Dollars))})`;
+    els.bankAvg.textContent = `${m.avgBet.toFixed(2)} units (${money(Math.round(m.avgBet * unit))})`;
+    els.bankN0.textContent = Number.isFinite(m.n0)
+      ? `${Math.round(m.n0).toLocaleString('en-US')} rounds (${Math.round(m.n0 / whole(els.bankHph.value)).toLocaleString('en-US')} hours)`
+      : 'Never: this game has no edge for you';
+    els.bankRor.textContent = m.ror >= 0.9995 ? '100%'
+      : m.ror < 0.0005 ? 'under 0.1%' : `${(m.ror * 100).toFixed(m.ror < 0.1 ? 1 : 0)}%`;
+    els.bankResults.hidden = false;
+    els.bankStatus.textContent = `From ${sim.rounds.toLocaleString('en-US')} simulated rounds (seed ${SIM_SEED}).` +
+      (m.ev100 <= 0 ? ' With no edge, any bankroll is lost in the long run.' : '');
+  }
+
+  function runSim() {
+    const rules = bankRules();
+    const ramp = bankRamp();
+    const key = JSON.stringify({ rules, ramp });
+    if (lastSim && lastSim.key === key) { showBankResults(lastSim.sim); return; }
+    const id = ++simId;
+    els.bankRun.disabled = true;
+    els.bankProgress.hidden = false;
+    els.bankProgress.value = 0;
+    els.bankStatus.textContent = 'Simulating…';
+    const done = (sim) => {
+      if (id !== simId) return;
+      els.bankRun.disabled = false;
+      els.bankProgress.hidden = true;
+      lastSim = { key, sim };
+      showBankResults(sim);
+    };
+    try {
+      if (!simWorker) simWorker = new Worker('sim-worker.js');
+      simWorker.onmessage = (e) => {
+        if (e.data.id !== simId) return;
+        if (e.data.progress) els.bankProgress.value = e.data.progress / SIM_ROUNDS;
+        else if (e.data.sim) done(e.data.sim);
+        else if (e.data.error) { els.bankRun.disabled = false; els.bankProgress.hidden = true; els.bankStatus.textContent = `Simulation failed: ${e.data.error}`; }
+      };
+      simWorker.postMessage({ id, rules, ramp, rounds: SIM_ROUNDS, seed: SIM_SEED });
+    } catch {
+      // No workers (a page opened from disk): a smaller run on the page itself.
+      simWorker = null;
+      setTimeout(() => done(Bankroll.simulate({ rules, ramp, rounds: 200000, seed: SIM_SEED })), 30);
+    }
+  }
+
+  function stopSim() {
+    simId++;
+    if (simWorker) { simWorker.terminate(); simWorker = null; }
+    els.bankRun.disabled = false;
+    els.bankProgress.hidden = true;
+  }
+
+  els.bankOpen.addEventListener('click', () => {
+    if (els.bankDialog.open) return;
+    fillBankRules(game.rules);
+    if (!els.bankRoll.dataset.touched) els.bankRoll.value = String(Math.max(1, Math.round(game.bankroll)));
+    els.bankDialog.showModal();
+    runSim();
+  });
+  els.bankRoll.addEventListener('input', () => { els.bankRoll.dataset.touched = '1'; });
+  els.bankPen.addEventListener('input', () => { els.bankPenValue.textContent = `${els.bankPen.value}%`; });
+  // Money inputs only rescale the last simulation; rules and betting need a rerun.
+  for (const el of [els.bankRoll, els.bankUnit, els.bankHph]) {
+    el.addEventListener('input', () => { if (lastSim && !els.bankResults.hidden) showBankResults(lastSim.sim); });
+  }
+  els.bankForm.addEventListener('change', (e) => {
+    if ([els.bankRoll, els.bankUnit, els.bankHph].includes(e.target)) return;
+    els.bankResults.hidden = true;
+    els.bankStatus.textContent = 'Rules or betting changed: press Recalculate.';
+  });
+  els.bankForm.addEventListener('submit', (e) => { e.preventDefault(); runSim(); });
+  els.bankClose.addEventListener('click', () => els.bankDialog.close());
+  els.bankDialog.addEventListener('close', stopSim);
+  els.bankDialog.addEventListener('click', (e) => { if (e.target === els.bankDialog) els.bankDialog.close(); });
+
   // --- Sitting out (Wonging) ---
 
   const seatDecide = (cards, up) => Strategy.recommend(cards, up,
@@ -1429,7 +1547,7 @@
     ]],
     ['Settings', [
       ['m', 'Sound on/off', els.mute], ['c', 'Coach notes on/off', els.coachToggle],
-      ['w', 'Training drills', els.drillOpen], ['t', 'Table rules', els.rulesOpen], ['o', 'Settings: animation, volume, colours', els.prefsOpen],
+      ['w', 'Training drills', els.drillOpen], ['u', 'Bankroll and risk of ruin', els.bankOpen], ['t', 'Table rules', els.rulesOpen], ['o', 'Settings: animation, volume, colours', els.prefsOpen],
       ['?', 'Rules, payouts and shortcuts', els.helpOpen], ['v', 'Strategy chart', els.chartOpenHelp],
     ]],
   ];
@@ -1500,7 +1618,7 @@
   els.help.addEventListener('click', (e) => { if (e.target === els.help) els.help.close(); });
 
   document.addEventListener('keydown', (e) => {
-    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open) return; // Escape closes dialogs natively
+    if (els.help.open || els.settings.open || els.prefsDialog.open || els.chartDialog.open || els.drillDialog.open || els.bankDialog.open) return; // Escape closes dialogs natively
     // Typing in any box (bet, side bets, count guess) isn't a shortcut.
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
     // Enter between rounds deals again with the bet in the box (the last bet).
