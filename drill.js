@@ -118,9 +118,9 @@
   const perMinute = (t, now) => (now > t.startedAt ? (t.answered * 60000) / (now - t.startedAt) : 0);
 
   /** Count drill: N cards from a freshly shuffled deck, and their Hi-Lo total. */
-  function countDeal(n = 52, rng = Math.random) {
+  function countDeal(n = 52, rng = Math.random, system = 'hilo') {
     const cards = BJ.shuffle(BJ.createShoe(Math.ceil(n / 52)), rng).slice(0, n);
-    return { cards, answer: cards.reduce((s, c) => s + Counting.hiLo(c), 0) };
+    return { cards, answer: cards.reduce((s, c) => s + Counting.tagOf(c, system), 0) };
   }
 
   const COUNT_TARGET_SECONDS = 25; // the usual goal for a full deck

@@ -12,7 +12,9 @@
     speed: 'auto', volume: 0.8, table: 'green', back: 'blue',
     wongOut: -1, wongIn: 1, // count trainer: sit out below wongOut, sit in at wongIn or more
     shoeReport: true, // show the counter's report card at each reshuffle
+    countSystem: 'hilo', // F20: hilo, ko, ho2 (Hi-Opt II) or om2 (Omega II)
   });
+  const COUNT_SYSTEMS = ['hilo', 'ko', 'ho2', 'om2'];
 
   /** Fill in and check saved preferences; anything invalid uses the default. */
   function normalizePrefs(raw) {
@@ -25,6 +27,7 @@
     if (Number.isInteger(raw.wongOut) && raw.wongOut >= -5 && raw.wongOut <= 2) p.wongOut = raw.wongOut;
     if (Number.isInteger(raw.wongIn) && raw.wongIn >= -2 && raw.wongIn <= 5) p.wongIn = raw.wongIn;
     if (typeof raw.shoeReport === 'boolean') p.shoeReport = raw.shoeReport;
+    if (COUNT_SYSTEMS.includes(raw.countSystem)) p.countSystem = raw.countSystem;
     if (p.wongIn < p.wongOut) { p.wongOut = DEFAULT_PREFS.wongOut; p.wongIn = DEFAULT_PREFS.wongIn; }
     return p;
   }
@@ -43,7 +46,7 @@
     return { step: 180, land: 400 };
   }
 
-  const api = { SPEEDS, TABLES, BACKS, DEFAULT_PREFS, normalizePrefs, effectiveSpeed, timing };
+  const api = { COUNT_SYSTEMS, SPEEDS, TABLES, BACKS, DEFAULT_PREFS, normalizePrefs, effectiveSpeed, timing };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackPrefs = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

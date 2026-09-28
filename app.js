@@ -134,6 +134,8 @@
     help: $('help'), helpOpen: $('help-open'), helpClose: $('help-close'), helpList: $('help-list'),
     helpRules: $('help-rules'), helpPayouts: $('help-payouts'), helpSides: $('help-sides'), setPayouts: $('set-payouts'),
     rulesText: $('rules-text'), settings: $('settings'), rulesOpen: $('rules-open'),
+    countSystemName: $('count-system'), countTrueLabel: $('count-true-label'), countNoteText: $('count-note'),
+    prefSystem: $('pref-system'), helpTags: $('help-tags'), helpTagsNote: $('help-tags-note'),
     seedText: $('seed-text'), seedCopy: $('seed-copy'), seedCopied: $('seed-copied'), setSeed: $('set-seed'),
     reportAgain: $('report-again'), replayDialog: $('replay'), replayOpen: $('replay-open'), replayClose: $('replay-close'),
     replayPick: $('replay-pick'), replayEmpty: $('replay-empty'), replayStage: $('replay-stage'),
@@ -457,9 +459,10 @@
    * strategy. Hints, accuracy and coach notes all use this.
    */
   function currentAdvice() {
-    const tc = countShown ? Counting.countState(game).trueCount : null;
+    // Index plays are Hi-Lo's, so only a Hi-Lo counter gets deviations; insurance follows any system.
+    const tc = countShown && countSystem() === 'hilo' ? Counting.countState(game).trueCount : null;
     if (game.phase === 'insurance') {
-      return (tc !== null && Counting.countInsurance(tc, game.evenMoneyOffered))
+      return (countShown && Counting.systemInsurance(Counting.systemState(game, countSystem()), game.evenMoneyOffered))
         || Strategy.insuranceAdvice(game.evenMoneyOffered);
     }
     const h = game.currentHand;
@@ -644,9 +647,11 @@
         : game.canInsure()
         ? `Dealer shows an ace. Insure for ${money(game.insuranceCost)}?`
         : 'Dealer shows an ace. Not enough chips to insure.';
-      const tcNow = Counting.countState(game).trueCount;
-      if (countShown && Counting.countInsurance(tcNow) && game.canInsure()) {
-        els.message.textContent += ` Count says take it (true count ${Counting.formatTrue(tcNow)}).`;
+      const now = Counting.systemState(game, countSystem());
+      if (countShown && now.insurance && game.canInsure()) {
+        const at = now.system === 'ko' ? `running count ${Counting.signed(now.running)}`
+          : `${systemName()} true count ${Counting.formatTrue(now.trueCount)}`;
+        els.message.textContent += ` Count says take it (${at}).`;
       }
       delete els.message.dataset.outcome;
       els.message.classList.remove('reveal');
@@ -748,7 +753,7 @@
   function scoreMove(move) {
     coachNote = null;
     if (!move) return;
-    const spot = Report.countSpot(game); // graded with the count hidden too
+    const spot = Report.countSpot(game, countSystem()); // graded with the count hidden too
     if (spot) Report.recordSpot(shoeTracker, { ...spot, move });
     const advice = currentAdvice();
     const hinted = hintFor === decisionKey();
@@ -817,7 +822,9 @@
     }
     // F18: what the ramp says for this round (a shoe that is due to be replaced starts at 0).
     if (game.cutCardReached && shoeTracker.rounds.length) finishShoe(false);
-    const tcAtBet = game.cutCardReached ? 0 : Counting.countState(game).trueCount;
+    const tcAtBet = game.cutCardReached
+      ? Counting.systemState(new Game({ decks: game.decks }), countSystem()).betCount
+      : Counting.systemState(game, countSystem()).betCount;
     const seenAtBet = game.cutCardReached ? { running: 0, unseen: game.decks * 52 } : Counting.countState(game);
     const beforeDeal = { bankroll: game.bankroll, running: seenAtBet.running, unseen: seenAtBet.unseen };
     const unitAtBet = betUnit();
@@ -950,38 +957,56 @@
   // --- Card-counting trainer (Hi-Lo) ---
 
   /** Count panel and check result. Only called once dealt cards have landed. */
+  const countSystem = () => prefs.countSystem;
+  const systemName = () => Counting.SYSTEMS[countSystem()].name;
+  const INDEX_NOTE = 'Index plays use Hi-Lo; switch to Hi-Lo (Settings) for count-based deviations. Bets and insurance follow your system.';
+
   function renderCount() {
-    const s = Counting.countState(game);
+    const s = Counting.systemState(game, countSystem());
     els.countToggle.setAttribute('aria-pressed', String(countShown));
     els.countToggle.firstChild.textContent = countShown ? 'Count shown ' : 'Count hidden ';
     els.countPanel.hidden = !countShown;
+    els.countSystemName.textContent = systemName();
     els.countRunning.textContent = Counting.signed(s.running);
-    els.countTrue.textContent = `${Counting.formatTrue(s.trueCount)} (plays as ${Counting.wholeTrue(s.trueCount)})`;
-    els.countDecks.textContent = `${s.decksLeft.toFixed(1)} decks unseen`;
+    if (s.system === 'ko') {
+      els.countTrueLabel.textContent = 'Key';
+      els.countTrue.textContent = `${Counting.signed(s.key)}, pivot ${Counting.signed(s.pivot)}`;
+    } else {
+      els.countTrueLabel.textContent = 'True count';
+      els.countTrue.textContent = `${Counting.formatTrue(s.trueCount)} (plays as ${Counting.wholeTrue(s.trueCount)})`;
+    }
+    const aceText = s.aceSurplus === null ? ''
+      : ` · aces left ${s.aces} (${s.aceSurplus >= 0 ? '+' : '-'}${Math.abs(s.aceSurplus).toFixed(1)} vs normal)`;
+    els.countDecks.textContent = `${s.decksLeft.toFixed(1)} decks unseen${aceText}`;
+    els.countNoteText.textContent = s.system === 'hilo'
+      ? 'Bets and plays use the true count rounded down to a whole number. With the count shown, hints and scoring use count plays.'
+      : `${s.system === 'ko' ? 'KO bets on the running count: 1 unit below the key, more toward the pivot. '
+        : 'Bets use the true count halved (level 2) plus the ace side count. '}${INDEX_NOTE}`;
     const shoeSize = game.decks * 52;
     const dealtPct = Math.round(((shoeSize - game.shoe.length) / shoeSize) * 100);
     els.countPen.textContent = `${dealtPct}% dealt, cut at ${Math.round(game.penetration * 100)}%`;
     const betweenHands = !(game.phase === 'player' || game.phase === 'insurance');
-    const t = Math.floor(s.trueCount);
+    const t = Math.floor(s.betCount);
+    const at = s.system === 'hilo' ? 'true count' : 'betting count';
     let wong = '';
     if (sitOut) {
-      wong = t >= prefs.wongIn ? `Watching. Count says sit back in (true count ${Counting.signed(t)}, J).`
+      wong = t >= prefs.wongIn ? `Watching. Count says sit back in (${at} ${Counting.signed(t)}, J).`
         : 'Watching: rounds are dealt to an empty seat and counted; no money moves.';
     } else if (betweenHands && t < prefs.wongOut) {
-      wong = `Count says sit out (true count ${Counting.signed(t)} is below ${Counting.signed(prefs.wongOut)}, J).`;
+      wong = `Count says sit out (${at} ${Counting.signed(t)} is below ${Counting.signed(prefs.wongOut)}, J).`;
     }
     els.countWong.hidden = !wong;
     els.countWong.textContent = wong;
     // Suggested bet under the bet box: only while the count is shown, between rounds.
     const betting = !(game.phase === 'player' || game.phase === 'insurance') && !game.isBroke;
-    const units = Counting.betUnits(s.trueCount);
+    const units = Counting.betUnits(s.betCount);
     const unit = betUnit();
-    const amount = Counting.suggestedBet(s.trueCount, {
+    const amount = Counting.suggestedBet(s.betCount, {
       min: game.minBet, unit, max: game.maxBet, bankroll: game.bankroll,
     });
     els.suggestRow.hidden = !(countShown && betting);
     els.suggestText.textContent = `Suggested bet: ${money(amount)} (${units} unit${units > 1 ? 's' : ''} of ` +
-      `${money(unit)} at true count ${Counting.formatTrue(s.trueCount)})`;
+      `${money(unit)} at ${s.system === 'ko' ? `running count ${Counting.signed(s.running)}` : `${at} ${Counting.formatTrue(s.betCount)}`})`;
     els.suggestBet.dataset.amount = String(amount);
     els.suggestBet.disabled = !(amount >= game.minBet);
     els.countResult.hidden = !countNote;
@@ -1027,13 +1052,15 @@
       renderCount();
       return;
     }
-    const { running, trueCount } = Counting.countState(game);
+    const st = Counting.systemState(game, countSystem());
+    const { running } = st;
     const right = guess === running;
     both((s) => Stats.recordCountCheck(s, right));
     Report.recordCheck(shoeTracker, right);
     storage('set', STATS_KEY, JSON.stringify(stats));
     countNote = right
-      ? `Right: the running count is ${Counting.signed(running)} (true count ${Counting.formatTrue(trueCount)}).`
+      ? `Right: the ${systemName()} running count is ${Counting.signed(running)}` +
+        `${st.trueCount === null ? '' : ` (true count ${Counting.formatTrue(st.trueCount)})`}.`
       : `Not quite: the running count is ${Counting.signed(running)}, you said ${Counting.signed(guess)}.`;
     els.countGuess.value = '';
     els.countGuess.blur();
@@ -1363,7 +1390,7 @@
 
   els.cdStart.addEventListener('click', () => {
     stopCountDrill();
-    cdDeck = Drill.countDeal(Number(els.cdSize.value));
+    cdDeck = Drill.countDeal(Number(els.cdSize.value), Math.random, countSystem());
     cdClock = Drill.countClock(cdDeck.cards.length, Number(els.cdSpeed.value));
     cdShown = -1;
     cdAsking = false;
@@ -1441,7 +1468,7 @@
     const shoe = shoeTracker;
     shoeTracker = Report.newShoe();
     if (!shoe.rounds.length) return null;
-    if (atCut) shoe.endRunning = Counting.countState(game).running;
+    if (atCut) shoe.endRunning = Counting.systemState(game, countSystem()).running;
     shoe.shoeSeed = game.shoeSeed;
     shoe.houseEdge = houseEdgeNow();
     shoe.summary = Report.summary(shoe, { houseEdge: shoe.houseEdge });
@@ -1461,7 +1488,7 @@
     const g = Report.grade(shoes, { houseEdge: houseEdgeNow() });
     els.reportTitle.textContent = session ? "Counter's report: this session" : 'Shoe report';
     els.reportSub.textContent = g.rounds
-      ? `${g.rounds} round${g.rounds === 1 ? '' : 's'}${session ? ` over ${g.shoes} shoe${g.shoes === 1 ? '' : 's'}` : ' in this shoe'}, graded against a perfect Hi-Lo counter.`
+      ? `${g.rounds} round${g.rounds === 1 ? '' : 's'}${session ? ` over ${g.shoes} shoe${g.shoes === 1 ? '' : 's'}` : ' in this shoe'}, graded against a perfect ${systemName()} counter.`
       : 'No rounds yet this session. Play a few, then check back.';
     els.repR.textContent = g.r === null ? 'Not measurable' : g.r.toFixed(2);
     els.repNote.hidden = !g.betNote;
@@ -1790,6 +1817,7 @@
     els.prefWongOut.value = String(prefs.wongOut);
     els.prefWongIn.value = String(prefs.wongIn);
     els.prefShoeReport.checked = prefs.shoeReport;
+    els.prefSystem.value = prefs.countSystem;
   }
 
   function readPrefs() {
@@ -1797,10 +1825,12 @@
       speed: els.prefSpeed.value, volume: Number(els.prefVolume.value) / 100,
       table: els.prefTable.value, back: els.prefBack.value,
       wongOut: Number(els.prefWongOut.value), wongIn: Number(els.prefWongIn.value),
-      shoeReport: els.prefShoeReport.checked,
+      shoeReport: els.prefShoeReport.checked, countSystem: els.prefSystem.value,
     });
     storage('set', PREFS_KEY, JSON.stringify(prefs));
     applyPrefs();
+    if (!inFlight) { renderCount(); renderHint(); }
+    renderTags();
     els.prefVolumeValue.textContent = `${Math.round(prefs.volume * 100)}%`;
   }
 
@@ -1868,6 +1898,35 @@
     els.helpList.replaceChildren(...sections.flat());
   }
 
+  /** Every system's tags, with yours highlighted. */
+  function renderTags() {
+    const VALUES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    const head = document.createElement('tr');
+    head.append(...['System', ...VALUES.map((v) => (v === 11 ? 'A' : v === 10 ? '10-K' : String(v)))].map((t) => {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      th.textContent = t;
+      return th;
+    }));
+    els.helpTags.tHead.replaceChildren(head);
+    els.helpTags.tBodies[0].replaceChildren(...Object.values(Counting.SYSTEMS).map((sys) => {
+      const tr = document.createElement('tr');
+      if (sys.id === countSystem()) tr.className = 'mine';
+      const th = document.createElement('th');
+      th.scope = 'row';
+      th.textContent = sys.name;
+      tr.append(th, ...VALUES.map((v) => {
+        const td = document.createElement('td');
+        td.textContent = Counting.signed(sys.tags[v]);
+        return td;
+      }));
+      return tr;
+    }));
+    els.helpTagsNote.textContent = `Your system: ${systemName()} (change it in Settings). KO starts each shoe at ` +
+      `${Counting.signed(Counting.koStart(game.decks))} with this table's ${game.decks} deck${game.decks > 1 ? 's' : ''}; ` +
+      'Hi-Opt II and Omega II keep a separate count of aces seen, used for betting only. ' + INDEX_NOTE;
+  }
+
   /** Rules and payouts for the table as it's set right now. */
   function renderPayouts() {
     const [one, two] = Rules.describe(game.rules);
@@ -1894,6 +1953,7 @@
 
   function openHelp() {
     renderPayouts();
+    renderTags();
     if (!els.help.open) els.help.showModal();
   }
 

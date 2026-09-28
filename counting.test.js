@@ -199,3 +199,70 @@ test('N1: H17 index plays for 11 v A, 10 v A and 15 v A', () => {
   // Unchanged entries still apply under H17.
   assert.equal(playH(['10', '6'], '10', 0, NO_LS).action, 'stand');
 });
+
+// --- F20: other counting systems ---
+
+test('F20: a full deck sums to 0 for the balanced systems and +4 for KO', () => {
+  const deck = BJ.createShoe(1);
+  const total = (sys) => deck.reduce((s, card) => s + K.tagOf(card, sys), 0);
+  assert.deepEqual(['hilo', 'ho2', 'om2', 'ko'].map(total), [0, 0, 0, 4]);
+  for (const d of [1, 2, 6, 8]) assert.equal(K.deckTotal('ko', d), 4 * d);
+  assert.equal(K.deckTotal('om2', 6), 0);
+  assert.deepEqual(Object.keys(K.SYSTEMS), ['hilo', 'ko', 'ho2', 'om2']);
+});
+
+test('F20: running counts start at 0 (KO at 4 - 4 x decks) and follow each system\'s tags', () => {
+  for (const decks of [1, 6]) {
+    const g = new BJ.Game({ decks });
+    assert.equal(K.systemState(g, 'ko').running, 4 - 4 * decks);
+    for (const s of ['hilo', 'ho2', 'om2']) assert.equal(K.systemState(g, s).running, 0);
+  }
+  const g = new BJ.Game({ decks: 6 });
+  const seen = g.shoe.splice(-30); // 30 cards come out
+  for (const s of ['hilo', 'ko', 'ho2', 'om2']) {
+    const start = s === 'ko' ? -20 : 0;
+    assert.equal(K.systemState(g, s).running, start + seen.reduce((n, card) => n + K.tagOf(card, s), 0), s);
+  }
+  assert.equal(K.systemState(g, 'hilo').running, K.countState(g).running);
+  assert.equal(K.systemState(g, 'ko').trueCount, null);
+  // A whole shoe seen: KO ends at 4 - 4d + 4d = +4.
+  g.shoe = [];
+  assert.equal(K.systemState(g, 'ko').running, 4);
+});
+
+test('F20: the Hi-Opt II ace side count changes betting only, not the running count', () => {
+  const g = new BJ.Game({ decks: 1 });
+  const deck = BJ.createShoe(1);
+  const aces = deck.filter((card) => card.rank === 'A');
+  const eights = deck.filter((card) => card.rank === '8');
+  const others = deck.filter((card) => !['A', '8'].includes(card.rank)).slice(0, 20);
+  // Same unseen tags (aces and 8s are both 0 in Hi-Opt II), but one remainder is ace-rich.
+  const rich = new BJ.Game({ decks: 1 });
+  rich.shoe = [...aces, ...others];
+  const plain = new BJ.Game({ decks: 1 });
+  plain.shoe = [...eights, ...others];
+  const a = K.systemState(rich, 'ho2');
+  const b = K.systemState(plain, 'ho2');
+  assert.equal(a.running, b.running, 'aces are tagged 0 in Hi-Opt II');
+  assert.equal(a.trueCount, b.trueCount);
+  assert.ok(a.aceSurplus > b.aceSurplus);
+  assert.ok(a.betCount > b.betCount, 'more aces left means a bigger bet');
+});
+
+test('F20: bet ramp and insurance follow the chosen system', () => {
+  const g = new BJ.Game({ decks: 6 });
+  // Take out 60 low cards (2-6): every system goes positive.
+  const low = g.shoe.filter((card) => ['2', '3', '4', '5', '6'].includes(card.rank)).slice(0, 60);
+  g.shoe = g.shoe.filter((card) => !low.includes(card));
+  const s = { hilo: K.systemState(g, 'hilo'), ko: K.systemState(g, 'ko'), ho2: K.systemState(g, 'ho2'), om2: K.systemState(g, 'om2') };
+  assert.ok(s.hilo.betCount >= 5 && K.betUnits(s.hilo.betCount) === 12);
+  for (const k of ['ko', 'ho2', 'om2']) assert.ok(K.betUnits(s[k].betCount) >= 8, `${k} ramps up (${s[k].betCount})`);
+  for (const k of Object.keys(s)) assert.equal(s[k].insurance, true, `${k} takes insurance this rich in tens`);
+  assert.equal(K.systemInsurance(s.ko).action, 'insurance');
+  assert.match(K.systemInsurance(s.om2).reason, /Omega II true count/);
+  // KO: below the key is 1 unit, at the key 2, at the pivot 8.
+  const units = (rc) => K.betUnits(K.koBetCount(rc, K.KO_KEY[6]));
+  assert.deepEqual([units(-5), units(-4), units(0), units(4), units(8)], [1, 2, 4, 8, 12]);
+  assert.equal(K.systemState(new BJ.Game({ decks: 6 }), 'ko').betCount < 2, true, 'a fresh KO shoe bets 1 unit');
+  assert.equal(K.systemState(new BJ.Game({ decks: 6 }), 'ko').insurance, false);
+});

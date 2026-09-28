@@ -3,6 +3,9 @@
  * perfect Hi-Lo counter playing the same rounds. Pure and DOM-free
  * (window.BlackjackReport in the browser, module.exports under Node).
  *
+ * Bets are graded against the ramp for your count system; index plays are
+ * Hi-Lo's, so they are only graded when you count Hi-Lo.
+ *
  * A tracker collects, per shoe:
  *   rounds: [{bet, suggested, unit, spots, tc, net, evLost}]  bet/suggested per spot
  *   spots:  [{hand, up, tc, index, play, move}]              deviation spots
@@ -36,14 +39,17 @@
    * count is on screen: {hand, up, tc, index, play} when the Hi-Lo count
    * play differs from basic strategy, else null.
    */
-  function countSpot(game) {
+  function countSpot(game, system = 'hilo') {
     const tc = Math.floor(Counting.countState(game).trueCount);
     if (game.phase === 'insurance') {
-      const ins = Counting.countInsurance(tc, game.evenMoneyOffered);
-      return ins ? { hand: game.evenMoneyOffered ? 'Even money' : 'Insurance', up: 'A', tc, index: ins.index, play: 'insurance' } : null;
+      const st = Counting.systemState(game, system);
+      const ins = Counting.systemInsurance(st, game.evenMoneyOffered);
+      const at = st.system === 'ko' ? st.running : Math.floor(st.trueCount);
+      return ins ? { hand: game.evenMoneyOffered ? 'Even money' : 'Insurance', up: 'A', tc: at, index: ins.index ?? Counting.INSURANCE_AT[st.system](game.decks), play: 'insurance' } : null;
     }
     const h = game.currentHand;
-    if (game.phase !== 'player' || !h) return null;
+    // Index plays are Hi-Lo's: other systems are graded on bets and insurance only.
+    if (game.phase !== 'player' || !h || system !== 'hilo') return null;
     const allowed = {
       canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(), canHit: game.canHit(),
     };

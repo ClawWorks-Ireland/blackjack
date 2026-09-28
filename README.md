@@ -126,6 +126,16 @@ button starts you over with $1,000.
   through any of the last 20 rounds card by card (← →), rebuilt by the
   engine from the logged cards and decisions, with the coach's move, the
   count a counter could see at that moment and the cost of any mistake.
+- **Count systems (Settings):** Hi-Lo (default), KO (unbalanced: a
+  deck sums to +4, the running count starts at 4 - 4 x decks and is read
+  against a key count and a +4 pivot), Hi-Opt II and Omega II (level 2,
+  with an ace side count used for betting only). The running count,
+  count checks, the count drill, the bet ramp, sit-out advice, insurance
+  and the report card all follow the chosen system; Rules & help shows
+  every system's tags. Level-2 true counts are halved for the 1-2-4-8-12
+  ramp, and each system's insurance point was measured by simulation.
+  Index plays are Hi-Lo's, so the coach only uses them with Hi-Lo, and
+  the bankroll simulation counts Hi-Lo.
 - **Card-counting trainer (Hi-Lo):** press K to show or hide the
   running count, true count and decks unseen. The dealer's hole card
   isn't counted until it's turned over, and the count restarts with each

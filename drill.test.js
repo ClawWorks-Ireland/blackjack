@@ -147,3 +147,14 @@ test('B14: pausing is idempotent and a hidden answer wait is not scored either',
   assert.equal(clock.paused, false);
   assert.equal(clock.elapsed(302000), 8000);
 });
+
+test('F20: each system\'s count-drill answer is its own tag sum', () => {
+  for (const sys of ['hilo', 'ko', 'ho2', 'om2']) {
+    const deal = D.countDeal(52, rng(8), sys);
+    assert.equal(deal.answer, deal.cards.reduce((s, c) => s + K.tagOf(c, sys), 0));
+    if (sys === 'ko') assert.equal(deal.answer, 4, 'a full KO deck is +4');
+    else assert.equal(deal.answer, 0);
+  }
+  const ten = D.countDeal(10, rng(8), 'om2');
+  assert.equal(ten.answer, ten.cards.reduce((s, c) => s + K.tagOf(c, 'om2'), 0));
+});

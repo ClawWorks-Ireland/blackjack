@@ -48,13 +48,13 @@
         <span id="bet-display"></span>
       </div>
 
-      <div id="count-panel" class="count-panel" hidden aria-label="Hi-Lo count">
-        Running count <strong id="count-running">0</strong>
-        · True count <strong id="count-true">0.0</strong>
+      <div id="count-panel" class="count-panel" hidden aria-label="Card count">
+        <span id="count-system">Hi-Lo</span> running count <strong id="count-running">0</strong>
+        · <span id="count-true-label">True count</span> <strong id="count-true">0.0</strong>
         · <span id="count-decks">6.0 decks unseen</span>
         · <span id="count-pen"></span>
         <div id="count-wong" class="count-bet" hidden></div>
-        <div class="count-note">Bets and plays use the true count rounded down to a whole number. With the count shown, hints and scoring use count plays.</div>
+        <div id="count-note" class="count-note">Bets and plays use the true count rounded down to a whole number. With the count shown, hints and scoring use count plays.</div>
       </div>
       <form id="count-check" class="count-check bet-only" novalidate>
         <label for="count-guess">Your running count</label>
@@ -169,6 +169,11 @@
         <p id="help-rules" class="note"></p>
         <table class="paytable" id="help-payouts"><caption>Main game</caption><tbody></tbody></table>
         <table class="paytable" id="help-sides"><caption>Side bets</caption><tbody></tbody></table>
+      </section>
+      <section aria-labelledby="tags-title">
+        <h3 id="tags-title">Count tags</h3>
+        <table class="paytable tags" id="help-tags"><caption>Each card's tag; your system is highlighted</caption><thead></thead><tbody></tbody></table>
+        <p id="help-tags-note" class="note"></p>
       </section>
       <p><button type="button" id="chart-open-help" class="link">Open the strategy chart (V)</button></p>
       <h3>Keyboard shortcuts</h3>
@@ -349,7 +354,7 @@
         <button type="submit" class="toggle">Check</button>
       </form>
       <p id="rep-count-result" class="note" aria-live="polite"></p>
-      <p class="note">A perfect Hi-Lo counter bets the 1-2-4-8-12 ramp on your unit and takes every index play. Expected results use an edge of minus the house edge plus 0.5% per point of true count; luck is your result minus what your bets and play were expected to make, and the skill gap is what the perfect counter expected minus that. Works with the count hidden. The last 20 shoe reports are saved and go into the CSV export.</p>
+      <p class="note">A perfect counter (your system) bets the 1-2-4-8-12 ramp on your unit and takes every index play. Expected results use an edge of minus the house edge plus 0.5% per point of true count; luck is your result minus what your bets and play were expected to make, and the skill gap is what the perfect counter expected minus that. Works with the count hidden. The last 20 shoe reports are saved and go into the CSV export.</p>
       <div class="dialog-actions">
         <button type="button" id="report-close">Close</button>
         <button type="button" id="report-again" class="toggle" hidden>Play this shoe again</button>
@@ -441,6 +446,14 @@
         <label for="pref-wong-out">Sit out below true count <input id="pref-wong-out" type="number" min="-5" max="2" step="1" value="-1"></label>
         <label for="pref-wong-in">Sit back in at <input id="pref-wong-in" type="number" min="-2" max="5" step="1" value="1"></label>
         <label class="check"><input type="checkbox" id="pref-shoe-report" checked> Show the counter's report at each reshuffle</label>
+        <label class="row" for="pref-system">Count system
+          <select id="pref-system">
+            <option value="hilo">Hi-Lo (level 1, balanced)</option>
+            <option value="ko">KO (level 1, unbalanced: key count and pivot)</option>
+            <option value="ho2">Hi-Opt II (level 2, ace side count)</option>
+            <option value="om2">Omega II (level 2, ace side count)</option>
+          </select>
+        </label>
       </fieldset>
       <p class="note">Changes apply straight away and are saved in this browser. Mute is still M.</p>
       <div class="dialog-actions">

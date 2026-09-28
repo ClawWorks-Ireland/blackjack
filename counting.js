@@ -7,6 +7,19 @@
  * minus the sum of the cards still unseen. That lets the count be derived
  * from the game state alone: it resets with each new shoe and survives a
  * reload without being saved separately.
+ *
+ * F20: other systems. countState(game, system) works for any of SYSTEMS:
+ * Hi-Lo, KO (unbalanced: a full deck sums to +4; the running count starts
+ * at the standard 4 - 4 x decks and is read against a key count and a
+ * pivot of +4 instead of a true count), and the level-2 Hi-Opt II and
+ * Omega II, both ace-neutral with an ace side count. `betCount` is a
+ * Hi-Lo-equivalent true count that drives the 1-2-4-8-12 ramp and the
+ * sit-out advice for every system: level-2 true counts are halved (both
+ * run about twice Hi-Lo's), their ace side count adds 2 per surplus ace
+ * for betting only, and KO maps key -> +2 and pivot -> +4. Insurance
+ * thresholds per system were measured by simulating shoes: the lowest
+ * count at which 3 x P(ten) - 1 turns positive. Index plays (Illustrious
+ * 18, Fab 4) are Hi-Lo's; the coach only uses them with Hi-Lo.
  */
 (function (root) {
   'use strict';
@@ -23,6 +36,85 @@
   }
 
   const sum = (cards) => cards.reduce((n, c) => n + hiLo(c), 0);
+
+  // Tags by card value 2-10 and 11 (ace).
+  const tagRow = (a) => ({ 2: a[0], 3: a[1], 4: a[2], 5: a[3], 6: a[4], 7: a[5], 8: a[6], 9: a[7], 10: a[8], 11: a[9] });
+  const SYSTEMS = Object.freeze({
+    hilo: { id: 'hilo', name: 'Hi-Lo', level: 1, balanced: true, aceSide: false, tags: tagRow([1, 1, 1, 1, 1, 0, 0, 0, -1, -1]) },
+    ko: { id: 'ko', name: 'KO', level: 1, balanced: false, aceSide: false, tags: tagRow([1, 1, 1, 1, 1, 1, 0, 0, -1, -1]) },
+    ho2: { id: 'ho2', name: 'Hi-Opt II', level: 2, balanced: true, aceSide: true, tags: tagRow([1, 1, 2, 2, 1, 1, 0, 0, -2, 0]) },
+    om2: { id: 'om2', name: 'Omega II', level: 2, balanced: true, aceSide: true, tags: tagRow([1, 1, 2, 2, 2, 1, 0, -1, -2, 0]) },
+  });
+  const KO_KEY = { 1: 2, 2: 1, 6: -4, 8: -6 }; // standard key counts (standardized IRC 4 - 4 x decks)
+  const KO_PIVOT = 4;
+  // Insurance: take it at this count or more ([decks] for the true count, KO's is the running count).
+  const INSURANCE_AT = {
+    hilo: () => 3, ko: (d) => (d <= 2 ? 4 : 3), ho2: (d) => (d === 1 ? 4 : 5), om2: (d) => (d === 1 ? 6 : 5),
+  };
+  const systemOf = (id) => SYSTEMS[id] || SYSTEMS.hilo;
+
+  /** A card's tag in a system. */
+  const tagOf = (card, system = 'hilo') => systemOf(system).tags[BJ.cardValue(card)];
+
+  /** What a full shoe of `decks` sums to in a system (0 when balanced; KO: +4 a deck). */
+  const deckTotal = (system, decks) => decks * 4 * [2, 3, 4, 5, 6, 7, 8, 9, 11].reduce((s, v) => s + systemOf(system).tags[v], 0) +
+    decks * 16 * systemOf(system).tags[10];
+
+  /** KO's initial running count: 4 - 4 x decks. */
+  const koStart = (decks) => 4 - 4 * decks;
+
+  /**
+   * Any system's view of the table: {system, running, unseen, decksLeft,
+   * trueCount (null for KO), aces, aceSurplus, betCount, insurance}.
+   */
+  function systemState(game, system = 'hilo') {
+    const sys = systemOf(system);
+    if (sys.id === 'hilo') {
+      const s = countState(game);
+      return { ...s, system: 'hilo', betCount: s.trueCount, aces: null, aceSurplus: null, insurance: s.trueCount >= INSURANCE_INDEX };
+    }
+    const live = game.phase === 'player' || game.phase === 'insurance';
+    const unseenCards = live && game.dealer.length > 1 ? [...game.shoe, game.dealer[1]] : game.shoe;
+    const unseen = unseenCards.length;
+    const decksLeft = unseen / 52;
+    const left = unseenCards.reduce((n, c) => n + sys.tags[BJ.cardValue(c)], 0);
+    const start = sys.id === 'ko' ? koStart(game.decks) : 0;
+    const running = 0 + start + deckTotal(sys.id, game.decks) - left;
+    const aces = unseenCards.filter((c) => c.rank === 'A').length;
+    const aceSurplus = aces - unseen / 13;
+    const out = { system: sys.id, running, unseen, decksLeft, aces, aceSurplus: sys.aceSide ? aceSurplus : null };
+    if (sys.id === 'ko') {
+      const key = KO_KEY[game.decks] ?? -4;
+      out.trueCount = null;
+      out.key = key;
+      out.pivot = KO_PIVOT;
+      out.betCount = koBetCount(running, key);
+      out.insurance = running >= INSURANCE_AT.ko(game.decks);
+    } else {
+      out.trueCount = trueCount(running, decksLeft);
+      out.betCount = trueCount(running + 2 * aceSurplus, decksLeft) / 2;
+      out.insurance = Math.floor(out.trueCount) >= INSURANCE_AT[sys.id](game.decks);
+    }
+    return out;
+  }
+
+  /** KO running count to a Hi-Lo-style betting count: key -> +2, pivot (+4) -> +4, below the key -> under +2. */
+  function koBetCount(running, key) {
+    const span = Math.max(1, KO_PIVOT - key);
+    return running < key ? 1 + (running - key) / span : 2 + (2 * (running - key)) / span;
+  }
+
+  /** Insurance advice from any system's state: the count-play object, or null. */
+  function systemInsurance(state, evenMoney = false) {
+    if (!state.insurance) return null;
+    if (state.system === 'hilo') return countInsurance(state.trueCount, evenMoney);
+    const name = systemOf(state.system).name;
+    const at = state.system === 'ko' ? `running count ${signed(state.running)}` : `true count ${formatTrue(state.trueCount)}`;
+    return {
+      action: 'insurance', label: evenMoney ? 'Even money' : 'Take insurance', deviation: true, index: null,
+      reason: `${name} ${at} says the ${evenMoney ? 'even money' : 'insurance'} bet now pays on average`,
+    };
+  }
 
   /**
    * What a counter at the table knows right now. The dealer's hole card is
@@ -208,7 +300,7 @@
 
   const api = {
     indexPlays, wholeTrue, hiLo, countState, trueCount, signed, formatTrue, parseGuess, countPlay, countInsurance, betUnits, suggestedBet,
-    INSURANCE_INDEX,
+    INSURANCE_INDEX, SYSTEMS, KO_KEY, KO_PIVOT, INSURANCE_AT, tagOf, deckTotal, koStart, koBetCount, systemState, systemInsurance,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackCounting = api;
