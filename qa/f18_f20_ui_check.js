@@ -121,7 +121,8 @@ async function replayFinal(p, value) {
       await p.screenshot({ path: path.join(OUT, 'f18-report-perfect.png') });
       const r = res.report || {};
       put('F18 perfect counter (count shown): r 1.00, 100% within a unit, every index taken, skill gap $0',
-        !!res.report && r['rep-r'] === '1.00' && r['rep-within'] === '100%' && /^(\d+) of \1$|None came up/.test(r['rep-index']) && /^\+?\$0(\.00)?$/.test(r['rep-gap']) && /^\$0(\.00)?$/.test(r['rep-ev']),
+        // r is undefined when the count never called for a bet change: the shoe report then says so (T4).
+        !!res.report && (r['rep-r'] === '1.00' || (r['rep-r'] === 'Not measurable' && /^Flat betting/.test(r['rep-note'] || ''))) && r['rep-within'] === '100%' && /^(\d+) of \1$|None came up/.test(r['rep-index']) && /^\+?\$0(\.00)?$/.test(r['rep-gap']) && /^\$0(\.00)?$/.test(r['rep-ev']),
         { rounds: res.rounds, report: r, countPlays: log.slice(0, 6) });
       // Play this shoe again appears on the shoe report
       put('F18/F19 shoe report offers "Play this shoe again"', !!r.againVisible);
