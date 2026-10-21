@@ -1,0 +1,8 @@
+{
+  "name": "blackjack-qa",
+  "private": true,
+  "description": "QA harness for the blackjack game: fuzzers, rule checks and Playwright UI checks",
+  "devDependencies": {
+    "playwright-core": "1.64.0"
+  }
+}

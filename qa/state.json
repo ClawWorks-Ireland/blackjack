@@ -1,0 +1,30 @@
+{
+  "repo": "<repo>",
+  "watcher_cron": "fbe48af1",
+  "round": 10,
+  "last_tested": "fadf7e1",
+  "creator_run": null,
+  "delivery": "Round 10: backlog empty, no handoff.",
+  "undelivered_reports": [],
+  "tools": [
+    "b14_ui_check.js",
+    "count_drill_check.js",
+    "count_sim.js",
+    "engine_fuzz.js",
+    "f11_check.js",
+    "f12_f14_check.js",
+    "f12_f14_ui_check.js",
+    "f15_f17_check.js",
+    "f5_f8_f9_check.js",
+    "f7_f10_check.js",
+    "feature_checks.js",
+    "focus_check.js",
+    "live_drills.sh",
+    "live_play.sh",
+    "ramp_check.js",
+    "side_check.js",
+    "spots_fuzz.js",
+    "strategy_diff.js",
+    "ui_playtest.js"
+  ]
+}
