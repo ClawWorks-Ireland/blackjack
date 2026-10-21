@@ -13,7 +13,7 @@ const ROUNDS = Number(process.argv[4] || 12);
 fs.mkdirSync(out, { recursive: true });
 const TYPES = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.svg': 'image/svg+xml' };
 const srv = http.createServer((q, r) => {
-  const f = path.join(dir, decodeURIComponent(q.url.split('?')[0]) === '/' ? 'index.html' : decodeURIComponent(q.url.split('?')[0]));
+  const f = path.join(dir, (decodeURIComponent(q.url.split('?')[0]).endsWith('/') ? decodeURIComponent(q.url.split('?')[0]) + 'index.html' : decodeURIComponent(q.url.split('?')[0])));
   if (!f.startsWith(dir)) { r.writeHead(403); r.end(); return; }
   fs.readFile(f, (e, d) => { if (e) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'content-type': TYPES[path.extname(f)] || 'text/plain' }); r.end(d); });
 });

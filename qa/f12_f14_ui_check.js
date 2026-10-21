@@ -12,7 +12,7 @@ const dir = path.resolve(process.argv[2]), out = path.resolve(process.argv[3]);
 fs.mkdirSync(out, { recursive: true });
 const T = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const srv = http.createServer((q, r) => {
-  const u = decodeURIComponent(q.url.split('?')[0]); const f = path.join(dir, u === '/' ? 'index.html' : u);
+  const u = decodeURIComponent(q.url.split('?')[0]); const f = path.join(dir, u.endsWith('/') ? u + 'index.html' : u);
   if (!f.startsWith(dir)) { r.writeHead(403); r.end(); return; }
   fs.readFile(f, (e, d) => { if (e) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'content-type': T[path.extname(f)] || 'application/octet-stream' }); r.end(d); });
 });
