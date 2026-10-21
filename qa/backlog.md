@@ -30,6 +30,7 @@ Rule: a bug requested 3 rounds in a row without a fix goes to the user instead o
 - T2 Med    UI checks served by `python3 -m http.server` hit ERR_CONNECTION_RESET on parallel script loads (7 of 30 fresh loads), so a module was missing and app.js threw at startup ("reading 'normalizeRules'/'houseEdge'"). Not a game bug. — fixed (qa/serve.js; run-round.js uses it)
 - T3 Low    ui_playtest predates F18 and stalled when the shoe report covered the table (see B16). — fixed (records B16 as a finding, closes the report, continues)
 - T4 Low    f18_f20_ui_check required r = 1.00 for the perfect counter, but a shoe where the count never calls for a bet change is flat-bet and correctly "Not measurable". — fixed (accepts that case when the flat-betting note shows)
+- T5 Low    ui_playtest closed the shoe report and then clicked Deal, but the report's timer (settleAt + 700 ms) could fire in between and block the click for 30 s. Harness race on the same timer as B16; the game behaves as designed between rounds. — fixed (clickDeal closes the report and retries)
 
 ## Features (priority order)
 - F2 basic-strategy coach (hint + mistake feedback + accuracy stat) — fixed@ab1d7d3 (built by creator on its own; B8 remains)

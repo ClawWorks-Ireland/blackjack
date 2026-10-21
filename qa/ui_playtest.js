@@ -48,6 +48,23 @@ const money = (s) => {
 };
 const findings = [];
 const seen = new Set();
+/**
+ * Click Deal. The F18 shoe report opens on a timer after the cut-card round,
+ * so it can appear between our last look and the click (T5): close it and
+ * retry rather than wait out Playwright's 30 s timeout.
+ */
+async function clickDeal(page, sel) {
+  for (let attempt = 0; ; attempt++) {
+    await page.evaluate(() => { const d = document.getElementById('report'); if (d && d.open) d.close(); });
+    try {
+      await page.click(sel, { timeout: 2000 });
+      return;
+    } catch (e) {
+      if (attempt >= 3) throw e;
+    }
+  }
+}
+
 function flag(issue, detail) {
   if (seen.has(issue)) { findings.find((f) => f.issue === issue).count++; return; }
   seen.add(issue);
@@ -101,9 +118,8 @@ async function main() {
     const rounds0 = Number(await text(SEL.statRounds));
     const rec0 = await record();
     const bet = Math.min(bets[i % bets.length], Math.floor(bank0));
-    await page.evaluate(() => { const d = document.getElementById("report"); if (d && d.open) d.close(); }); // F18 shoe report auto-opens at the cut
     await page.fill(SEL.bet, String(bet));
-    await page.click(SEL.deal);
+    await clickDeal(page, SEL.deal);
     let steps = 0;
     let usedKey = false;
     while (steps++ < 40) {
@@ -176,10 +192,9 @@ async function main() {
   await page.screenshot({ path: require('path').join(out, 'dbg-before-betprobe.png') });
   // Skip when broke: Deal is correctly disabled below the minimum bet, and clicking it would hang.
   for (const v of (bank >= 1 ? ['0', '-5', '2.5', String(Math.floor(bank) + 1), ''] : [])) {
-    await page.evaluate(() => { const d = document.getElementById("report"); if (d && d.open) d.close(); }); // F18 shoe report auto-opens at the cut
     await page.fill(SEL.bet, v);
     const before = await text(SEL.message);
-    await page.click(SEL.deal);
+    await clickDeal(page, SEL.deal);
     await page.waitForTimeout(50);
     const after = await text(SEL.message);
     const valid = await page.$eval(SEL.bet, (e) => e.validationMessage).catch(() => '');
@@ -207,9 +222,8 @@ async function main() {
   while (brokeRounds++ < 60) {
     const b = money(await text(SEL.bankroll));
     if (!(b >= 1)) break;
-    await page.evaluate(() => { const d = document.getElementById("report"); if (d && d.open) d.close(); }); // F18 shoe report auto-opens at the cut
     await page.fill(SEL.bet, String(Math.floor(b)));
-    await page.click(SEL.deal);
+    await clickDeal(page, SEL.deal);
     for (let s = 0; s < 10; s++) {
       if (await enabled(SEL.noInsure)) { await page.click(SEL.noInsure); continue; }
       if (await enabled(SEL.hit)) await page.click(SEL.hit); else break;
