@@ -1,13 +1,14 @@
 // Round 11 engine checks for F18 (report card), F19 (seeded shoes + replay), F20 (count systems).
 // Usage: node qa/f18_f20_check.js <snapshot-dir>
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 const snap = path.resolve(process.argv[2]);
-const BJ = require(path.join(snap, 'blackjack.js'));
-const Counting = require(path.join(snap, 'counting.js'));
-const Strategy = require(path.join(snap, 'strategy.js'));
-const Report = require(path.join(snap, 'report.js'));
-const Replay = require(path.join(snap, 'replay.js'));
-const Drill = require(path.join(snap, 'drill.js'));
+const BJ = require(engineFile(snap, 'blackjack.js'));
+const Counting = require(engineFile(snap, 'counting.js'));
+const Strategy = require(engineFile(snap, 'strategy.js'));
+const Report = require(engineFile(snap, 'report.js'));
+const Replay = require(engineFile(snap, 'replay.js'));
+const Drill = require(engineFile(snap, 'drill.js'));
 
 const checks = {};
 const put = (name, pass, detail) => { checks[name] = detail === undefined ? { pass } : { pass, detail }; };

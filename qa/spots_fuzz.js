@@ -7,11 +7,12 @@
  */
 'use strict';
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 const dir = process.argv[2];
 const ROUNDS = Number(process.argv[3] || 1e5);
-const { Game } = require(path.resolve(dir, 'blackjack.js'));
+const { Game } = require(engineFile(dir, 'blackjack.js'));
 let Counting = null;
-try { Counting = require(path.resolve(dir, 'counting.js')); } catch (_) { /* optional */ }
+try { Counting = require(engineFile(dir, 'counting.js')); } catch (_) { /* optional */ }
 
 let a = 4242 >>> 0;
 const rnd = () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };

@@ -12,6 +12,7 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const { pagePath } = require('./lib/layout');
 
 const { chromium } = require('./lib/browser');
 
@@ -55,7 +56,7 @@ function flag(issue, detail) {
 
 async function main() {
   const srv = await serve();
-  const url = `http://127.0.0.1:${srv.address().port}/index.html`;
+  const url = `http://127.0.0.1:${srv.address().port}${pagePath(dir)}`;
   const browser = await chromium.launch({ headless: !process.env.HEADED, slowMo: process.env.HEADED ? Number(process.env.SLOWMO || 250) : 0 });
   const shots = [];
   const shot = async (page, name) => {

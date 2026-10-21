@@ -8,6 +8,7 @@
 const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { pagePath, hasFile } = require('./lib/layout');
 
 const QA = __dirname;
 const REPO = path.resolve(QA, '..');
@@ -25,14 +26,15 @@ const out = path.join(QA, 'reports', sha7);
 fs.mkdirSync(out, { recursive: true });
 
 // Test the commit, never the working tree.
-if (!fs.existsSync(path.join(snap, 'index.html'))) {
+if (!fs.existsSync(path.join(snap, '.git-archive-done'))) {
   fs.mkdirSync(snap, { recursive: true });
   const tar = execFileSync('git', ['-C', REPO, 'archive', '--format=tar', sha], { maxBuffer: 1 << 28 });
   execFileSync('tar', ['-x', '-C', snap], { input: tar });
+  fs.writeFileSync(path.join(snap, '.git-archive-done'), sha + '\n');
 }
 
-const url = `http://127.0.0.1:${port}/index.html`;
-const has = (f) => fs.existsSync(path.join(snap, f));
+const url = `http://127.0.0.1:${port}${pagePath(snap)}`;
+const has = (f) => hasFile(snap, f);
 // [name, script, args, needs] — a step runs only when the snapshot has its module.
 const STEPS = [
   ['unit tests', null, [], null],
@@ -100,7 +102,7 @@ function judge(name, { code, text }) {
       const started = Date.now();
       const res = script
         ? await run(process.execPath, [path.join(QA, script), ...argv], QA)
-        : await run(process.execPath, ['--test'], snap);
+        : await run(process.execPath, ['--test'], snap); // finds engine/, web/ and agent/ tests too
       fs.writeFileSync(path.join(out, `${script ? path.basename(script, '.js') : 'unit_tests'}.out`), res.text);
       const verdict = judge(name, res);
       results.push({ name, ...verdict, seconds: Math.round((Date.now() - started) / 1000) });

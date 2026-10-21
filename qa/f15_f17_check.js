@@ -6,8 +6,9 @@
  */
 'use strict';
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 const dir = path.resolve(process.argv[2]);
-const req = (f) => require(path.join(dir, f));
+const req = (f) => require(engineFile(dir, f));
 const BJ = req('blackjack.js'), Rules = req('rules.js'), Strategy = req('strategy.js'), Chart = req('chart.js'),
   Bank = req('bankroll.js'), Drill = req('drill.js'), Counting = req('counting.js'), EV = req('ev.js');
 const out = { checks: {} };

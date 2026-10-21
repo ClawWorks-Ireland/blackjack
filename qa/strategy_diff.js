@@ -1,8 +1,9 @@
 // Compare <snap>/strategy.js recommend() with an independent 6D S17 DAS LS chart.
 'use strict';
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 const dir = path.resolve(process.argv[2]);
-const S = require(path.join(dir, 'strategy.js'));
+const S = require(engineFile(dir, 'strategy.js'));
 const R = ['2','3','4','5','6','7','8','9','10','A'];
 const val = (r) => (r === 'A' ? 11 : Number(r));
 function total(cs){let t=0,a=0;for(const c of cs){t+=val(c);if(c==='A')a++;}while(t>21&&a){t-=10;a--;}return{t,soft:a>0};}

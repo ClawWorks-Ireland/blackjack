@@ -9,6 +9,7 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const { pagePath } = require('./lib/layout');
 const { chromium } = require('./lib/browser');
 const dir = path.resolve(process.argv[2]);
 const out = path.resolve(process.argv[3]);
@@ -28,7 +29,7 @@ const serve = () => new Promise((r) => {
 
 (async () => {
   const srv = await serve();
-  const url = `http://127.0.0.1:${srv.address().port}/index.html`;
+  const url = `http://127.0.0.1:${srv.address().port}${pagePath(dir)}`;
   const browser = await chromium.launch({ headless: !process.env.HEADED, slowMo: process.env.HEADED ? Number(process.env.SLOWMO || 250) : 0 });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();

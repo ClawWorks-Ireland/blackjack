@@ -7,7 +7,7 @@
  */
 'use strict';
 
-importScripts('sidebets.js', 'blackjack.js', 'strategy.js', 'counting.js', 'rules.js', 'bankroll.js');
+importScripts('../engine/sidebets.js', '../engine/blackjack.js', '../engine/strategy.js', '../engine/counting.js', '../engine/rules.js', '../engine/bankroll.js');
 
 self.onmessage = (e) => {
   const { id, rules, ramp, rounds, seed } = e.data;
