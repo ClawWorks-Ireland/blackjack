@@ -65,6 +65,25 @@ async function clickDeal(page, sel) {
   }
 }
 
+/**
+ * Click an action during a hand. If the F18 shoe report has opened over the
+ * table (B16), record it, close it and retry, so the playtest reports the bug
+ * instead of timing out.
+ */
+async function clickInHand(page, sel, where) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.click(sel, { timeout: 2000 });
+      return;
+    } catch (e) {
+      const open = await page.$eval('#report', (d) => d.open).catch(() => false);
+      if (!open || attempt >= 3) throw e;
+      flag('shoe report opened during a hand (B16)', where);
+      await page.evaluate(() => document.getElementById('report').close());
+    }
+  }
+}
+
 function flag(issue, detail) {
   if (seen.has(issue)) { findings.find((f) => f.issue === issue).count++; return; }
   seen.add(issue);
@@ -133,7 +152,7 @@ async function main() {
         if (!firsts.insurance) { firsts.insurance = true; await shot(page, '02-insurance-offer'); }
         const take = i % 3 === 0 && (await enabled(SEL.insure));
         if (take) tally.insurance++;
-        await page.click(take ? SEL.insure : SEL.noInsure);
+        await clickInHand(page, take ? SEL.insure : SEL.noInsure, { round: i + 1, step: steps });
         continue;
       }
       const opts = [];
@@ -149,7 +168,7 @@ async function main() {
       if (!usedKey && pick === 'stand' && i % 4 === 0) {
         usedKey = true;
         await page.keyboard.press('s'); // shortcut path
-      } else await page.click(SEL[pick]);
+      } else await clickInHand(page, SEL[pick], { round: i + 1, step: steps });
       const hands = await count(SEL.hands);
       tally.maxHands = Math.max(tally.maxHands, hands);
       if (hands >= 3 && !firsts.multi) { firsts.multi = true; await shot(page, '03-three-plus-hands'); }

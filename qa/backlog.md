@@ -31,6 +31,7 @@ Rule: a bug requested 3 rounds in a row without a fix goes to the user instead o
 - T3 Low    ui_playtest predates F18 and stalled when the shoe report covered the table (see B16). — fixed (records B16 as a finding, closes the report, continues)
 - T4 Low    f18_f20_ui_check required r = 1.00 for the perfect counter, but a shoe where the count never calls for a bet change is flat-bet and correctly "Not measurable". — fixed (accepts that case when the flat-betting note shows)
 - T5 Low    ui_playtest closed the shoe report and then clicked Deal, but the report's timer (settleAt + 700 ms) could fire in between and block the click for 30 s. Harness race on the same timer as B16; the game behaves as designed between rounds. — fixed (clickDeal closes the report and retries)
+- T6 Low    ui_playtest only looked for a mid-hand shoe report at the top of each step, so a report opening just before an action click (B16) still timed it out. — fixed (clickInHand records B16, closes the report and retries)
 
 ## Features (priority order)
 - F2 basic-strategy coach (hint + mistake feedback + accuracy stat) — fixed@ab1d7d3 (built by creator on its own; B8 remains)
