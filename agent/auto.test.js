@@ -38,6 +38,12 @@ test('auto: stops at the cut card or when the bankroll runs short', () => {
   assert.equal(r.stopped, 'shuffle');
   assert.ok(r.played > 10 && r.played < 200);
   assert.equal(r.obs.shoe.cutCardReached, true);
+  const later = autoPlay(env, { rounds: 300 });
+  assert.ok(later.shuffles >= 1);
+  assert.deepEqual(later.bets, { min: 1, max: 1 });
+  const counter = autoPlay(env, { rounds: 1000, policy: 'hilo' });
+  assert.ok(counter.shuffles >= 5);
+  assert.deepEqual(counter.bets, { min: 1, max: 12 }, 'the counter ramps from 1 to 12 units over several shoes');
 
   const poor = new BlackjackEnv({ seed: 'auto-poor', bankroll: 25 });
   const p = autoPlay(poor, { rounds: 1000, bet: 20, policy: 'random' });

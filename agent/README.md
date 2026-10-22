@@ -117,8 +117,10 @@ end exactly where they would if the agent had played those moves itself.
   out the cut card.
 - Play also stops when the bankroll can't cover the next bet. `stopped` says
   why: `rounds`, `shuffle` or `bankroll`.
-- The reply has `played`, `net`, `wagered`, `bankroll` (`start`, `end`), a
-  tally of hand outcomes, the best and worst round, and the table's `obs`.
+- The reply has `played`, `net`, `wagered`, `bankroll` (`start`, `end`), the
+  smallest and largest round's bet (`bets`), how many new shoes were shuffled
+  in (`shuffles`), a tally of hand outcomes (split hands count separately),
+  the best and worst round, and the table's `obs`.
   Only between rounds; a bad request is an error and changes nothing.
 
 ## MCP server

@@ -19,8 +19,9 @@ const OUTCOMES = ['win', 'blackjack', 'push', 'lose', 'bust', 'surrender'];
  * after the round that brings out the cut card. Play also stops when the
  * bankroll can't cover the next bet.
  *
- * Returns {played, stopped, policy, net, wagered, bankroll: {start, end},
- * hands: {win, blackjack, ...}, best, worst, obs}.
+ * Returns {played, stopped, policy, bet, bets: {min, max}, shuffles, net,
+ * wagered, bankroll: {start, end}, hands: {win, blackjack, ...} (split hands
+ * count separately), best, worst, obs}.
  */
 function autoPlay(env, { rounds, policy = 'basic', bet, untilShuffle = false } = {}) {
   if (!Number.isInteger(rounds) || rounds < 1 || rounds > MAX_ROUNDS) {
@@ -40,12 +41,19 @@ function autoPlay(env, { rounds, policy = 'basic', bet, untilShuffle = false } =
   let wagered = 0;
   let best = null;
   let worst = null;
+  let low = null;
+  let high = null;
+  let shuffles = 0;
+  let shoe = first.shoe.seed;
   let stopped = 'rounds';
   while (played < rounds) {
     const stake = bet === undefined ? p.bet(obs, ctx) : bet;
     const total = Array.isArray(stake) ? stake.reduce((a, b) => a + b, 0) : stake;
     if (!(total <= obs.bankroll)) { stopped = 'bankroll'; break; }
     let res = env.step({ action: 'deal', bet: stake });
+    if (res.obs.shoe.seed !== shoe) { shuffles++; shoe = res.obs.shoe.seed; }
+    if (low === null || total < low) low = total;
+    if (high === null || total > high) high = total;
     while (!res.done) res = env.step(p.act(res.obs, env.hint(), ctx));
     played++;
     obs = res.obs;
@@ -58,7 +66,7 @@ function autoPlay(env, { rounds, policy = 'basic', bet, untilShuffle = false } =
   }
   const round2 = (n) => Math.round(n * 100) / 100;
   return {
-    played, stopped, policy, bet: bet === undefined ? 'policy' : bet,
+    played, stopped, policy, bet: bet === undefined ? 'policy' : bet, bets: { min: low, max: high }, shuffles,
     net: round2(obs.bankroll - start), wagered: round2(wagered),
     bankroll: { start, end: obs.bankroll }, hands, best, worst,
     obs: env.observe(),
@@ -69,9 +77,11 @@ function autoPlay(env, { rounds, policy = 'basic', bet, untilShuffle = false } =
 function describe(r) {
   const why = { rounds: '', shuffle: ', stopped at the cut card', bankroll: ', stopped: bankroll below the next bet' }[r.stopped];
   const tally = OUTCOMES.filter((o) => r.hands[o]).map((o) => `${r.hands[o]} ${o}`).join(', ');
+  const bets = r.bets.min === r.bets.max ? `bet ${r.bets.min}` : `bets ${r.bets.min} to ${r.bets.max}`;
+  const shuffled = r.shuffles ? `, ${r.shuffles} new shoe${r.shuffles === 1 ? '' : 's'}` : '';
   return `Played ${r.played} round${r.played === 1 ? '' : 's'} by ${r.policy}${why}: net ${r.net > 0 ? '+' : ''}${r.net} `
     + `on ${r.wagered} wagered, bankroll ${r.bankroll.start} -> ${r.bankroll.end}`
-    + (r.played ? ` · hands: ${tally} · best round ${r.best > 0 ? '+' : ''}${r.best}, worst ${r.worst}` : '');
+    + (r.played ? ` · ${bets}${shuffled} · hands (splits count separately): ${tally} · best round ${r.best > 0 ? '+' : ''}${r.best}, worst ${r.worst}` : '');
 }
 
 module.exports = { autoPlay, describe, MAX_ROUNDS };
