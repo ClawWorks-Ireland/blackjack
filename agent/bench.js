@@ -184,7 +184,9 @@ const sameConfig = (c) => JSON.stringify({ ...c }) === JSON.stringify({ ...STAND
 function gitCommit() {
   try {
     const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: __dirname }).toString().trim();
-    const dirty = execFileSync('git', ['status', '--porcelain', '--', '.', '../engine'], { cwd: __dirname }).toString().trim();
+    // Code changes only: the leaderboard files are what --record itself writes.
+    const paths = ['.', '../engine', ':(exclude)leaderboard.json', ':(exclude)LEADERBOARD.md'];
+    const dirty = execFileSync('git', ['status', '--porcelain', '--', ...paths], { cwd: __dirname }).toString().trim();
     return dirty ? `${sha}+dirty` : sha;
   } catch (_) {
     return null;
