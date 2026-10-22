@@ -493,13 +493,13 @@
 
   /**
    * Open a shoe report after `delay` ms, but only between rounds: if a new
-   * hand was dealt meanwhile, hold the report until that hand settles so it
-   * never covers Hit and Stand (B16).
+   * hand was dealt meanwhile, hold it, and render() opens it once that hand
+   * has settled and its cards have landed, before Deal unlocks. It never
+   * covers Hit and Stand (B16).
    */
   function queueReport(shoe, delay) {
-    const at = round;
     setTimeout(() => {
-      if (round === at && game.phase !== 'player' && game.phase !== 'insurance') showReport(shoe);
+      if (!inFlight && game.phase !== 'player' && game.phase !== 'insurance') showReport(shoe);
       else pendingReport = shoe;
     }, delay);
   }
@@ -520,10 +520,6 @@
       const done = finishShoe(true);
       pendingReport = null; // a newer shoe's report replaces one still waiting
       if (done && prefs.shoeReport) queueReport(done, settleAt + 700);
-    } else if (pendingReport) {
-      const held = pendingReport;
-      pendingReport = null;
-      queueReport(held, settleAt + 700);
     }
     const outcome = netOutcome();
     const cue = outcome === 'blackjack' ? 'blackjack'
@@ -627,6 +623,12 @@
       els.chips.querySelectorAll('[data-chip]').forEach((b) => { b.disabled = true; });
       revealTimer = setTimeout(render, settleAt + landMs());
       return;
+    }
+
+    if (pendingReport && game.phase !== 'player' && game.phase !== 'insurance') {
+      const held = pendingReport;
+      pendingReport = null;
+      showReport(held);
     }
 
     els.dealerTotal.textContent = !game.dealer.length ? ''

@@ -56,6 +56,7 @@ const STEPS = [
   ['count drill', 'count_drill_check.js', [url], 'drill.js'],
   ['bet ramp', 'ramp_check.js', [snap], 'counting.js'],
   ['F18-F20 UI', 'f18_f20_ui_check.js', [url, out], 'report.js'],
+  ['B16 report timing', 'b16_ui_check.js', [url], 'report.js'],
 ];
 
 function run(cmd, argv, cwd) {
