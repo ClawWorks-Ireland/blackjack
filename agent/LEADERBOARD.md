@@ -6,7 +6,7 @@ Standard config (bench v1): default rules (6 decks, S17, 3:2, DAS, late surrende
 
 | # | Policy | Units / 100 rounds | Return | Avg bet (units) | Chart agreement | Off-chart cost | Commit | Date |
 |---|---|---|---|---|---|---|---|---|
-| 1 | hilo (baseline) | +1.96 ± 0.57 | +1.23% ± 0.36% | 1.59 | 96.8% | 0.17% | 33adcf6 | 2026-10-22 |
+| 1 | hilo (baseline) | +1.93 ± 0.57 | +1.21% ± 0.36% | 1.59 | 96.8% | 0.15% | bf81a39 | 2026-10-22 |
 | 2 | basic (baseline) | -0.32 ± 0.22 | -0.32% ± 0.22% | 1.00 | 100.0% | 0.02% | 33adcf6 | 2026-10-22 |
 | 3 | never-bust (baseline) | -6.10 ± 0.19 | -6.10% ± 0.19% | 1.00 | 65.3% | 5.69% | 33adcf6 | 2026-10-22 |
 | 4 | random (baseline) | -42.03 ± 0.23 | -42.03% ± 0.23% | 1.00 | 29.7% | 41.97% | 33adcf6 | 2026-10-22 |
