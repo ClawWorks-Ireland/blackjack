@@ -173,8 +173,12 @@ function main(argv) {
   const hub = new Hub({ leaderboard, log });
   hub.create({ name: 'Main table', minBet: 10, maxBet: 500 });
   hub.create({ name: 'Practice (with bots)', minBet: 10, maxBet: 500, bots: 3 });
-  const logFile = flag('--log', null);
-  const logRequests = logFile ? (m) => fs.appendFile(path.resolve(logFile), `${new Date().toISOString()} ${m}\n`, () => {}) : null;
+  const logFile = flag('--log', null) && path.resolve(flag('--log'));
+  if (logFile) fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  let logFailed = false;
+  const logRequests = logFile ? (m) => fs.appendFile(logFile, `${new Date().toISOString()} ${m}\n`, (e) => {
+    if (e && !logFailed) { logFailed = true; console.error(`request log: can't write ${logFile}: ${e.message}`); }
+  }) : null;
   const server = createServer({ hub, log, logRequests });
   server.listen(port, host, () => {
     console.log(`Blackjack tables on port ${port}`);
@@ -185,7 +189,7 @@ function main(argv) {
       console.log(`  only at:       http://${host}:${port}/`);
     }
     console.log(`  leaderboard data: ${path.relative(process.cwd(), data)}`);
-    if (logFile) console.log(`  request log: ${path.relative(process.cwd(), path.resolve(logFile))}`);
+    if (logFile) console.log(`  request log: ${path.relative(process.cwd(), logFile)}`);
   });
   const stop = () => { hub.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1000).unref(); };
   process.on('SIGINT', stop);
