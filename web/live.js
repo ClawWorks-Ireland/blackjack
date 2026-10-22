@@ -196,6 +196,13 @@
         kids.push(el('p', { class: 'muted', text: `Last round: ${last.hands.map((h) => `${h.total}${h.result ? ` ${h.result.outcome}` : ''}`).join(' / ')} against the dealer's ${last.dealerTotal}, ${last.net >= 0 ? 'won' : 'lost'} ${money(Math.abs(last.net))}` }));
       }
       if (you.onTable) kids[0].append(el('span', { class: 'muted', text: ` + ${money(you.onTable)} on the table` }));
+      // Your hand, big and next to your buttons: on a phone your seat can be anywhere in the grid.
+      if (me.hands.length) {
+        kids.push(el('div', { class: 'your-hands', 'aria-label': 'Your hand' }, ...me.hands.map((h, k) => el('div', { class: `hand${me.active === k ? ' active' : ''}` },
+          el('div', { class: 'cards' }, ...h.cards.map(card)),
+          el('div', { class: 'total', text: `${h.soft ? 'soft ' : ''}${h.total}${me.hands.length > 1 ? ` · ${money(h.bet)}` : ''}` }),
+          h.result ? el('div', { class: `result ${h.result.outcome}`, text: `${h.result.outcome} ${signed(h.result.net)}` }) : null))));
+      }
       if (you.legal.includes('bet') && (view.phase === 'done' || (me.bet === 0 && !me.out))) {
         const input = el('input', { type: 'number', min: view.table.minBet, max: Math.min(view.table.maxBet, you.bankroll), step: 1, value: lastBet || view.table.minBet, 'aria-label': 'Bet', style: 'width:7em' });
         const bet = () => { lastBet = Number(input.value); store.set('live.lastBet', String(lastBet)); send('bet', { amount: lastBet }); };

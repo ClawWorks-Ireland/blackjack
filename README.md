@@ -61,6 +61,21 @@ The server is for a home network: it has no accounts or passwords. Use
 `--host 127.0.0.1` to keep it to this Mac. Don't expose it to the internet
 as it is.
 
+To keep it running, install it as a launchd agent: it starts at login and
+restarts if it stops (output in `server/data/server.log`).
+
+```bash
+server/service.sh install 192.168.4.43   # listen on this address; also: status, restart, uninstall
+```
+
+Two macOS settings matter. The firewall must allow the Node binary
+(`/opt/homebrew/Cellar/node/<version>/bin/node`, so re-check after
+`brew upgrade node`). And a server started from inside another app (an
+editor, the Claude app) runs under that app's Local Network permission,
+which may stop phones reaching it: start it from Terminal, SSH or the
+service. `--log server/data/requests.log` records every request, which
+shows quickly whether a device gets through.
+
 ## Test it
 
 ```bash
