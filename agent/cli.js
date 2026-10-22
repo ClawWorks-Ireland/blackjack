@@ -6,7 +6,7 @@
  *   node agent/cli.js [--seed S] [--rules '{"h17":true}'] [--bankroll N] [--min-bet N] [--max-bet N]
  *
  * Requests:  {"action":"deal","bet":10}   {"action":"hit"}   {"cmd":"observe"}
- *            {"cmd":"reset","seed":"s1","rules":{...}}   {"cmd":"hint"}   {"cmd":"quit"}
+ *            {"cmd":"reset","seed":"s1","rules":{...}}   {"cmd":"hint"}   {"cmd":"hint","count":true}   {"cmd":"quit"}
  *            {"cmd":"auto","rounds":100,"policy":"basic","bet":10,"untilShuffle":false}
  * Responses: {"ok":true,"obs":{...},"reward":0,"done":false}  or  {"ok":false,"error":"..."}
  * Any "id" in a request is echoed back.
@@ -15,6 +15,7 @@
 const readline = require('readline');
 const { BlackjackEnv, EnvError } = require('./env.js');
 const { autoPlay } = require('./auto.js');
+const { countHint } = require('./count-hint.js');
 
 function parseArgs(argv) {
   const opts = {};
@@ -45,7 +46,7 @@ function handle(env, req) {
     case 'step': return { ...env.step(req) };
     case 'observe': return { obs: env.observe() };
     case 'legal': return { legal: env.legalActions() };
-    case 'hint': return { hint: env.hint() };
+    case 'hint': return { hint: req.count ? countHint(env) : env.hint() };
     case 'auto': {
       const { obs, ...auto } = autoPlay(env, { rounds: req.rounds, policy: req.policy, bet: req.bet, untilShuffle: req.untilShuffle });
       return { auto, obs };

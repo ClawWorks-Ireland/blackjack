@@ -46,8 +46,11 @@ function mayDouble(cards, doubleOn = 'any') {
   return doubleOn === '10-11' ? total === 10 || total === 11 : total >= 9 && total <= 11;
 }
 
-function makeSolver({ h17 = false, das = true, decks = 6, doubleOn = 'any' } = {}) {
-  const deck = fullDeck(decks);
+/**
+ * `deck` (optional) is the composition to play from, counts by value 1-10
+ * (index 0 unused); by default a full shoe of `decks` decks.
+ */
+function makeSolver({ h17 = false, das = true, decks = 6, doubleOn = 'any', deck = fullDeck(decks) } = {}) {
   const dealerMemo = new Map();
   const playMemo = new Map();
 
@@ -197,7 +200,7 @@ function makeSolver({ h17 = false, das = true, decks = 6, doubleOn = 'any' } = {
     return ev;
   }
 
-  return { actions, standEV, splitAcesEV };
+  return { actions, standEV, hitEV, doubleEV, splitEV, splitAcesEV };
 }
 
 /** Chance the dealer has blackjack given the up card and your two cards. */

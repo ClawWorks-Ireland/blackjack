@@ -15,6 +15,7 @@ const readline = require('readline');
 const { BlackjackEnv, EnvError } = require('./env.js');
 const { parseArgs } = require('./cli.js');
 const { autoPlay, describe, MAX_ROUNDS } = require('./auto.js');
+const { countHint } = require('./count-hint.js');
 
 const SERVER_INFO = { name: 'blackjack', version: '1.0.0' };
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -112,7 +113,17 @@ const TOOLS = [
     description: 'Basic strategy for the current decision, as a baseline, with ev: the expected value of each legal action '
       + 'per unit of the bet (full-shoe solver values that ignore the count; evBasis says how exact). '
       + 'For insurance, ev is the gain over declining given the cards seen so far.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        count: {
+          type: 'boolean',
+          description: 'Add what a counter knows: the Hi-Lo running and true count, the counter\'s play (index play, '
+            + 'insurance, or the ramp bet between rounds), and evSeen, each legal play priced from the cards left.',
+        },
+      },
+      additionalProperties: false,
+    },
   },
 ];
 
@@ -158,7 +169,7 @@ function callTool(env, name, args = {}) {
         const obs = env.observe();
         return text(`${summary(obs)}\n${JSON.stringify({ obs })}`);
       }
-      case 'hint': return text(JSON.stringify({ hint: env.hint() }));
+      case 'hint': return text(JSON.stringify({ hint: args.count ? countHint(env) : env.hint() }));
       case 'auto_play': {
         const { obs, ...auto } = autoPlay(env, args);
         return text(`${describe(auto)}\n${summary(obs)}\n${JSON.stringify({ auto, obs })}`);

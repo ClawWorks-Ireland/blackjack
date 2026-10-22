@@ -102,6 +102,27 @@ expect index plays to beat them. `evBasis` says how exact the numbers are:
 `ev` is null for a hand the table doesn't cover (a pair you can't split, played
 as its total).
 
+### Count-aware hints
+
+Ask for `{"cmd":"hint","count":true}` (CLI) or `hint` with `{"count":true}`
+(MCP) to get what a card counter knows on top of the plain hint:
+
+- `count`: the Hi-Lo `running` and `trueCount`, `decksLeft`, and `play`, what a
+  Hi-Lo counter does now: an index play (`index` set, e.g. stand on 16 v 10 at
+  0 or above), the insurance decision (at +3), or, between rounds, the ramp's
+  `bet` (1-2-4-8-12 units). Between rounds the hint itself is
+  `{"action":"deal","bet":...}`.
+- `evSeen`: each legal play priced from the cards actually left (the shoe
+  minus `obs.shoe.seen`), computed exactly by the solver in
+  `engine/tools/solver.js`; `bestSeen` is the best of them. It can disagree
+  with both basic strategy and the index plays, since it uses the full
+  composition rather than one count. Splits are valued without resplitting.
+
+Everything comes from what a seated player has seen, never the shoe's order.
+A count hint takes about 20 ms (occasionally up to a second for a split deep
+in the shoe), so it is opt-in; the plain `hint`, which the benchmark uses,
+is unchanged.
+
 ### Batch play
 
 `auto` (CLI) and `auto_play` (MCP) let a built-in policy play up to 10,000
