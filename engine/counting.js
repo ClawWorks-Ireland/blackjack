@@ -218,6 +218,17 @@
     const twoCards = cards.length === 2;
     const isPair = twoCards && cards[0].rank === cards[1].rank;
 
+    if (isPair && allowed.canSplit) {
+      for (const [v, u, play, index, sense] of PAIRS) {
+        if (BJ.cardValue(cards[0]) === v && u === up && applies(t, index, sense) && basic.action !== play) {
+          return dev(play, `Pair of ${cards[0].rank}s`, index);
+        }
+      }
+      // The hard-total and surrender indices are for unpaired hands: a pair
+      // that basic strategy splits (6-6, 8-8) stays a split.
+      if (basic.action === 'split') return basic;
+    }
+
     if (allowed.canSurrender) {
       for (const [tot, u, index, sense] of SURR_SET) {
         if (tot !== total || u !== up) continue;
@@ -229,14 +240,6 @@
         }
       }
       if (basic.action === 'surrender') return basic;
-    }
-
-    if (isPair && allowed.canSplit) {
-      for (const [v, u, play, index, sense] of PAIRS) {
-        if (BJ.cardValue(cards[0]) === v && u === up && applies(t, index, sense) && basic.action !== play) {
-          return dev(play, `Pair of ${cards[0].rank}s`, index);
-        }
-      }
     }
 
     for (const [tot, u, play, index, sense] of HARD_SET) {

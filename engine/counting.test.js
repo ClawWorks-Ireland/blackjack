@@ -266,3 +266,15 @@ test('F20: bet ramp and insurance follow the chosen system', () => {
   assert.equal(K.systemState(new BJ.Game({ decks: 6 }), 'ko').betCount < 2, true, 'a fresh KO shoe bets 1 unit');
   assert.equal(K.systemState(new BJ.Game({ decks: 6 }), 'ko').insurance, false);
 });
+
+test('a pair basic strategy splits stays split whatever the hard-total index says (CLA-106)', () => {
+  assert.equal(play(['6', '6'], '4', -1).action, 'split');            // not "hit 12 v 4 below 0"
+  assert.equal(play(['6', '6'], '2', 5).action, 'split');             // not "stand 12 v 2 at +3"
+  assert.equal(play(['8', '8'], '10', 3).action, 'split');            // not "surrender 16 v 10" or "stand"
+  assert.equal(play(['8', '8'], '9', 6).action, 'split');             // not "stand 16 v 9 at +5"
+  assert.equal(play(['8', '8'], '10', 3, NO_LS).action, 'split');
+  assert.equal(play(['10', '6'], '10', 3).action, 'surrender');       // an unpaired 16 still surrenders
+  assert.equal(play(['10', '2'], '4', -1).action, 'hit');             // and an unpaired 12 still hits
+  // When the pair can't be split, it plays as its hard total, indices and all.
+  assert.equal(play(['6', '6'], '4', -1, { canDouble: true, canSplit: false, canSurrender: true }).action, 'hit');
+});
