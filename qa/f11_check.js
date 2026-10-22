@@ -75,8 +75,13 @@ srv.listen(0, '127.0.0.1', async () => {
       const lp = await browser.newPage({ viewport: { width: w, height: h }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
       await lp.goto(url); await lp.evaluate(() => localStorage.clear()); await lp.reload();
       const idle = { deal: await lp.evaluate(() => document.getElementById('deal').getBoundingClientRect().bottom), vw: await lp.evaluate(() => document.documentElement.scrollWidth) };
-      await lp.check('input[name="spots"][value="3"]'); await lp.fill('#bet', '10'); await lp.click('#deal'); await lp.waitForTimeout(600);
-      if (await lp.$eval('#no-insure', (e) => !e.disabled && !e.closest('[hidden]')).catch(() => false)) { await lp.click('#no-insure'); await lp.waitForTimeout(400); }
+      await lp.check('input[name="spots"][value="3"]'); await lp.fill('#bet', '10');
+      // A dealer blackjack ends the round at the peek, with no Hit/Stand to measure: deal again (T10).
+      for (let tries = 0; tries < 10; tries++) {
+        await lp.click('#deal'); await lp.waitForTimeout(600);
+        if (await lp.$eval('#no-insure', (e) => !e.disabled && !e.closest('[hidden]')).catch(() => false)) { await lp.click('#no-insure'); await lp.waitForTimeout(400); }
+        if (await lp.evaluate(() => document.body.classList.contains('in-hand'))) break;
+      }
       const mid = await lp.evaluate(() => {
         const box = (id) => { const e = document.getElementById(id); const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; };
         const cards = [...document.querySelectorAll('#player-hands .card, #dealer-cards .card')].map((c) => c.getBoundingClientRect());
