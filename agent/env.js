@@ -56,18 +56,24 @@
 
     /**
      * Start a new table. Options: seed (string, or "seed-N" to start at shoe
-     * N), rules (partial rules object), bankroll, minBet, maxBet.
+     * N), rules (partial rules object), bankroll, minBet, maxBet, and bots
+     * (0-6 other seats played by basic strategy) with seat (0 to bots: how
+     * many bots sit on your right and play before you).
      */
-    reset({ seed = null, rules = {}, bankroll = 1000, minBet = 1, maxBet = 500 } = {}) {
+    reset({ seed = null, rules = {}, bankroll = 1000, minBet = 1, maxBet = 500, bots = 0, seat = 0 } = {}) {
       const full = checkRules(rules);
       for (const [name, v] of [['bankroll', bankroll], ['minBet', minBet], ['maxBet', maxBet]]) {
         if (!Number.isFinite(v) || v <= 0) throw new EnvError(`${name} must be a positive number`);
       }
       if (minBet > maxBet) throw new EnvError('minBet must not exceed maxBet');
+      if (!Number.isInteger(bots) || bots < 0 || bots > BJ.TABLE_SEATS - 1) throw new EnvError(`bots must be a whole number from 0 to ${BJ.TABLE_SEATS - 1}`);
+      if (!Number.isInteger(seat) || seat < 0 || seat > bots) throw new EnvError(`seat must be a whole number from 0 to ${bots} (the number of bots)`);
       const text = seed === null || seed === undefined ? BJ.randomSeed() : String(seed);
       const parsed = BJ.parseSeed(text);
       if (!parsed) throw new EnvError('seed must be 1-40 characters of letters, digits, "_", "." or "-"');
-      this.game = new BJ.Game({ bankroll, minBet, maxBet, ...full, ...parsed });
+      // Bots play basic strategy for the table's rules, with no money.
+      const botDecide = (cards, up, allowed) => Strategy.recommend(cards, up, allowed, full).action;
+      this.game = new BJ.Game({ bankroll, minBet, maxBet, ...full, ...parsed, bots, seat, botDecide });
       this.round = 0;
       this.shuffles = this.game.shuffles;
       this.seenBefore = emptySeen(); // revealed in earlier rounds of this shoe
@@ -158,10 +164,12 @@
       this.folded = true;
     }
 
+    /** Cards face up on the table (every seat's, bots' included); `all` adds the hole card. */
     tableCards(all) {
       const g = this.game;
       const dealer = all || g.phase === 'done' ? g.dealer : g.dealer.slice(0, 1);
-      return [...g.hands.flatMap((h) => h.cards), ...dealer];
+      const bots = g.others.flatMap((o) => o.hands.flatMap((h) => h.cards));
+      return [...g.hands.flatMap((h) => h.cards), ...bots, ...dealer];
     }
 
     /**
@@ -184,7 +192,10 @@
         legalCost: this.legalCost(),
         ...(full ? {
           rules: g.rules,
-          table: { minBet: g.minBet, maxBet: g.maxBet, maxSpots: BJ.MAX_SPOTS, maxHandsPerSpot: BJ.MAX_HANDS, sideMax: BJ.SIDE_MAX },
+          table: {
+            minBet: g.minBet, maxBet: g.maxBet, maxSpots: BJ.MAX_SPOTS, maxHandsPerSpot: BJ.MAX_HANDS, sideMax: BJ.SIDE_MAX,
+            seats: BJ.TABLE_SEATS, bots: g.bots, seat: g.seat,
+          },
         } : {}),
         shoe: {
           seed: g.shoeSeed, decks: g.decks, cardsLeft: g.shoe.length + (live ? 1 : 0), // the hole card is still unseen
@@ -204,6 +215,21 @@
           };
         }),
         active: g.phase === 'player' ? g.active : null,
+        seat: g.seat, // your first spot's seat; bots in lower seats play before you
+        // Bot seats in table order. Seats on your right have played by the
+        // time you act; the rest play after you, so only their first two cards show.
+        others: g.others.map((o) => ({
+          seat: o.seat,
+          played: o.played,
+          hands: o.hands.map((h, i) => {
+            const v = BJ.handValue(h.cards);
+            return {
+              cards: h.cards.map(cardText), total: v.total, soft: v.soft, fromSplit: !!h.fromSplit,
+              doubled: !!h.doubled, surrendered: !!h.surrendered,
+              result: g.phase === 'done' && o.results[i] ? o.results[i].outcome : null,
+            };
+          }),
+        })),
         insurance: {
           offered: g.phase === 'insurance', evenMoney: g.evenMoneyOffered,
           cost: g.phase === 'insurance' ? round2(g.insuranceCost) : 0,

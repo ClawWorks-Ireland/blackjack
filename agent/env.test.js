@@ -232,3 +232,44 @@ test('legalCost lists every in-round legal move and matches what it takes from t
   }
   for (const [a, n] of Object.entries(seen)) assert.ok(n > 10, `${a} checked ${n} times`);
 });
+
+test('bots: every visible card counts, bots on your right have played and the rest wait (CLA-99)', () => {
+  for (const [bots, seat] of [[1, 0], [3, 1], [6, 6], [4, 2]]) {
+    const env = new BlackjackEnv({ seed: `bots-${bots}-${seat}`, bots, seat, bankroll: 1e6 });
+    const rand = lcg(bots * 10 + seat);
+    let rounds = 0;
+    for (const res of play(env, 400, (obs) => obs.legal[Math.floor(rand() * obs.legal.length)], 10)) {
+      const { shoe, others, phase } = res.obs;
+      assert.equal(Object.values(shoe.seen).reduce((a, b) => a + b, 0) + shoe.cardsLeft, 312);
+      assert.equal(others.length, bots);
+      assert.deepEqual(others.map((o) => o.seat), others.map((o) => o.seat).slice().sort((a, b) => a - b));
+      if (phase === 'player') {
+        for (const o of others) {
+          if (o.seat > seat) {
+            assert.equal(o.played, false);
+            assert.equal(o.hands[0].cards.length, 2, 'a bot after you has only its first two cards');
+          }
+        }
+      }
+      if (res.done) {
+        rounds++;
+        for (const o of others) for (const h of o.hands) assert.ok(h.result || res.obs.dealer.cards.length === 2);
+      }
+    }
+    assert.equal(rounds, 400);
+  }
+});
+
+test('bots: same seed and seat replay exactly; bad seats are errors', () => {
+  const run = () => {
+    const env = new BlackjackEnv({ seed: 'bots-replay', bots: 2, seat: 1 });
+    return [...play(env, 100, basic)].map((r) => JSON.stringify(r));
+  };
+  assert.deepEqual(run(), run());
+  assert.throws(() => new BlackjackEnv({ bots: 7 }), /bots must be/);
+  assert.throws(() => new BlackjackEnv({ bots: 2, seat: 3 }), /seat must be/);
+  assert.throws(() => new BlackjackEnv({ bots: 1.5 }), EnvError);
+  const env = new BlackjackEnv({ bots: 6 });
+  assert.throws(() => env.step({ action: 'deal', bet: [10, 10] }), /7 seats/);
+  assert.equal(env.observe().table.seats, 7);
+});

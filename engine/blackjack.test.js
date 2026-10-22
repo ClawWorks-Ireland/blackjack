@@ -914,6 +914,18 @@ test('F17: new rules are saved and checked', () => {
   assert.equal(new BJ.Game({ obo: true }).obo, false, 'OBO only means something under ENHC');
 });
 
+test('CLA-102: the sit-out seat resplits, finishing one hand at a time', () => {
+  // Seat 8,8 vs dealer 10,7: split; the first hand draws another 8 (resplit), then 3 (11, hit: K = 21);
+  // the second hand draws 9 (17), the third draws 10 (18).
+  const g = riggedGame([c('8'), c('8'), c('10'), c('7'), c('8'), c('3'), c('K'), c('9'), c('10')]);
+  const decide = (cards) => {
+    if (cards.length === 2 && cards[0].rank === cards[1].rank) return 'split';
+    return BJ.handValue(cards).total < 17 ? 'hit' : 'stand';
+  };
+  const w = g.watchRound(decide);
+  assert.deepEqual(w.seats.map((s) => BJ.handValue(s).total), [21, 17, 18]);
+});
+
 test('N2: the sit-out seat splits a pair into two hands', () => {
   // Seat 8,8 vs dealer 10,7: split; hands draw 3 and 10, then hit 8,3 = 11 once (K = 21).
   const g = riggedGame([c('8'), c('8'), c('10'), c('7'), c('3'), c('10'), c('K')]);
@@ -929,4 +941,91 @@ test('N2: the sit-out seat splits a pair into two hands', () => {
   const a = riggedGame([c('A'), c('A'), c('10'), c('7'), c('5'), c('9'), c('K')]);
   const wa = a.watchRound((cards) => (cards.length === 2 && cards[0].rank === 'A' && cards[1].rank === 'A' ? 'split' : 'hit'));
   assert.deepEqual(wa.seats.map((s) => s.length), [2, 2]);
+});
+
+// --- CLA-99: bot seats ---
+
+const Strat = require('./strategy.js');
+const basicBot = (rules) => (cards, up, allowed) => Strat.recommend(cards, up, allowed, rules).action;
+
+function botGame(opts, cards) {
+  const g = new BJ.Game({ bankroll: 1000, botDecide: () => 'stand', ...opts });
+  g.botDecide = basicBot(g.rules);
+  g.shoe = Array.from({ length: 100 }, () => c('2')).concat(cards.slice().reverse());
+  return g;
+}
+
+test('CLA-99: seats are dealt in table order and bots on your right play before you', () => {
+  // Seats: bot 0, you (seat 1), bot 2. Deal order: bot0 10,6 · you 10,7 · bot2 9,9 · dealer 10,6.
+  // Bot 0 hits 16 v 10 (no surrender at this table) and draws 5 before you act.
+  const g = botGame({ bots: 2, seat: 1, lateSurrender: false },
+    [c('10'), c('6'), c('10'), c('7'), c('9'), c('9'), c('10'), c('6'), c('5'), c('8'), c('10'), c('3'), c('4')]);
+  g.deal(10);
+  assert.equal(g.phase, 'player');
+  assert.deepEqual(g.others.map((o) => o.seat), [0, 2]);
+  assert.deepEqual(g.others[0].hands[0].cards.map((x) => x.rank), ['10', '6', '5'], 'bot 0 played already');
+  assert.equal(g.others[1].played, false, 'bot 2 waits for you');
+  g.stand();
+  // Bot 2 stands on 9,9 (18) v 10; the dealer's 10,6 draws 8 and busts.
+  assert.equal(g.phase, 'done');
+  assert.ok(g.others[1].played);
+  assert.equal(g.results[0].outcome, 'win');
+  assert.equal(g.others[0].results[0].outcome, 'win');
+});
+
+test('CLA-99: the dealer plays out when only a bot is live, and no bots changes nothing', () => {
+  // You (seat 0) bust; the bot after you stands on 20; the dealer must still draw (16 + 6: bust).
+  const g = botGame({ bots: 1, seat: 0 }, [c('10'), c('6'), c('10'), c('10'), c('10'), c('6'), c('10'), c('6')]);
+  g.deal(10);
+  g.hit(); // 16 + 10: bust
+  assert.equal(g.phase, 'done');
+  assert.equal(g.dealer.length, 3, 'dealer drew for the bot');
+  assert.equal(g.others[0].results[0].outcome, 'win');
+  // Same seed without bots: same draws as before CLA-99.
+  const a = new BJ.Game({ seed: 'nobots' });
+  const b = new BJ.Game({ seed: 'nobots', bots: 0, seat: 0 });
+  a.deal(10); b.deal(10);
+  assert.deepEqual(a.hands, b.hands);
+  assert.deepEqual(a.dealer, b.dealer);
+  assert.deepEqual(b.others, []);
+});
+
+test('CLA-99: bots split and resplit one hand at a time, and seats are checked', () => {
+  const g = botGame({ bots: 1, seat: 1 }, []);
+  // 8,8 v 6: split; first hand draws 8 (resplit), then 3, 10 ...
+  g.shoe = Array.from({ length: 100 }, () => c('2')).concat([c('8'), c('3'), c('10'), c('9'), c('7')].reverse());
+  const hands = g.playSeat([c('8'), c('8')], c('6'), g.botDecide);
+  assert.equal(hands.length, 3);
+  assert.ok(hands.every((h) => h.fromSplit));
+  assert.deepEqual(hands.map((h) => h.cards.length >= 2), [true, true, true]);
+  assert.throws(() => new BJ.Game({ bots: 7 }), /Bots must be/);
+  assert.throws(() => new BJ.Game({ bots: 2, seat: 3, botDecide: () => 'stand' }), /Seat must be/);
+  assert.throws(() => new BJ.Game({ bots: 1 }), /botDecide/);
+  const full = new BJ.Game({ bots: 6, seat: 0, botDecide: () => 'stand' });
+  assert.throws(() => full.deal([10, 10]), /7 seats/);
+  full.deal(10);
+  assert.equal(full.others.length, 6);
+});
+
+test('CLA-99: every card drawn is on the table or in the shoe, over many seeded rounds', () => {
+  const g = new BJ.Game({ seed: 'bots-cards', bots: 4, seat: 2, bankroll: 1e6, botDecide: () => 'stand' });
+  g.botDecide = basicBot(g.rules);
+  const decide = basicBot(g.rules);
+  for (let r = 0; r < 500; r++) {
+    const before = g.shoe.length;
+    const shoeNo = g.shuffles;
+    g.deal([10, 10]);
+    while (g.phase === 'insurance') g.declineInsurance();
+    while (g.phase === 'player') {
+      const h = g.currentHand;
+      const a = decide(h.cards, g.dealer[0], { canHit: g.canHit(), canDouble: g.canDouble(), canSplit: g.canSplit(), canSurrender: g.canSurrender() });
+      g[a]();
+    }
+    if (g.shuffles !== shoeNo) continue; // a new shoe this round
+    const onTable = g.hands.reduce((n, h) => n + h.cards.length, 0) + g.dealer.length +
+      g.others.reduce((n, o) => n + o.hands.reduce((m, h) => m + h.cards.length, 0), 0);
+    assert.equal(before - g.shoe.length, onTable, `round ${r}`);
+    assert.equal(g.others.length, 4);
+    assert.ok(g.others.every((o) => o.played || g.dealer.length === 2));
+  }
 });

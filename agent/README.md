@@ -21,7 +21,8 @@ node agent/cli.js --seed s1 --rules '{"h17":true,"payout":1.2}'
 ```
 
 Options: `--seed S` (`"s1-5"` starts at shoe 5), `--rules JSON`, `--bankroll N`
-(default 1000), `--min-bet N` (1), `--max-bet N` (500).
+(default 1000), `--min-bet N` (1), `--max-bet N` (500), `--bots N` (0) and
+`--seat K` (0): see [Other seats](#other-seats).
 
 Send one JSON object per line on stdin; one JSON object comes back per line
 on stdout. The first line out is `{"ok":true,"event":"ready","obs":{...}}`.
@@ -69,6 +70,8 @@ double any two, 75% penetration.
   "hands": [ { "cards": ["8c", "5c"], "total": 13, "soft": false, "bet": 25, "spot": 0,
                "fromSplit": false, "splitAces": false, "surrendered": false, "result": null } ],
   "active": 0,                        // index into hands while phase is player
+  "seat": 0,                          // your first spot's seat at the table
+  "others": [],                       // bot seats, see Other seats below
   "insurance": { "offered": false, "evenMoney": false, "cost": 0, "stake": 0, "net": null },
   "sideBets": [],                     // e.g. { "bet": "pairs", "stake": 5, "outcome": "lose", "win": null, "odds": 0, "net": -5 }
   "net": null,                        // the round's chip change once done
@@ -148,6 +151,34 @@ end exactly where they would if the agent had played those moves itself.
   the best and worst round, and the table's `obs`.
   Only between rounds; a bad request is an error and changes nothing.
 
+### Other seats
+
+A table has 7 seats. `bots` (0 to 6, CLI `--bots`, `reset` and `new_table`)
+fills other seats with bots that play basic strategy for the table's rules
+(splits, resplits, doubles, surrender) with no money, and `seat` (0 to `bots`)
+says how many of them sit on your right. Your spots sit together from that
+seat, so `bots` plus your spots can't pass 7.
+
+- Seats are dealt and played in table order, as in a shoe game where every
+  player card is face up. Bots on your right (lower seats) have played their
+  hands by the time you act, so you see all their cards; bots on your left
+  play after you, and until then only their first two cards show.
+- The dealer plays out whenever any hand at the table is still live, yours or
+  a bot's, so a crowded table uses up the shoe faster.
+- Every bot card you can see is in `obs.shoe.seen`, so counts, count hints
+  and `evSeen` include them.
+- `obs.others` lists the bot seats in table order: `{seat, played, hands:
+  [{cards, total, soft, fromSplit, doubled, surrendered, result}]}`, with
+  `result` (`win`, `lose`, `push`, `blackjack`, `bust`, `surrender`) once the
+  round is over. The MCP summary shows them around your hands in seat order.
+- `obs.table` has `seats` (7), `bots` and `seat`; every observation has `seat`.
+
+Without bots nothing changes: same draws, same seeds, same leaderboard. On
+fresh seeds the Hi-Lo baseline makes +1.1 to +1.6 units per 100 rounds at a
+full table (6 bots, first or third base: the seat makes no measurable
+difference) against +1.9 alone. More cards go to other players, so fewer of
+your rounds come at the high counts the counter waits for.
+
 ## MCP server
 
 `agent/mcp.js` puts the same table behind the Model Context Protocol, so an
@@ -161,7 +192,7 @@ claude mcp add blackjack -- node /path/to/blackjack/agent/mcp.js --seed s1
 
 | Tool | Arguments | Does |
 |---|---|---|
-| `new_table` | `seed`, `rules`, `bankroll`, `minBet`, `maxBet` (all optional) | sit at a new table |
+| `new_table` | `seed`, `rules`, `bankroll`, `minBet`, `maxBet`, `bots`, `seat` (all optional) | sit at a new table |
 | `deal` | `bet` (a number, or up to 3 for several spots), `side` | bet and deal a round |
 | `act` | `action`: `hit`, `stand`, `double`, `split`, `surrender`, `insurance`, `decline_insurance` | play the active hand |
 | `observe` | | the full observation, with rules and table |
@@ -201,8 +232,9 @@ node agent/bench.js --policy ./my-policy.js --record   # put it on the leaderboa
 
 **Standard config:** default rules, table $10–$500, a bankroll that can't run
 out, seeds `bench-1` to `bench-5` × 200,000 rounds (1,000,000 in all, about
-10 s for a JS policy). `--rounds N` and `--seeds a,b` make quick runs; only
-standard runs can be recorded, so every leaderboard entry compares.
+10 s for a JS policy). `--rounds N` and `--seeds a,b` make quick runs, and
+`--bots N --seat K` plays at a shared table; only standard runs (alone at the
+table) can be recorded, so every leaderboard entry compares.
 
 **Policies** see what any agent sees: `bet(obs, ctx)` returns a bet (or a list
 for several spots), `act(obs, hint, ctx)` returns a name from `obs.legal`, and

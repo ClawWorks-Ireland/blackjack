@@ -3,7 +3,7 @@
  * JSON-lines front end to the agent environment: one JSON request per line on
  * stdin, one JSON response per line on stdout. See agent/README.md.
  *
- *   node agent/cli.js [--seed S] [--rules '{"h17":true}'] [--bankroll N] [--min-bet N] [--max-bet N]
+ *   node agent/cli.js [--seed S] [--rules '{"h17":true}'] [--bankroll N] [--min-bet N] [--max-bet N] [--bots N] [--seat K]
  *
  * Requests:  {"action":"deal","bet":10}   {"action":"hit"}   {"cmd":"observe"}
  *            {"cmd":"reset","seed":"s1","rules":{...}}   {"cmd":"hint"}   {"cmd":"hint","count":true}   {"cmd":"quit"}
@@ -31,8 +31,10 @@ function parseArgs(argv) {
     else if (k === '--bankroll') { opts.bankroll = num(v, k); i++; }
     else if (k === '--min-bet') { opts.minBet = num(v, k); i++; }
     else if (k === '--max-bet') { opts.maxBet = num(v, k); i++; }
+    else if (k === '--bots') { opts.bots = num(v, k); i++; }
+    else if (k === '--seat') { opts.seat = num(v, k); i++; }
     else if (k === '--help' || k === '-h') {
-      process.stdout.write('usage: node agent/cli.js [--seed S] [--rules JSON] [--bankroll N] [--min-bet N] [--max-bet N]\n' +
+      process.stdout.write('usage: node agent/cli.js [--seed S] [--rules JSON] [--bankroll N] [--min-bet N] [--max-bet N] [--bots N] [--seat K]\n' +
         'Then send one JSON request per line; see agent/README.md.\n');
       process.exit(0);
     } else throw new EnvError(`unknown option ${k}`);
@@ -52,8 +54,8 @@ function handle(env, req) {
       return { auto, obs };
     }
     case 'reset': {
-      const { seed, rules, bankroll, minBet, maxBet } = req;
-      return { obs: env.reset({ seed, rules, bankroll, minBet, maxBet }) };
+      const { seed, rules, bankroll, minBet, maxBet, bots, seat } = req;
+      return { obs: env.reset({ seed, rules, bankroll, minBet, maxBet, bots, seat }) };
     }
     default: throw new EnvError('request needs "action" or "cmd" (step, observe, legal, hint, auto, reset, quit)');
   }

@@ -28,6 +28,7 @@
   const DEALER_STAND = 17;
   const MAX_HANDS = 4; // per betting spot, after splits
   const MAX_SPOTS = 3;
+  const TABLE_SEATS = 7; // bots and your spots together
   const PENETRATION = 0.75; // cut card sits three quarters of the way into the shoe
   const SIDE_MAX = 100; // per side bet
   const SIDE = typeof module !== 'undefined' && module.exports
@@ -164,6 +165,7 @@
       bankroll = 1000, decks = 6, minBet = 1, maxBet = Infinity, penetration = PENETRATION, rng = Math.random,
       h17 = false, payout = 1.5, das = true, lateSurrender = true,
       rsa = false, enhc = false, obo = false, doubleOn = 'any', seed = null, shoeNo = 1,
+      bots = 0, seat = 0, botDecide = null,
     } = {}) {
       this.bankroll = bankroll;
       this.decks = decks;
@@ -198,6 +200,16 @@
       this.tookEvenMoney = false;
       this.sideBets = []; // settled as soon as the cards are dealt
       this.spotBets = []; // initial bet on each spot this round
+      // CLA-99: other seats at the table, played by `botDecide(cards, upcard,
+      // allowed)` with no money. Your spots sit together from seat `seat`;
+      // seats on your right (lower numbers) play before you, the rest after.
+      if (!Number.isInteger(bots) || bots < 0 || bots > TABLE_SEATS - 1) throw new Error(`Bots must be 0 to ${TABLE_SEATS - 1}`);
+      if (!Number.isInteger(seat) || seat < 0 || seat > bots) throw new Error(`Seat must be 0 to ${bots}`);
+      if (bots && typeof botDecide !== 'function') throw new Error('Bots need a botDecide function');
+      this.bots = bots;
+      this.seat = seat;
+      this.botDecide = botDecide;
+      this.others = []; // this round's bot seats: [{seat, hands: [{cards, ...}], results}]
     }
 
     /** The table rules, in the shape the settings panel and strategy use. */
@@ -303,24 +315,10 @@
       const dealer = [this.draw(), this.draw()];
       let seats = [first];
       if (!isBlackjack(dealer) && !isBlackjack(first)) {
-        // A pair the seat splits becomes two hands (no resplit; split aces take one card).
-        const pair = first[0].rank === first[1].rank;
-        if (pair && decide(first, dealer[0]) === 'split') {
-          seats = [[first[0], this.draw()], [first[1], this.draw()]];
-        }
-        const aces = seats.length > 1 && first[0].rank === 'A';
-        if (!aces) {
-          for (const seat of seats) {
-            for (let n = 0; n < 12 && handValue(seat).total < 21; n++) {
-              let a = decide(seat, dealer[0]);
-              if (a === 'split') a = 'hit'; // no resplitting at the empty seat
-              if (a !== 'hit' && a !== 'double') break;
-              seat.push(this.draw());
-              if (a === 'double') break;
-            }
-          }
-        }
-        if (seats.some((s) => !isBust(s))) while (dealerShouldHit(dealer, this.h17)) dealer.push(this.draw());
+        // Played like a bot seat (CLA-102): splits and resplits, one hand at a time.
+        const hands = this.playSeat(first, dealer[0], decide);
+        seats = hands.map((h) => h.cards);
+        if (hands.some((h) => !h.surrendered && !isBust(h.cards))) while (dealerShouldHit(dealer, this.h17)) dealer.push(this.draw());
       }
       return { seat: seats[0], seats, dealer, newShoe };
     }
@@ -372,6 +370,7 @@
       // One bet per spot: a number for one spot, or an array for up to three.
       const bets = Array.isArray(bet) ? bet : [bet];
       if (bets.length < 1 || bets.length > MAX_SPOTS) throw new Error(`Play 1 to ${MAX_SPOTS} spots`);
+      if (this.bots + bets.length > TABLE_SEATS) throw new Error(`The table has ${TABLE_SEATS} seats: ${this.bots} bots leave room for ${TABLE_SEATS - this.bots} spots`);
       for (const b of bets) {
         if (!Number.isFinite(b) || b <= 0) throw new Error('Bet must be positive');
         if (b < this.minBet) throw new Error(`Minimum bet is $${this.minBet}`);
@@ -398,11 +397,17 @@
       this.insurance = 0;
       this.insuranceNet = null;
       this.tookEvenMoney = false;
-      // Draw order: each spot's two cards, then the dealer's two.
-      this.hands = bets.map((b, spot) => ({
-        cards: [this.draw(), this.draw()], bet: b, spot,
+      // Draw order: each seat's two cards in table order (bots and your
+      // spots), then the dealer's two. Without bots: your spots, then the dealer.
+      this.others = [];
+      const yours = (spot) => ({
+        cards: [this.draw(), this.draw()], bet: bets[spot], spot,
         fromSplit: false, splitAces: false, surrendered: false, done: false,
-      }));
+      });
+      const bot = (seat) => this.others.push({ seat, hands: [{ cards: [this.draw(), this.draw()] }], results: [], played: false });
+      for (let s = 0; s < this.seat; s++) bot(s);
+      this.hands = bets.map((b, spot) => yours(spot));
+      for (let s = this.seat + bets.length; s < this.bots + bets.length; s++) bot(s);
       this.dealer = [this.draw(), this.draw()];
       this.active = 0;
       // Side bets ride on the first spot.
@@ -435,6 +440,7 @@
     peek() {
       if (this.enhc) {
         this.phase = 'player';
+        this.playBots((o) => o.seat < this.seat);
         for (const h of this.hands) if (isNatural(h)) h.done = true;
         this.advance();
         return;
@@ -449,9 +455,63 @@
         this.finish();
         return;
       }
+      // Seats on your right play first; their cards are on the table before you act.
+      this.playBots((o) => o.seat < this.seat);
       // A natural on any spot is paid at the end; play moves to the next spot.
       for (const h of this.hands) if (isNatural(h)) h.done = true;
       this.advance();
+    }
+
+    /** Play every bot seat matching `which` that hasn't played this round. */
+    playBots(which) {
+      for (const o of this.others) {
+        if (o.played || !which(o)) continue;
+        o.hands = this.playSeat(o.hands[0].cards, this.dealer[0], this.botDecide);
+        o.played = true;
+      }
+    }
+
+    /**
+     * Play one seat with no money: `decide(cards, upcard, allowed)` picks
+     * hit, stand, double, split or surrender for each hand. Split hands get
+     * their second card when their turn comes, as at the table; pairs resplit
+     * up to MAX_HANDS hands; split aces take one card each. Returns the hands:
+     * [{cards, fromSplit, splitAces, doubled, surrendered}].
+     */
+    playSeat(cards, upcard, decide) {
+      const hand = (c, fromSplit = false, splitAces = false) => ({ cards: c, fromSplit, splitAces, doubled: false, surrendered: false });
+      const hands = [hand(cards)];
+      if (isBlackjack(cards)) return hands;
+      for (let i = 0; i < hands.length; i++) {
+        const h = hands[i];
+        if (h.cards.length === 1) h.cards.push(this.draw());
+        if (h.splitAces) continue;
+        while (handValue(h.cards).total < 21) {
+          const two = h.cards.length === 2;
+          const allowed = {
+            canHit: true,
+            canDouble: two && (this.das || !h.fromSplit) && canDoubleOn(h.cards, this.doubleOn),
+            canSplit: two && h.cards[0].rank === h.cards[1].rank && hands.length < MAX_HANDS,
+            canSurrender: this.lateSurrender && !this.enhc && two && hands.length === 1,
+          };
+          const a = decide(h.cards, upcard, allowed);
+          if (a === 'split' && allowed.canSplit) {
+            const aces = h.cards[0].rank === 'A';
+            const moved = h.cards.pop();
+            h.fromSplit = true;
+            h.splitAces = aces;
+            hands.splice(i + 1, 0, hand([moved], true, aces));
+            h.cards.push(this.draw());
+            if (aces) break;
+            continue;
+          }
+          if (a === 'surrender' && allowed.canSurrender) { h.surrendered = true; break; }
+          if (a === 'double' && allowed.canDouble) { h.cards.push(this.draw()); h.doubled = true; break; }
+          if (a === 'hit') { h.cards.push(this.draw()); continue; }
+          break; // stand, or a move the seat can't make
+        }
+      }
+      return hands;
     }
 
     hit() {
@@ -530,9 +590,11 @@
         if (this.active < this.hands.length) this.prepare(this.active);
       }
       if (this.active < this.hands.length) return;
-      // Dealer only draws if at least one player hand is still live.
+      this.playBots((o) => o.seat > this.seat);
+      // Dealer only draws if at least one hand at the table is still live.
       // (A natural is already paid off, so it doesn't make the dealer draw either.)
-      if (this.hands.some((h) => !h.surrendered && !isBust(h.cards) && !isNatural(h))) {
+      const live = (h) => !h.surrendered && !isBust(h.cards) && !isNatural(h);
+      if (this.hands.some(live) || this.others.some((o) => o.hands.some(live))) {
         while (dealerShouldHit(this.dealer, this.h17)) this.dealer.push(this.draw());
       }
       this.finish();
@@ -544,6 +606,9 @@
       this.logging = false;
       // Stakes were removed when placed, so return stake + net per hand.
       this.hands.forEach((h, i) => { this.bankroll += h.bet + this.results[i].net; });
+      for (const o of this.others) {
+        o.results = o.hands.map((h) => settle(h.cards, this.dealer, h.doubled ? 2 : 1, { ...h, payout: this.payout }));
+      }
       this.phase = 'done';
     }
 
@@ -671,7 +736,7 @@
   }
 
   const api = {
-    SUITS, RANKS, MAX_HANDS, MAX_SPOTS, PAYOUTS, DOUBLE_ON, SIDE_MAX, createShoe, shuffle, cardValue, handValue, canDoubleOn,
+    SUITS, RANKS, MAX_HANDS, MAX_SPOTS, TABLE_SEATS, PAYOUTS, DOUBLE_ON, SIDE_MAX, createShoe, shuffle, cardValue, handValue, canDoubleOn,
     isBlackjack, isBust, dealerShouldHit, settle, Game, seededRng, hashSeed, parseSeed, randomSeed, seededShoe,
   };
 

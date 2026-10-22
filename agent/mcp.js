@@ -40,6 +40,8 @@ const TOOLS = [
         bankroll: { type: 'number', description: 'Starting chips (default 1000).' },
         minBet: { type: 'number', description: 'Table minimum (default 1).' },
         maxBet: { type: 'number', description: 'Table maximum (default 500).' },
+        bots: { type: 'integer', minimum: 0, maximum: 6, description: 'Other seats, played by basic-strategy bots with no money (default 0). Their cards count in obs.shoe.seen.' },
+        seat: { type: 'integer', minimum: 0, maximum: 6, description: 'How many bots sit on your right and play before you (0 = first base, default 0; at most bots).' },
       },
       additionalProperties: false,
     },
@@ -136,11 +138,17 @@ function summary(obs) {
     const d = obs.dealer;
     parts.push(`dealer ${cards(d.cards)}${d.holeCardHidden ? ` + hole card (showing ${d.total})` : ` (${d.total})`}`);
   }
+  // Bot seats in table order: the ones on your right, your hands, then the rest.
+  const botHand = (h) => `${cards(h.cards)} (${h.soft ? 'soft ' : ''}${h.total}${h.result ? `, ${h.result}` : ''})`;
+  const bots = (right) => obs.others.filter((o) => (o.seat < obs.seat) === right)
+    .forEach((o) => parts.push(`seat ${o.seat} bot: ${o.hands.map(botHand).join(' / ')}`));
+  bots(true);
   obs.hands.forEach((h, i) => {
     const mark = obs.phase === 'player' && i === obs.active ? '> ' : '';
     const result = h.result ? `, ${h.result.outcome} ${h.result.net > 0 ? '+' : ''}${h.result.net}` : '';
     parts.push(`${mark}hand ${i + 1}: ${cards(h.cards)} (${h.soft ? 'soft ' : ''}${h.total}), bet ${h.bet}${result}`);
   });
+  bots(false);
   if (obs.insurance.offered) parts.push(`${obs.insurance.evenMoney ? 'even money' : 'insurance'} offered (cost ${obs.insurance.cost})`);
   obs.sideBets.forEach((s) => {
     parts.push(`${s.bet === 'pairs' ? 'Perfect Pairs' : '21+3'} ${s.stake}: ${s.win ? `${s.win} ${s.odds}:1, +${s.net}` : `lose ${s.net}`}`);

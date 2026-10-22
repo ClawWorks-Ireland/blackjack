@@ -8,7 +8,7 @@
  *   node agent/bench.js --policy hilo            # one baseline
  *   node agent/bench.js --policy ./my-policy.js  # a JS module {name, bet, act}
  *   node agent/bench.js --cmd "python3 agent.py" --name my-agent
- *   options: --rounds N --seeds a,b --json --record
+ *   options: --rounds N --seeds a,b --bots N --seat K --json --record
  *
  * --cmd runs any program as the agent over JSON lines: the bench writes
  * {"type":"bet","obs":{...}} and expects {"bet":10} (or a list for several
@@ -41,11 +41,11 @@ const round = (n, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
  * results are kept as sums, so memory does not grow with the rounds.
  */
 async function runBench(policy, config = STANDARD) {
-  const { rules, minBet, maxBet, bankroll, seeds, rounds } = config;
+  const { rules, minBet, maxBet, bankroll, seeds, rounds, bots = 0, seat = 0 } = config;
   const t = { rounds: 0, initial: 0, wagered: 0, net: 0, net2: 0, init2: 0, netInit: 0, decisions: 0, agree: 0, offChart: 0 };
   const started = Date.now();
   for (const seed of seeds) {
-    const env = new BlackjackEnv({ seed, rules, bankroll, minBet, maxBet });
+    const env = new BlackjackEnv({ seed, rules, bankroll, minBet, maxBet, bots, seat });
     const first = env.observe();
     const ctx = { seed, rules: first.rules, table: first.table, observe: () => env.observe() };
     let obs = first;
@@ -253,6 +253,8 @@ async function main(argv) {
   const config = { ...STANDARD };
   if (flag('--rounds')) config.rounds = Number(flag('--rounds'));
   if (flag('--seeds')) config.seeds = flag('--seeds').split(',');
+  if (flag('--bots')) config.bots = Number(flag('--bots'));
+  if (flag('--seat')) config.seat = Number(flag('--seat'));
   if (!Number.isInteger(config.rounds) || config.rounds < 1) throw new BenchError('--rounds must be a positive whole number');
   const record = argv.includes('--record');
   let policies;
