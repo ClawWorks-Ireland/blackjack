@@ -1,0 +1,114 @@
+/* Live tables (CLA-112): lobby, table and players leaderboard. Same felt as the solo game. */
+:root {
+  --felt: #0f5132;
+  --felt-dark: #0a3a24;
+  --gold: #f5c542;
+  --text: #f8f9fa;
+  --muted: #cfd8d3;
+  --red: #c1121f;
+  --panel: rgba(0, 0, 0, 0.22);
+  --line: rgba(255, 255, 255, 0.18);
+  --ai: #7cc4ff;
+  --human: #ffd27c;
+  --bot: #b8c4be;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at center, var(--felt), var(--felt-dark));
+}
+main { width: min(960px, 100%); margin: 0 auto; padding: 1rem 16px 2rem; }
+header.bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 1rem; margin-bottom: 1rem; }
+header.bar h1 { margin: 0; color: var(--gold); font-size: 1.6rem; letter-spacing: 0.04em; }
+header.bar nav { display: flex; gap: 1rem; margin-left: auto; }
+a { color: var(--gold); }
+h2 { font-size: 1.1rem; margin: 0 0 0.5rem; }
+.muted { color: var(--muted); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1rem; margin-bottom: 1rem; }
+
+button, input, select { font: inherit; }
+button {
+  min-height: 44px; padding: 0.4rem 1rem; border-radius: 8px; border: 0;
+  background: var(--gold); color: #1b1b1b; font-weight: 700; cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 600; }
+button:disabled { opacity: 0.45; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+input[type="text"], input[type="number"], select {
+  min-height: 44px; padding: 0.3rem 0.6rem; border-radius: 8px; border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.95); color: #111; max-width: 100%;
+}
+label { display: inline-flex; align-items: center; gap: 0.4rem; }
+.row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+
+/* Player kind badges: text, not colour alone. */
+.badge { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 999px; color: #111; vertical-align: middle; letter-spacing: 0.03em; }
+.badge.ai { background: var(--ai); }
+.badge.human { background: var(--human); }
+.badge.bot { background: var(--bot); }
+
+/* Lobby */
+.tables { display: grid; gap: 0.8rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.table-card h3 { margin: 0 0 0.3rem; font-size: 1.05rem; }
+.table-card ul { list-style: none; padding: 0; margin: 0.5rem 0; display: grid; gap: 0.2rem; font-size: 0.92rem; }
+.table-card .seat-free { color: var(--muted); }
+
+/* Table */
+.felt { display: grid; gap: 1rem; }
+.dealer { text-align: center; }
+.cards { display: flex; gap: 0.3rem; justify-content: center; flex-wrap: wrap; min-height: 72px; }
+.card {
+  position: relative; width: 50px; height: 72px; border-radius: 6px; background: #fff; color: #111;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); font-weight: 700;
+}
+.card.red { color: var(--red); }
+.card .corner { position: absolute; top: 3px; left: 5px; font-size: 0.85rem; }
+.card .pip { position: absolute; inset: 0; display: grid; place-items: center; font-size: 1.5rem; }
+.card.back { background: repeating-linear-gradient(45deg, #1d3557, #1d3557 5px, #457b9d 5px, #457b9d 10px); border: 3px solid #fff; }
+.seats { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.seat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem; text-align: center; min-height: 150px; }
+.seat.empty { opacity: 0.45; display: grid; place-items: center; }
+.seat.turn { border: 2px solid var(--gold); box-shadow: 0 0 0 3px rgba(245, 197, 66, 0.25); }
+.seat.you { background: rgba(245, 197, 66, 0.12); }
+.seat .who { font-weight: 700; margin-bottom: 0.2rem; overflow-wrap: anywhere; }
+.seat .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.3rem; }
+.seat .hand { margin-top: 0.3rem; }
+.seat .hand.active .cards { outline: 2px dashed var(--gold); outline-offset: 3px; border-radius: 6px; }
+.seat .result { font-size: 0.85rem; font-weight: 700; margin-top: 0.2rem; }
+.result.win, .result.blackjack { color: #8ef0a6; }
+.result.lose, .result.bust { color: #ffb3b3; }
+.status { text-align: center; font-size: 1.05rem; min-height: 1.5em; }
+.timer { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.timer > div { height: 100%; background: var(--gold); width: 0; }
+.you-panel { display: grid; gap: 0.6rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+
+/* Leaderboard */
+.tabs { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
+.tabs button[aria-pressed="true"] { outline: 3px solid #fff; }
+.versus { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.8rem; }
+.versus .big { font-size: 1.6rem; font-weight: 800; }
+.scroll { overflow-x: auto; }
+table.board { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+table.board th, table.board td { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+table.board td.num, table.board th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.board tr.provisional { opacity: 0.7; }
+
+@media (max-width: 600px) {
+  /* Phones: your controls right under the status, before the seats; empty seats shrink to a line. */
+  .felt > .dealer { order: 1; }
+  .felt > .timer { order: 2; }
+  .felt > .status { order: 3; }
+  .felt > #you { order: 4; }
+  .felt > section[aria-label="Seats"] { order: 5; }
+  .felt > p { order: 6; }
+  .seat.empty { min-height: 0; padding: 0.3rem; font-size: 0.85rem; }
+}
+@media (max-width: 480px) {
+  .seats { grid-template-columns: repeat(2, 1fr); }
+  .card { width: 40px; height: 58px; }
+  .card .pip { font-size: 1.2rem; }
+}

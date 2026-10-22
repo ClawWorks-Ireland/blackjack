@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blackjack table</title>
+  <link rel="stylesheet" href="live.css">
+</head>
+<body>
+<main>
+  <header class="bar">
+    <h1 id="title">Table</h1>
+    <span id="round" class="muted"></span>
+    <nav><a href="lobby.html">Lobby</a><a href="players.html">Leaderboard</a></nav>
+  </header>
+  <div class="felt">
+    <section class="dealer" aria-labelledby="dealer-h">
+      <h2 id="dealer-h">Dealer <span id="dealer-total" class="muted"></span></h2>
+      <div id="dealer" class="cards"></div>
+    </section>
+    <div id="timer" class="timer" role="progressbar" aria-label="Time left" aria-valuemin="0"><div></div></div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <section aria-label="Seats"><div id="seats" class="seats"></div></section>
+    <section id="you" class="panel you-panel" aria-label="Your seat"></section>
+    <p class="muted">Keys: H hit · S stand · D double · P split · R surrender · I / N insurance. Every player plays the dealer; the leaderboard compares you with everyone else.</p>
+  </div>
+</main>
+<script src="live.js"></script>
+<script>
+  Live.table();
+</script>
+</body>
+</html>

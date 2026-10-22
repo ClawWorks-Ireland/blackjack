@@ -6,7 +6,10 @@
  *
  *   node agent/mcp.js [--seed S] [--rules '{"h17":true}'] [--bankroll N] [--min-bet N] [--max-bet N]
  *
- * Tools: new_table, deal, act, observe, hint, auto_play. Each returns a one-line table
+ * Tools: new_table, deal, act, observe, hint, auto_play for a private table;
+ * live_tables, live_join, live_wait, live_bet, live_act, live_leave and
+ * live_leaderboard to sit with other agents and people at the live table
+ * server (server/server.js), where this session plays as an AI. Each returns a one-line table
  * summary followed by the same JSON the CLI sends. Errors come back as tool
  * results with isError set, never as a changed table.
  */
@@ -16,6 +19,7 @@ const { BlackjackEnv, EnvError } = require('./env.js');
 const { parseArgs } = require('./cli.js');
 const { autoPlay, describe, MAX_ROUNDS } = require('./auto.js');
 const { countHint } = require('./count-hint.js');
+const { TableClient, yourMove } = require('./table-client.js');
 
 const SERVER_INFO = { name: 'blackjack', version: '1.0.0' };
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -129,6 +133,79 @@ const TOOLS = [
   },
 ];
 
+const LIVE_TOOLS = [
+  {
+    name: 'live_tables',
+    description: 'List the live tables on the table server (server/server.js, BLACKJACK_SERVER or http://localhost:8787), '
+      + 'where agents and people play the same shoe. Each player plays the dealer; a leaderboard compares AI and human players.',
+    inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'Table server URL.' } }, additionalProperties: false },
+  },
+  {
+    name: 'live_join',
+    description: 'Sit down at a live table as an AI player. Then call live_wait, and live_bet / live_act when it is your move. '
+      + 'The table has a clock: a seat that doesn\'t move in time stands, and one that keeps missing rounds loses its seat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string', description: 'Table id from live_tables.' },
+        name: { type: 'string', description: 'Your player name on the table and leaderboard (up to 24 characters).' },
+        seat: { type: 'integer', minimum: 0, maximum: 6, description: 'A free seat (default: the first free one).' },
+        url: { type: 'string', description: 'Table server URL.' },
+      },
+      required: ['table', 'name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'live_wait',
+    description: 'Wait (up to `timeout` seconds) until it is your move: a bet between rounds, insurance, or playing your hand. '
+      + 'Returns the table with "your move: ...". Call it again if it says waiting.',
+    inputSchema: { type: 'object', properties: { timeout: { type: 'integer', minimum: 1, maximum: 55, description: 'Seconds (default 25).' } }, additionalProperties: false },
+  },
+  {
+    name: 'live_bet',
+    description: 'Bet for the next round at your live table (or sit_out: true to skip it).',
+    inputSchema: { type: 'object', properties: { amount: { type: 'number' }, sit_out: { type: 'boolean' } }, additionalProperties: false },
+  },
+  {
+    name: 'live_act',
+    description: 'Make your move at the live table: hit, stand, double, split, surrender, insurance or decline_insurance.',
+    inputSchema: {
+      type: 'object',
+      properties: { action: { type: 'string', enum: ['hit', 'stand', 'double', 'split', 'surrender', 'insurance', 'decline_insurance'] } },
+      required: ['action'],
+      additionalProperties: false,
+    },
+  },
+  { name: 'live_leave', description: 'Leave your live table (between rounds).', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  {
+    name: 'live_leaderboard',
+    description: 'The live tables leaderboard: players ranked by units won per 100 rounds, each marked AI or human, and humans vs AI overall.',
+    inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['ai', 'human'] }, url: { type: 'string' } }, additionalProperties: false },
+  },
+];
+TOOLS.push(...LIVE_TOOLS);
+
+/** One line for a live table view, in seat order, then what it wants from you. */
+function liveSummary(v) {
+  const parts = [`${v.name}, round ${v.round}, ${v.phase}`];
+  if (v.dealer.cards.length) parts.push(`dealer ${cards(v.dealer.cards)}${v.dealer.holeCardHidden ? ` + hole card (showing ${v.dealer.total})` : ` (${v.dealer.total})`}`);
+  v.seats.forEach((s, i) => {
+    if (!s) return;
+    const you = v.you && v.you.seat === i;
+    const hands = s.hands.map((h, k) => `${s.active === k ? '> ' : ''}${cards(h.cards)} (${h.soft ? 'soft ' : ''}${h.total})${h.result ? ` ${h.result.outcome} ${h.result.net > 0 ? '+' : ''}${h.result.net}` : ''}`).join(' / ');
+    parts.push(`seat ${i + 1} ${s.player.name} [${s.player.kind}]${you ? ' (you)' : ''}: ${hands || (s.out ? 'sitting out' : s.bet ? `bet ${s.bet}` : 'no bet yet')}`);
+  });
+  if (v.you) {
+    const move = yourMove(v);
+    const cost = (a) => (v.you.legalCost[a] ? ` (+${v.you.legalCost[a]})` : '');
+    const legal = v.you.legal.filter((a) => a !== 'bet' && a !== 'sit_out').map((a) => a + cost(a)).join(', ');
+    parts.push(`bankroll ${v.you.bankroll}`);
+    parts.push({ bet: `your move: bet (live_bet, ${v.table.minBet}-${v.table.maxBet})`, insurance: `your move: ${v.you.evenMoney ? 'even money' : 'insurance'}? ${legal}`, play: `your move: ${legal}`, wait: 'waiting for other players' }[move] || 'you have no seat');
+  }
+  return parts.join(' · ');
+}
+
 const cards = (list) => list.join(' ');
 
 /** One line a model can read at a glance; the JSON below it has everything. */
@@ -163,8 +240,47 @@ function summary(obs) {
 
 const text = (s) => ({ content: [{ type: 'text', text: s }] });
 
+const live = { client: null };
+const errorResult = (message) => ({ ...text(JSON.stringify({ error: message })), isError: true });
+
+/** Live table tools: async, against the table server. Errors are tool errors. */
+async function callLive(name, args) {
+  try {
+    if (name === 'live_tables') {
+      const tables = await new TableClient(args.url || (live.client && live.client.url) || undefined).list();
+      const lines = tables.map((t) => `table ${t.id}: ${t.name}, $${t.minBet}-$${t.maxBet}, ${t.free} free: ${t.seats.filter(Boolean).map((s) => `${s.name} [${s.kind}]`).join(', ') || 'nobody yet'}`);
+      return text(`${lines.join('\n') || 'No tables.'}\n${JSON.stringify({ tables })}`);
+    }
+    if (name === 'live_leaderboard') {
+      const lb = await new TableClient(args.url || (live.client && live.client.url) || undefined).leaderboard(args.kind);
+      const k = lb.byKind;
+      const head = `humans ${k.human && k.human.per100 !== null ? k.human.per100 : '-'} vs AI ${k.ai && k.ai.per100 !== null ? k.ai.per100 : '-'} units/100 rounds`;
+      const rows = lb.players.map((p) => `${p.rank === null ? '-' : p.rank}. ${p.name} [${p.kind}] ${p.per100} units/100 over ${p.rounds} rounds${p.provisional ? ' (provisional)' : ''}`);
+      return text(`${head}\n${rows.join('\n')}\n${JSON.stringify(lb)}`);
+    }
+    if (name === 'live_join') {
+      if (live.client && live.client.token) throw new Error('already at a table: live_leave first');
+      const c = new TableClient(args.url || undefined);
+      const j = await c.join(args.table, args.name, args.seat);
+      live.client = c;
+      return text(`${liveSummary(j.view)}\n${JSON.stringify({ seat: j.seat, view: j.view })}`);
+    }
+    const c = live.client;
+    if (!c || !c.token) throw new Error('not at a live table: live_join first');
+    let v;
+    if (name === 'live_wait') v = await c.wait(args.timeout || 25);
+    else if (name === 'live_bet') v = args.sit_out ? await c.sitOut() : await c.bet(Number(args.amount));
+    else if (name === 'live_act') v = await c.act(args.action);
+    else if (name === 'live_leave') { await c.leave(); live.client = null; return text('Left the table.'); }
+    return text(`${liveSummary(v)}\n${JSON.stringify({ view: v })}`);
+  } catch (e) {
+    return errorResult(e.message);
+  }
+}
+
 /** Run one tool call against `env`; a bad request is an isError result and leaves the table as it was. */
 function callTool(env, name, args = {}) {
+  if (name.startsWith('live_')) return callLive(name, args);
   try {
     switch (name) {
       case 'new_table': {
@@ -208,7 +324,8 @@ function handleMessage(env, msg) {
         serverInfo: SERVER_INFO,
         instructions: 'A blackjack table. Call deal to bet, then act until the round is done. '
           + 'obs.legal lists the moves allowed now and obs.legalCost the chips each one takes; '
-          + 'obs.shoe.seen counts the cards revealed since the shuffle.',
+          + 'obs.shoe.seen counts the cards revealed since the shuffle. '
+          + 'To play with other agents and people at a live table instead, use live_tables, live_join and live_wait.',
       });
     }
     case 'ping': return reply({});
@@ -216,7 +333,8 @@ function handleMessage(env, msg) {
     case 'tools/call': {
       const { name, arguments: args } = msg.params || {};
       if (!TOOLS.some((t) => t.name === name)) return fail(-32602, `unknown tool "${name}"`);
-      return reply(callTool(env, name, args || {}));
+      const result = callTool(env, name, args || {});
+      return typeof result.then === 'function' ? result.then(reply) : reply(result);
     }
     default: return fail(-32601, `method not found: ${msg.method}`);
   }
@@ -242,7 +360,8 @@ function main() {
       return;
     }
     const res = handleMessage(env, msg);
-    if (res) out(res);
+    if (res && typeof res.then === 'function') res.then(out);
+    else if (res) out(res);
   });
 }
 

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blackjack tables</title>
+  <link rel="stylesheet" href="live.css">
+</head>
+<body>
+<main>
+  <header class="bar">
+    <h1>Blackjack tables</h1>
+    <span class="muted">Agents and people at the same tables</span>
+    <nav><a href="players.html">Leaderboard</a><a href="index.html">Play solo</a></nav>
+  </header>
+
+  <section class="panel" aria-labelledby="you-h">
+    <h2 id="you-h">You</h2>
+    <div class="row">
+      <label>Name <input id="name" type="text" maxlength="24" autocomplete="nickname" placeholder="Your name"></label>
+      <label><input id="agent" type="checkbox"> I'm an agent (list me as AI)</label>
+    </div>
+    <p class="muted" id="you-note">Players who join from this page are listed as human unless they tick the box. Agents joining over MCP or the command line are listed as AI.</p>
+  </section>
+
+  <section aria-labelledby="tables-h">
+    <h2 id="tables-h">Tables</h2>
+    <div id="tables" class="tables" aria-live="polite"></div>
+    <p id="lobby-msg" class="status" role="status"></p>
+  </section>
+
+  <section class="panel" aria-labelledby="new-h">
+    <h2 id="new-h">New table</h2>
+    <form id="new" class="row">
+      <label>Name <input name="name" type="text" maxlength="24" placeholder="Friday night"></label>
+      <label>Minimum bet <input name="minBet" type="number" min="1" value="10" style="width:6em"></label>
+      <label>Bots <select name="bots"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
+      <label>Seconds per move <input name="turnSeconds" type="number" min="5" max="120" value="30" style="width:5em"></label>
+      <button type="submit">Create</button>
+    </form>
+  </section>
+</main>
+<script src="live.js"></script>
+<script>
+  Live.lobby();
+</script>
+</body>
+</html>

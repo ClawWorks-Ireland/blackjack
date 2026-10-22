@@ -140,7 +140,7 @@ class LiveTable {
   }
 
   after(ms, what, fn) {
-    this.deadline = { at: Date.now() + ms, what };
+    this.deadline = { at: Date.now() + ms, ms, what };
     this.timer = setTimeout(() => {
       this.timer = null;
       try { fn(); } catch (e) { this.hub.log(`table ${this.id}: ${e.message}`); }
@@ -214,7 +214,7 @@ class LiveTable {
     const v = this.table.view(p ? p.seat : null);
     return {
       id: this.id, name: this.name, version: this.version,
-      deadline: this.deadline ? { what: this.deadline.what, msLeft: Math.max(0, this.deadline.at - Date.now()) } : null,
+      deadline: this.deadline ? { what: this.deadline.what, ms: this.deadline.ms, msLeft: Math.max(0, this.deadline.at - Date.now()) } : null,
       ...v,
     };
   }

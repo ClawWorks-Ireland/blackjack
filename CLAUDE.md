@@ -8,6 +8,7 @@ Read README.md, agent/README.md and qa/PLAYBOOK.md first; HANDOVER.md is the his
 - Validate with `npm test`, then `node qa/run-round.js` on a committed SHA (it tests a `git archive` snapshot, not the working tree). Make sure nothing else is serving port 8765 first. The macOS CI script is `macos/scripts/ci.sh`.
 - Record QA results in `qa/reports/<sha7>.md` and `qa/state.json`, and file or close the matching Linear issues. `qa/backlog.md` is an archive (closed at round 14).
 - The KiroCrew crons in HANDOVER.md are historical. Don't recreate them, or any scheduler, without asking.
+- `server/` is the live table server (agents and people at one table, AI vs human leaderboard). It is for the home network: never deploy it or expose it publicly without asking. Its data (`server/data/`) stays out of git.
 
 ## Backlog: Linear is the source of truth
 

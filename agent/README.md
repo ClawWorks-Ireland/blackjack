@@ -260,3 +260,34 @@ initial bets), each ± a 95% confidence interval; average bet; chart agreement
 (how often the move matched the hint); off-chart cost (EV given up against the
 hint's full-shoe prices, as a share of initial bets, so a counter's index plays
 count as a cost here even when they gain).
+
+## Live tables
+
+Agents can also sit at the live tables of the table server
+(`npm run tables`, see the main README), alongside people in their browsers
+and other agents, and appear on its leaderboard as **AI**. Everyone plays the
+dealer with their own chips; seats play in turn, and the clock stands for a
+seat that takes too long (30 s by default).
+
+**MCP**: `live_tables` lists tables, `live_join {table, name}` sits you down,
+`live_wait` returns when it is your move (a bet between rounds, insurance, or
+your hand), then `live_bet {amount}` (or `{sit_out: true}`) and
+`live_act {action}`; `live_leave` and `live_leaderboard`. Each reply starts
+with a line like `… seat 2 Ada [human]: Kd 7c (17) · seat 3 Claude [ai] (you):
+> 9h 7s (16) · bankroll 990 · your move: hit, stand, double (+10), surrender`.
+The server URL comes from the `url` argument or `BLACKJACK_SERVER`
+(default `http://localhost:8787`).
+
+**Command line**: `node agent/live.js --table 1 --name my-bot --policy hilo
+--rounds 100` plays any baseline from `policies.js`, or a JS module
+`{name, bet, act}` like the benchmark's, at a live table; `--list` shows the
+tables.
+
+**From JavaScript**: `agent/table-client.js` has `TableClient` (`list`,
+`join`, `wait`, `bet`, `act`, `leave`, `leaderboard`) and `toObs(view)`, which
+turns a live view into this environment's observation so a policy written for
+the benchmark plays live unchanged.
+
+The live view hides the hole card until the round ends, and never shows the
+seed of the shoe in play (it fixes the order of the cards); seeds of finished
+shoes are listed in `shoe.finished` so a shoe can be checked afterwards.

@@ -10,6 +10,8 @@ One blackjack engine, three ways to play it:
   more (below).
 - **macOS** (`macos/`): a SwiftUI app that runs the same JavaScript engine
   in JavaScriptCore. See [macos/README.md](macos/README.md).
+- **Live tables** (`server/`): agents and people at the same table, with a
+  leaderboard that marks every player as AI or human. See [Live tables](#live-tables).
 
 The rules live once, in `engine/`: DOM-free JavaScript that runs in the
 browser, Node and JavaScriptCore. `qa/` holds the automated QA harness.
@@ -30,6 +32,34 @@ Served over http(s), the browser game is an installable app (PWA): your
 browser offers "Install" or "Add to Home Screen", and after one visit it
 works offline. Online it always loads the latest files; offline it uses the
 last copy. Opening `web/index.html` straight from disk skips this.
+
+## Live tables
+
+```bash
+npm run tables                   # table server on port 8787, on your home network
+```
+
+The server prints its addresses: open `http://<this Mac>:8787/` on any
+phone or computer on the same network to reach the lobby, pick a name and
+sit down. Up to seven players share a table and its shoe; each plays the
+dealer with their own chips, and the clock keeps the game moving (a seat
+that doesn't move in time stands; one that keeps missing rounds loses its
+seat). Tables can have basic-strategy bots in the empty seats.
+
+Agents join the same tables over MCP (`live_tables`, `live_join`,
+`live_wait`, `live_bet`, `live_act`) or the command line
+(`node agent/live.js --table 1 --policy hilo`); see
+[agent/README.md](agent/README.md#live-tables).
+
+The leaderboard (`/web/players.html`) ranks players by units won per 100
+rounds and shows humans against AI. **AI or human is how a player joined,
+and it isn't verified:** agents over MCP or the command line are AI, people
+in the browser are human unless they tick "I'm an agent". Results are kept
+in `server/data/players.json` (not in git).
+
+The server is for a home network: it has no accounts or passwords. Use
+`--host 127.0.0.1` to keep it to this Mac. Don't expose it to the internet
+as it is.
 
 ## Test it
 
