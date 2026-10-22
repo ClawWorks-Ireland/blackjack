@@ -1,4 +1,6 @@
-# BlackJack QA backlog
+# BlackJack QA backlog (archive)
+
+> **Archive, closed at QA round 14 (97df14c, 22 October 2026).** Open work now lives in Linear, project BlackJack (team ClawWorks, issues CLA-93 onwards); see CLAUDE.md. Entries still open when the backlog moved are marked with their Linear issue.
 
 Status: open · requested@<sha> = asked to be fixed (historical: sent to the KiroCrew creator) · fixed@<sha> = verified by a QA round · reopened@<sha>
 Rule: a bug requested 3 rounds in a row without a fix goes to the user instead of being re-sent. Rounds where delivery was blocked don't count.
@@ -20,7 +22,7 @@ Rule: a bug requested 3 rounds in a row without a fix goes to the user instead o
 - B12 Low   true count shown rounded (+2.0, +3.0) but the bet ramp floors it: live play @8b2d891 showed '$5 @TC +2.0' and '$10 @TC +3.0' (1 and 2 units, not 2 and 4) — fixed@1742e78 (12e0890): 16k TCs checked
 - B13 Low   focus stays on BODY after a round with no decision (blackjack either side): 4/40 rounds @30d5a2f and @1742e78 — fixed@50edc73 (c2edfc2): 40/40 rounds
 - N1 Low    index plays use S17 values under H17 (documented README:150) — fixed@50edc73 (1202ff1): H17 indices verified
-- N2 Note   sit-out phantom seat treats split as one hit (watchRound); count correct, card usage slightly off — note only
+- N2 Note   sit-out phantom seat treats split as one hit (watchRound); count correct, card usage slightly off — note only → CLA-102
 - B14 Low   count drill runs on setInterval: in a hidden/background tab the timer is throttled to ~1/s (52 cards @0.5 s took 243 s live, 26.4 s visible) and the time/pace is scored as the player's. Pause the drill on visibilitychange (or refuse to score a drill that lost visibility) — fixed@fadf7e1 (fadf7e1)
 - B15 Med   F18 report charges a perfect in-head counter for correct index plays. With the count hidden, scoreMove() prices the move against currentAdvice(), which falls back to basic strategy, so a correct deviation is logged as a mistake (history, accuracy, EV lost), while Report.countSpot() grades the same move as an index play taken. Observed @6ec4a0e: report "Index plays 3 of 3" yet "EV given away $0.05", skill gap +$0.05, history "#37 · mistakes: Stood on 12 vs 3: -2.0% of your bet" (TC +3.6, index +2), accuracy 96% (66 of 69); again in the round run: "4 of 4" taken, $0.03 given away for Stand 16 v 10 at TC +1.3. Expected (report.js header): following the ramp and every index exactly gives skill gap $0. Repro: count hidden, Hi-Lo, play the index on 12 v 3 at TC ≥ +2, finish the shoe. Intermittent in f18_f20_ui_check (needs an index spot with the count hidden); deterministic in code (app.js scoreMove ~753–777). — fixed@01155fe (1ca7b4f: Report.moveCorrect accepts the index play at the spot)
 - B16 Low   F18 shoe report opens on setTimeout(settleAt + 700) after the cut-card round without checking that no new round has started. Dealing again within that window (Rebet/Enter at default speed) opens the modal report over the next hand and blocks Hit/Stand until closed. Seen @6ec4a0e by ui_playtest (report intercepted the #stand click mid-hand). Expected: show the report only while still between rounds (or hold the next deal until it is shown). — fixed@01155fe (1ca7b4f, 01155fe: report opens only between rounds; a held one opens as the next hand settles; qa/b16_ui_check.js)
@@ -60,6 +62,6 @@ Rule: a bug requested 3 rounds in a row without a fix goes to the user instead o
 - F18 counter's report card per shoe/session (key E): bet correlation vs ramp, index plays taken/missed, count accuracy, skill vs luck vs a perfect counter — verified@6ec4a0e; B15/B16 fixed@01155fe (engine 17/17 incl. F19/F20; UI: perfect counter count shown r 1.00, 100% within, skill gap $0; flat bettor r not measurable)
 - F19 seeded shoes + hand replay (key L): reproducible seed, step-through replay with coach/count/EV, "play this shoe again" — verified@6ec4a0e: same seed = same shoes, seed text parsing, replay step-through, play this shoe again
 - F20 other count systems: KO, Hi-Opt II + ace side count, Omega II + ace side count, used by count/drills/ramp/insurance — verified@6ec4a0e: KO/Hi-Opt II/Omega II tags, ace side count, drill (+4 KO, 0 for balanced), no Hi-Lo index plays under other systems
-- F21 other seats at the table (1–6 basic-strategy bots using cards) — open, later
-- F22 translations (EN/FR/ES) — open, later
-- F23 achievements and training streaks — open, later
+- F21 other seats at the table (1–6 basic-strategy bots using cards) — open, later → CLA-99
+- F22 translations (EN/FR/ES) — open, later → CLA-100
+- F23 achievements and training streaks — open, later → CLA-101

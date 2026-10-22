@@ -263,7 +263,7 @@ and history; it doesn't touch the bankroll.
 | `agent/` | `env.js` (reset/step/observe), `cli.js` (JSON lines), `mcp.js` (MCP server), examples |
 | `web/` | The browser UI on top of the engine |
 | `macos/` | SwiftUI app; `BlackjackCore` runs `agent/env.js` and the engine it needs in JavaScriptCore |
-| `qa/` | QA harness: fuzzers, rule checks, Playwright UI checks, per-round reports and backlog |
+| `qa/` | QA harness: fuzzers, rule checks, Playwright UI checks, per-round reports and the backlog archive (open work is in Linear, project BlackJack) |
 
 | File | What it does |
 |---|---|
