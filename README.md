@@ -260,7 +260,7 @@ and history; it doesn't touch the bankroll.
 | Folder | What it holds |
 |---|---|
 | `engine/` | The rules and everything computed from them. No DOM code; runs in the browser, Node and JavaScriptCore |
-| `agent/` | `env.js` (reset/step/observe), `cli.js` (JSON lines), `mcp.js` (MCP server), examples |
+| `agent/` | `env.js` (reset/step/observe), `cli.js` (JSON lines), `mcp.js` (MCP server), `bench.js` + `policies.js` (benchmark, [leaderboard](agent/LEADERBOARD.md)), examples |
 | `web/` | The browser UI on top of the engine |
 | `macos/` | SwiftUI app; `BlackjackCore` runs `agent/env.js` and the engine it needs in JavaScriptCore |
 | `qa/` | QA harness: fuzzers, rule checks, Playwright UI checks, per-round reports and the backlog archive (open work is in Linear, project BlackJack) |

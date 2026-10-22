@@ -136,3 +136,47 @@ while (!done) ({ obs, reward, done } = env.step(env.hint().action));
 
 `agent/examples/basic-strategy.js` drives the CLI over a pipe, the way an
 agent in another language or a local model would.
+
+## Benchmark and leaderboard
+
+`agent/bench.js` plays a policy over fixed seeds and scores it next to the
+baselines, so an agent's result means something. Results are on
+[LEADERBOARD.md](LEADERBOARD.md).
+
+```bash
+node agent/bench.js                          # every baseline, standard config
+node agent/bench.js --policy hilo            # one baseline
+node agent/bench.js --policy ./my-policy.js  # a JS module exporting {name, description, bet, act}
+node agent/bench.js --cmd "python3 my_agent.py" --name my-agent
+node agent/bench.js --policy ./my-policy.js --record   # put it on the leaderboard
+```
+
+**Standard config:** default rules, table $10–$500, a bankroll that can't run
+out, seeds `bench-1` to `bench-5` × 200,000 rounds (1,000,000 in all, about
+10 s for a JS policy). `--rounds N` and `--seeds a,b` make quick runs; only
+standard runs can be recorded, so every leaderboard entry compares.
+
+**Policies** see what any agent sees: `bet(obs, ctx)` returns a bet (or a list
+for several spots), `act(obs, hint, ctx)` returns a name from `obs.legal`, and
+`ctx` holds the seed, rules and table. Either may return a promise. The
+baselines are in `policies.js`:
+
+| Baseline | Plays |
+|---|---|
+| `random` | flat minimum bet, a random legal move |
+| `never-bust` | flat minimum bet, hits only when it can't bust |
+| `basic` | flat minimum bet, the hint every time |
+| `hilo` | Hi-Lo count from `obs.shoe.seen`: 1-2-4-8-12 unit ramp, index plays, insurance at +3 |
+
+**Any language** with `--cmd`: the bench writes one JSON object per line and
+reads one back. `{"type":"bet","obs":{...}}` wants `{"bet":10}`;
+`{"type":"act","obs":{...},"hint":{...}}` wants `{"action":"hit"}`.
+Observations are full (rules and table included). An illegal or malformed
+reply stops the run with the reason. `examples/bench-agent.js` is a
+ten-line example that scores exactly like `basic`.
+
+**Scores:** units won per 100 rounds (table-minimum units) and return (net ÷
+initial bets), each ± a 95% confidence interval; average bet; chart agreement
+(how often the move matched the hint); off-chart cost (EV given up against the
+hint's full-shoe prices, as a share of initial bets, so a counter's index plays
+count as a cost here even when they gain).
