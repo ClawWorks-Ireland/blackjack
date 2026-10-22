@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "blackjack": {
+      "command": "node",
+      "args": ["agent/mcp.js"]
+    }
+  }
+}
