@@ -70,7 +70,7 @@ srv.listen(0, '127.0.0.1', async () => {
       }
     }
     ok('F14 an off-chart move produces a review line with a % cost', !!review && /-?\d+(\.\d+)?% of your bet/.test(review), { review });
-    ok('F14 "Mistakes cost" stat is non-zero after a mistake', !!mistakes && !/^\$?0(\.00)?\b/.test(mistakes.replace(/[^0-9.$-]/g, '')), { mistakes });
+    ok('F14 "Mistakes cost" stat is non-zero after a mistake', !!mistakes && Number((mistakes.match(/\$([\d,]+(?:\.\d+)?)/) || [])[1]?.replace(/,/g, '')) > 0, { mistakes });
 
     // ---- F13: drills don't touch bankroll or stats ----
     for (let k = 0; k < 60 && !(await en('#deal')); k++) await page.waitForTimeout(50);

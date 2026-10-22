@@ -34,6 +34,7 @@ Rule: a bug requested 3 rounds in a row without a fix goes to the user instead o
 - T6 Low    ui_playtest only looked for a mid-hand shoe report at the top of each step, so a report opening just before an action click (B16) still timed it out. — fixed (clickInHand records B16, closes the report and retries)
 - T7 High   run-round.js started its server with output ignored and waited 500 ms, so when an earlier round's server still held port 8765 the new one failed to bind and every UI check ran against that older commit. The first round on 1ca7b4f graded 37e6715's UI and reported B15 still open. — fixed (run-round waits for the server, checks it serves the commit under test, else exits 2)
 - T8 Low    ui_playtest flagged B16 whenever the shoe report was open at the top of its hand loop, including just after the hand had settled, which is when the B16 fix opens a held report (seen @01155fe, round 51: result shown, actions disabled). — fixed (flags only while body.in-hand)
+- T9 Low    f12_f14_ui_check read the "Mistakes cost" stat by stripping it to digits ('$0.99 (9.86% of bets)' → '$0.999.86') and testing /^\$?0(\.00)?\b/, so any cost under $1 counted as zero. Failed @8320fe7 on a $0.99 mistake; the game was right. — fixed (parses the dollar amount and checks > 0)
 
 ## Features (priority order)
 - F2 basic-strategy coach (hint + mistake feedback + accuracy stat) — fixed@ab1d7d3 (built by creator on its own; B8 remains)
