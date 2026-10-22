@@ -6,18 +6,19 @@
  */
 'use strict';
 const fs = require('fs'), http = require('http'), path = require('path');
+const { pagePath } = require('./lib/layout');
 const { chromium } = require('./lib/browser');
 const dir = path.resolve(process.argv[2]), out = path.resolve(process.argv[3]);
 fs.mkdirSync(out, { recursive: true });
 const T = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const srv = http.createServer((q, r) => {
-  const u = decodeURIComponent(q.url.split('?')[0]); const f = path.join(dir, u === '/' ? 'index.html' : u);
+  const u = decodeURIComponent(q.url.split('?')[0]); const f = path.join(dir, u.endsWith('/') ? u + 'index.html' : u);
   if (!f.startsWith(dir)) { r.writeHead(403); r.end(); return; }
   fs.readFile(f, (e, d) => { if (e) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'content-type': T[path.extname(f)] || 'application/octet-stream' }); r.end(d); });
 });
 
 srv.listen(0, '127.0.0.1', async () => {
-  const url = `http://127.0.0.1:${srv.address().port}/index.html`;
+  const url = `http://127.0.0.1:${srv.address().port}${pagePath(dir)}`;
   const browser = await chromium.launch({ headless: true });
   const r = { checks: {}, errors: [] };
   const ok = (n, pass, detail) => { r.checks[n] = { pass, ...(detail !== undefined ? { detail } : {}) }; };

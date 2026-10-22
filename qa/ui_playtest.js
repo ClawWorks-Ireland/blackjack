@@ -12,6 +12,7 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const { pagePath } = require('./lib/layout');
 
 const { chromium } = require('./lib/browser');
 
@@ -47,6 +48,42 @@ const money = (s) => {
 };
 const findings = [];
 const seen = new Set();
+/**
+ * Click Deal. The F18 shoe report opens on a timer after the cut-card round,
+ * so it can appear between our last look and the click (T5): close it and
+ * retry rather than wait out Playwright's 30 s timeout.
+ */
+async function clickDeal(page, sel) {
+  for (let attempt = 0; ; attempt++) {
+    await page.evaluate(() => { const d = document.getElementById('report'); if (d && d.open) d.close(); });
+    try {
+      await page.click(sel, { timeout: 2000 });
+      return;
+    } catch (e) {
+      if (attempt >= 3) throw e;
+    }
+  }
+}
+
+/**
+ * Click an action during a hand. If the F18 shoe report has opened over the
+ * table (B16), record it, close it and retry, so the playtest reports the bug
+ * instead of timing out.
+ */
+async function clickInHand(page, sel, where) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.click(sel, { timeout: 2000 });
+      return;
+    } catch (e) {
+      const open = await page.$eval('#report', (d) => d.open).catch(() => false);
+      if (!open || attempt >= 3) throw e;
+      flag('shoe report opened during a hand (B16)', where);
+      await page.evaluate(() => document.getElementById('report').close());
+    }
+  }
+}
+
 function flag(issue, detail) {
   if (seen.has(issue)) { findings.find((f) => f.issue === issue).count++; return; }
   seen.add(issue);
@@ -55,7 +92,7 @@ function flag(issue, detail) {
 
 async function main() {
   const srv = await serve();
-  const url = `http://127.0.0.1:${srv.address().port}/index.html`;
+  const url = `http://127.0.0.1:${srv.address().port}${pagePath(dir)}`;
   const browser = await chromium.launch({ headless: !process.env.HEADED, slowMo: process.env.HEADED ? Number(process.env.SLOWMO || 250) : 0 });
   const shots = [];
   const shot = async (page, name) => {
@@ -100,9 +137,8 @@ async function main() {
     const rounds0 = Number(await text(SEL.statRounds));
     const rec0 = await record();
     const bet = Math.min(bets[i % bets.length], Math.floor(bank0));
-    await page.evaluate(() => { const d = document.getElementById("report"); if (d && d.open) d.close(); }); // F18 shoe report auto-opens at the cut
     await page.fill(SEL.bet, String(bet));
-    await page.click(SEL.deal);
+    await clickDeal(page, SEL.deal);
     let steps = 0;
     let usedKey = false;
     while (steps++ < 40) {
@@ -116,7 +152,7 @@ async function main() {
         if (!firsts.insurance) { firsts.insurance = true; await shot(page, '02-insurance-offer'); }
         const take = i % 3 === 0 && (await enabled(SEL.insure));
         if (take) tally.insurance++;
-        await page.click(take ? SEL.insure : SEL.noInsure);
+        await clickInHand(page, take ? SEL.insure : SEL.noInsure, { round: i + 1, step: steps });
         continue;
       }
       const opts = [];
@@ -132,7 +168,7 @@ async function main() {
       if (!usedKey && pick === 'stand' && i % 4 === 0) {
         usedKey = true;
         await page.keyboard.press('s'); // shortcut path
-      } else await page.click(SEL[pick]);
+      } else await clickInHand(page, SEL[pick], { round: i + 1, step: steps });
       const hands = await count(SEL.hands);
       tally.maxHands = Math.max(tally.maxHands, hands);
       if (hands >= 3 && !firsts.multi) { firsts.multi = true; await shot(page, '03-three-plus-hands'); }
@@ -175,10 +211,9 @@ async function main() {
   await page.screenshot({ path: require('path').join(out, 'dbg-before-betprobe.png') });
   // Skip when broke: Deal is correctly disabled below the minimum bet, and clicking it would hang.
   for (const v of (bank >= 1 ? ['0', '-5', '2.5', String(Math.floor(bank) + 1), ''] : [])) {
-    await page.evaluate(() => { const d = document.getElementById("report"); if (d && d.open) d.close(); }); // F18 shoe report auto-opens at the cut
     await page.fill(SEL.bet, v);
     const before = await text(SEL.message);
-    await page.click(SEL.deal);
+    await clickDeal(page, SEL.deal);
     await page.waitForTimeout(50);
     const after = await text(SEL.message);
     const valid = await page.$eval(SEL.bet, (e) => e.validationMessage).catch(() => '');
@@ -206,9 +241,8 @@ async function main() {
   while (brokeRounds++ < 60) {
     const b = money(await text(SEL.bankroll));
     if (!(b >= 1)) break;
-    await page.evaluate(() => { const d = document.getElementById("report"); if (d && d.open) d.close(); }); // F18 shoe report auto-opens at the cut
     await page.fill(SEL.bet, String(Math.floor(b)));
-    await page.click(SEL.deal);
+    await clickDeal(page, SEL.deal);
     for (let s = 0; s < 10; s++) {
       if (await enabled(SEL.noInsure)) { await page.click(SEL.noInsure); continue; }
       if (await enabled(SEL.hit)) await page.click(SEL.hit); else break;

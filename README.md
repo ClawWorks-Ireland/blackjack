@@ -1,33 +1,48 @@
 # Blackjack
 
-A single-page blackjack game that runs in the browser with no build step
-and no dependencies. It plays standard casino rules and includes a
-basic-strategy coach that hints, scores your moves, and explains mistakes.
+One blackjack engine, three ways to play it:
 
-## Run it
+- **Agents** (`agent/`): a reset/step/observe environment and a JSON-lines
+  CLI, so programs and models can play. Seeded and reproducible; they see
+  only what a seated player sees. See [agent/README.md](agent/README.md).
+- **Browser** (`web/`): a single-page game with no build step and no
+  dependencies, with a basic-strategy coach, card-counting trainer and
+  more (below).
+- **macOS** (`macos/`): a SwiftUI app that runs the same JavaScript engine
+  in JavaScriptCore. See [macos/README.md](macos/README.md).
 
-Open `index.html` directly in a browser, or serve it locally:
+The rules live once, in `engine/`: DOM-free JavaScript that runs in the
+browser, Node and JavaScriptCore. `qa/` holds the automated QA harness.
+
+## Play it
 
 ```bash
-npm start            # serves on http://127.0.0.1:8080 (localhost only)
+npm run agent -- --seed s1       # agent CLI: JSON requests on stdin, replies on stdout
+npm start                        # browser game on http://127.0.0.1:8080/web/ (localhost only)
+macos/scripts/run-app.sh         # macOS app
 ```
 
-`npm start` uses Python's built-in web server, so it needs `python3`.
+`npm start` serves the repo root with a small Node server (`qa/serve.js`);
+`web/index.html` loads the engine from `../engine/`, so serve the root,
+not `web/` alone.
 
-Served over http(s), the game is an installable app (PWA): your browser
-offers "Install" or "Add to Home Screen", and after one visit it works
-offline. Online it always loads the latest files; offline it uses the
-last copy. Opening `index.html` straight from disk skips this.
+Served over http(s), the browser game is an installable app (PWA): your
+browser offers "Install" or "Add to Home Screen", and after one visit it
+works offline. Online it always loads the latest files; offline it uses the
+last copy. Opening `web/index.html` straight from disk skips this.
 
 ## Test it
 
 ```bash
-npm test             # node --test, Node 18 or newer
+npm test                         # node --test: engine, web, agent and the macOS embed check (Node 18+)
+macos/scripts/ci.sh              # Swift build + tests + Swift/Node self-play cross-check
+node qa/run-round.js             # full QA round on HEAD (Chrome; cd qa && npm ci first)
 ```
 
-The tests cover the game rules, saving and restoring, the stats, the
-strategy chart, bet validation and money formatting. They use only Node's built-in test
-runner.
+The Node tests cover the game rules, saving and restoring, the stats, the
+strategy chart, bet validation, money formatting, the agent environment and
+CLI, and that the macOS app embeds the current engine. They use only Node's
+built-in test runner.
 
 ## Table rules
 
@@ -242,31 +257,39 @@ and history; it doesn't touch the bankroll.
 
 ## Project layout
 
+| Folder | What it holds |
+|---|---|
+| `engine/` | The rules and everything computed from them. No DOM code; runs in the browser, Node and JavaScriptCore |
+| `agent/` | `env.js` (reset/step/observe), `cli.js` (JSON lines), examples |
+| `web/` | The browser UI on top of the engine |
+| `macos/` | SwiftUI app; `BlackjackCore` runs `agent/env.js` and the engine it needs in JavaScriptCore |
+| `qa/` | QA harness: fuzzers, rule checks, Playwright UI checks, per-round reports and backlog |
+
 | File | What it does |
 |---|---|
-| `blackjack.js` | Game rules and the `Game` state machine. No DOM code |
-| `strategy.js` | Basic-strategy chart for these table rules. No DOM code |
-| `stats.js` | Stats, history and saved-data parsing. No DOM code |
-| `format.js` | Money formatting ($1,002.50). No DOM code |
-| `betting.js` | Bet checks, chips and rebet amounts. No DOM code |
-| `rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
-| `counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
-| `prefs.js` | Display and sound settings, animation timing. No DOM code |
-| `ev.js`, `ev-data.js` | Mistake cost from a precomputed EV table (`tools/make_ev.js`). No DOM code |
-| `drill.js` | Flashcard picking and scoring, count drill decks. No DOM code |
-| `chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
-| `a11y.js` | Card announcements and contrast checks. No DOM code |
-| `report.js` | Counter's report card: bet correlation, index plays, luck vs skill. No DOM code |
-| `replay.js` | Rebuilds a logged round step by step for replay. No DOM code |
-| `bankroll.js` | Seeded bankroll simulation: EV, SD, N0, risk of ruin. No DOM code |
-| `sim-worker.js` | Runs the bankroll simulation off the main thread |
-| `sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |
-| `sound.js` | Sounds made with the Web Audio API |
-| `app.js` | UI: rendering, animations, controls and shortcuts |
-| `index.html`, `style.css` | Page structure and styling |
-| `manifest.webmanifest`, `sw.js`, `icons/` | Install and offline support |
-| `*.test.js` | Tests for the DOM-free modules, the service worker and the shortcut keys |
-| `tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
+| `engine/blackjack.js` | Game rules and the `Game` state machine. No DOM code |
+| `engine/strategy.js` | Basic-strategy chart for these table rules. No DOM code |
+| `engine/stats.js` | Stats, history and saved-data parsing. No DOM code |
+| `engine/format.js` | Money formatting ($1,002.50). No DOM code |
+| `engine/betting.js` | Bet checks, chips and rebet amounts. No DOM code |
+| `engine/rules.js` | Rule options, saved-settings checks, house edge. No DOM code |
+| `engine/counting.js` | Hi-Lo count, index plays and bet ramp. No DOM code |
+| `web/prefs.js` | Display and sound settings, animation timing. No DOM code |
+| `engine/ev.js`, `engine/ev-data.js` | Mistake cost from a precomputed EV table (`engine/tools/make_ev.js`). No DOM code |
+| `engine/drill.js` | Flashcard picking and scoring, count drill decks. No DOM code |
+| `engine/chart.js` | The strategy chart for any rules, built from the coach. No DOM code |
+| `web/a11y.js` | Card announcements and contrast checks. No DOM code |
+| `engine/report.js` | Counter's report card: bet correlation, index plays, luck vs skill. No DOM code |
+| `engine/replay.js` | Rebuilds a logged round step by step for replay. No DOM code |
+| `engine/bankroll.js` | Seeded bankroll simulation: EV, SD, N0, risk of ruin. No DOM code |
+| `web/sim-worker.js` | Runs the bankroll simulation off the main thread |
+| `engine/sidebets.js` | Perfect Pairs and 21+3 hands, payouts and exact house edge. No DOM code |
+| `web/sound.js` | Sounds made with the Web Audio API |
+| `web/app.js` | UI: rendering, animations, controls and shortcuts |
+| `web/index.html`, `web/style.css` | Page structure and styling |
+| `web/manifest.webmanifest`, `web/sw.js`, `web/icons/` | Install and offline support |
+| `*.test.js` | Tests next to the code they cover (`engine/`, `web/`, `agent/`) |
+| `engine/tools/` | The solver behind the strategy chart and house edge (not loaded by the game) |
 
 The DOM-free modules work in both the browser (as
 `window.Blackjack`, `window.BlackjackStrategy`, `window.BlackjackStats`,
@@ -280,23 +303,23 @@ The index plays are the standard shoe-game values, with the H17 set (11 vs A, 10
 
 ## How the strategy chart was made
 
-`tools/solver.js` computes the expected value of every play for every
+`engine/tools/solver.js` computes the expected value of every play for every
 starting hand, removing cards from the shoe as they're dealt and
 handling the dealer's unseen hole card exactly. A chart cell is the best
 play averaged over every two-card hand with that total. For 4 to 8 decks
 this reproduces Wizard of Odds' published S17 and H17 charts cell for
-cell. `tools/make_charts.js` writes `tools/charts.json` for all 96 rule
+cell. `engine/tools/make_charts.js` writes `engine/tools/charts.json` for all 96 rule
 combinations (decks, S17/H17, DAS, peek or ENHC, and doubling on any
-two cards, 9-11 or 10-11), and `strategy.test.js` checks `strategy.js`
+two cards, 9-11 or 10-11), and `engine/strategy.test.js` checks `engine/strategy.js`
 against every cell. Splits are valued without resplitting, a small
 approximation. ENHC values each play as (1 - p) times its peek-game EV
 minus p times the chips at risk, with p the chance of a dealer
 blackjack given your cards. Resplitting aces and OBO change no cell.
-`tools/make_ev.js` writes the matching EV table (`ev-data.js`) that
+`engine/tools/make_ev.js` writes the matching EV table (`engine/ev-data.js`) that
 prices mistakes.
 
 The house edge uses Wizard of Odds' published figures for these rules
-without surrender, plus adjustments from `tools/house_edge.js` for late
+without surrender, plus adjustments from `engine/tools/house_edge.js` for late
 surrender, 6:5, ENHC (about +0.11 points), doubling on 9-11 (+0.09 to
 +0.15) or 10-11 (+0.17 to +0.30), and resplitting aces (-0.03 to
 -0.06, one extra split valued). It assumes basic strategy. It also includes the

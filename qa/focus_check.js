@@ -1,9 +1,10 @@
 const {chromium}=require('./lib/browser'); const http=require('http'),fs=require('fs'),path=require('path');
+const { pagePath } = require('./lib/layout');
 const dir=path.resolve(process.argv[2]);
 const T={'.js':'text/javascript','.css':'text/css','.html':'text/html'};
-const srv=http.createServer((q,r)=>{const u=decodeURIComponent(q.url.split('?')[0]);const f=path.join(dir,u==='/'?'index.html':u);fs.readFile(f,(e,d)=>{if(e){r.writeHead(404);r.end();return;}r.writeHead(200,{'content-type':T[path.extname(f)]||'text/plain'});r.end(d);});}).listen(0,'127.0.0.1',async()=>{
+const srv=http.createServer((q,r)=>{const u=decodeURIComponent(q.url.split('?')[0]);const f=path.join(dir,u.endsWith('/')?u+'index.html':u);fs.readFile(f,(e,d)=>{if(e){r.writeHead(404);r.end();return;}r.writeHead(200,{'content-type':T[path.extname(f)]||'text/plain'});r.end(d);});}).listen(0,'127.0.0.1',async()=>{
  const b=await chromium.launch({headless:true}); const p=await b.newPage({viewport:{width:1280,height:900}});
- await p.goto(`http://127.0.0.1:${srv.address().port}/index.html`);
+ await p.goto(`http://127.0.0.1:${srv.address().port}${pagePath(dir)}`);
  const st=()=>p.evaluate(()=>({deal:!document.getElementById('deal').disabled,msg:document.getElementById('message').textContent.trim(),val:document.getElementById('bet').value,vm:document.getElementById('bet').validationMessage}));
  const out={};
  for (const v of ['50','0','-5','2.5','5000','']) { await p.fill('#bet',v); await p.waitForTimeout(100); out[v||'(empty)']=await st(); }

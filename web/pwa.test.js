@@ -27,6 +27,8 @@ test('F11: the service worker caches every file the page needs', () => {
     'index.html', 'style.css', 'manifest.webmanifest',
     ...JSON.parse(read('manifest.webmanifest')).icons.map((i) => i.src),
   ];
-  for (const f of needed) assert.ok(sw.includes(`'./${f}'`), `${f} is cached`);
+  // Page-relative paths: './x' for the web UI's own files, '../engine/x' for the shared engine.
+  const cached = (f) => sw.includes(f.startsWith('../') ? `'${f}'` : `'./${f}'`);
+  for (const f of needed) assert.ok(cached(f), `${f} is cached`);
   for (const f of needed) assert.ok(fs.existsSync(path.join(__dirname, f)), `${f} exists`);
 });

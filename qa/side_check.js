@@ -9,10 +9,11 @@
  */
 'use strict';
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 const dir = process.argv[2];
 const ROUNDS = Number(process.argv[3] || 1e5);
-const { Game, SUITS, RANKS } = require(path.resolve(dir, 'blackjack.js'));
-const SB = require(path.resolve(dir, 'sidebets.js'));
+const { Game, SUITS, RANKS } = require(engineFile(dir, 'blackjack.js'));
+const SB = require(engineFile(dir, 'sidebets.js'));
 
 const RED = (s) => /[♥♦]|heart|diamond/i.test(s);
 // Perfect Pairs: perfect 25, coloured (same colour, different suit) 12, mixed 6.

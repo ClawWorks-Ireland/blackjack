@@ -1,5 +1,13 @@
 # BlackJack project — handover
 
+> **Status, 21 October 2026.** This document describes the project as handed
+> over from the KiroCrew host on 13 October. Since then: the game is on GitHub
+> (`delmarolivier/blackjack`), the QA harness lives in `qa/` (run a round with
+> `node qa/run-round.js`; see `qa/PLAYBOOK.md`), the owed round on 6ec4a0e has
+> been run (`qa/reports/6ec4a0e.md`), and the code is split into `engine/`,
+> `web/`, `agent/` and `macos/` (see README.md). The KiroCrew crons and paths
+> below are historical; none were set up on the new host.
+
 Everything a new agent/engineer needs to pick up this project cold. Written 2026-10-13.
 
 ## 1. What this is

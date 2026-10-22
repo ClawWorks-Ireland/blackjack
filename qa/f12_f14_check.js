@@ -11,9 +11,10 @@
  */
 'use strict';
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 const dir = path.resolve(process.argv[2]);
 const TRIALS = Number(process.argv[3] || 4e5);
-const req = (f) => require(path.join(dir, f));
+const req = (f) => require(engineFile(dir, f));
 const BJ = req('blackjack.js'), Strategy = req('strategy.js'), Chart = req('chart.js'), Drill = req('drill.js'), EV = req('ev.js');
 const out = { checks: {} };
 const ok = (n, pass, detail) => { out.checks[n] = { pass, ...(detail !== undefined ? { detail } : {}) }; };

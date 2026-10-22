@@ -9,10 +9,11 @@
  */
 'use strict';
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 
 const dir = process.argv[2];
 const ROUNDS = Number(process.argv[3] || 40000);
-const BJ = require(path.resolve(dir, 'blackjack.js'));
+const BJ = require(engineFile(dir, 'blackjack.js'));
 const { Game } = BJ;
 
 // ---------- seeded RNG (mulberry32) ----------
@@ -212,7 +213,7 @@ const t0 = Date.now();
 const random = run('random', ROUNDS, 12345);
 const basicRun = run('basic', ROUNDS * 5, 777);
 const report = {
-  engine: path.resolve(dir, 'blackjack.js'),
+  engine: engineFile(dir, 'blackjack.js'),
   exports: Object.keys(BJ),
   randomPlay: random,
   basicStrategy: basicRun,

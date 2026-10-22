@@ -1,4 +1,4 @@
-// Static file server for UI checks that take a URL (f18_f20_ui_check.js).
+// Static file server for `npm start` and for UI checks that take a URL.
 // Usage: node qa/serve.js <dir> [port]   (binds 127.0.0.1, default port 8765)
 //
 // Use this instead of `python3 -m http.server`: Python's server resets

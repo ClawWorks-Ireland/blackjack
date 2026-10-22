@@ -12,11 +12,12 @@
  */
 'use strict';
 const path = require('path');
+const { engineFile } = require('./lib/layout');
 
 const dir = process.argv[2];
 const ROUNDS = Number(process.argv[3] || 2e6);
 const SEED = Number(process.argv[4] || 7);
-const { Game } = require(path.resolve(dir, 'blackjack.js'));
+const { Game } = require(engineFile(dir, 'blackjack.js'));
 
 function rng32(seed) {
   let a = seed >>> 0;
@@ -116,4 +117,4 @@ function run(mode) {
 }
 
 const t0 = Date.now();
-console.log(JSON.stringify({ engine: path.resolve(dir, 'blackjack.js'), results: [run('flat'), run('hilo')], ms: Date.now() - t0 }, null, 1));
+console.log(JSON.stringify({ engine: engineFile(dir, 'blackjack.js'), results: [run('flat'), run('hilo')], ms: Date.now() - t0 }, null, 1));
