@@ -1,0 +1,35 @@
+{
+  "round": 11,
+  "last_tested": "6ec4a0e",
+  "last_report": "qa/reports/6ec4a0e.md",
+  "open": [
+    "B15",
+    "B16"
+  ],
+  "runner": "node qa/run-round.js <commit>",
+  "tools": [
+    "b14_ui_check.js",
+    "count_drill_check.js",
+    "count_sim.js",
+    "engine_fuzz.js",
+    "f11_check.js",
+    "f12_f14_check.js",
+    "f12_f14_ui_check.js",
+    "f15_f17_check.js",
+    "f18_f20_check.js",
+    "f18_f20_ui_check.js",
+    "f5_f8_f9_check.js",
+    "f7_f10_check.js",
+    "feature_checks.js",
+    "focus_check.js",
+    "live_drills.sh",
+    "live_play.sh",
+    "ramp_check.js",
+    "run-round.js",
+    "serve.js",
+    "side_check.js",
+    "spots_fuzz.js",
+    "strategy_diff.js",
+    "ui_playtest.js"
+  ]
+}

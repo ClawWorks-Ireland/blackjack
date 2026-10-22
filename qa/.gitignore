@@ -1,0 +1,4 @@
+node_modules/
+# Per-round evidence: screenshots, JSON and logs stay local; the <sha7>.md summaries are committed.
+reports/*/
+.snapshots/
