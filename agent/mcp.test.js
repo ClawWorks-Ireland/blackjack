@@ -99,3 +99,37 @@ test('MCP: the server answers over stdio, one message per line', async () => {
   assert.equal(dealt.obs.shoe.seed, 'mcp-stdio-1'); // shoe 1 of that seed
   assert.equal(dealt.obs.round, 1);
 });
+
+test('MCP: the summary and obs settle side bets and name the insurance offer', () => {
+  const env = new BlackjackEnv();
+  tool(env, 'new_table', { seed: 'mcp-side', bankroll: 100000 });
+  let won = 0;
+  let offers = 0;
+  for (let r = 0; r < 300; r++) {
+    let result = tool(env, 'deal', { bet: 10, side: { pairs: 5, t213: 5 } });
+    const sides = payload(result).obs.sideBets;
+    assert.equal(sides.length, 2);
+    for (const s of sides) {
+      const name = s.bet === 'pairs' ? 'Perfect Pairs' : '21\\+3';
+      if (s.outcome === 'win') {
+        won++;
+        assert.ok(s.win && s.odds > 0);
+        assert.equal(s.net, s.stake * s.odds);
+        assert.match(result.content[0].text, new RegExp(`${name} 5: ${s.win} ${s.odds}:1, \\+${s.net}`));
+      } else {
+        assert.deepEqual([s.outcome, s.win, s.odds, s.net], ['lose', null, 0, -5]);
+        assert.match(result.content[0].text, new RegExp(`${name} 5: lose -5`));
+      }
+    }
+    while (!payload(result).done) {
+      const { insurance } = payload(result).obs;
+      if (insurance.offered) {
+        offers++;
+        const label = insurance.evenMoney ? 'even money' : 'insurance';
+        assert.match(result.content[0].text.split('\n')[0], new RegExp(`${label} offered \\(cost ${insurance.cost}\\)`));
+      }
+      result = tool(env, 'act', { action: env.hint().action });
+    }
+  }
+  assert.ok(won > 0 && offers > 0);
+});

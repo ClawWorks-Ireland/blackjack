@@ -68,7 +68,7 @@ double any two, 75% penetration.
                "fromSplit": false, "splitAces": false, "surrendered": false, "result": null } ],
   "active": 0,                        // index into hands while phase is player
   "insurance": { "offered": false, "evenMoney": false, "cost": 0, "stake": 0, "net": null },
-  "sideBets": [],
+  "sideBets": [],                     // e.g. { "bet": "pairs", "stake": 5, "outcome": "lose", "win": null, "odds": 0, "net": -5 }
   "net": null,                        // the round's chip change once done
   "broke": false                      // bankroll below the minimum bet
 }
@@ -76,7 +76,11 @@ double any two, 75% penetration.
 
 Cards are rank (`A 2-9 T J Q K`) + suit (`s h d c`). `cardsLeft` counts the
 hole card while it is hidden, so `sum(seen) + cardsLeft` is always the shoe
-size. Replies to steps leave out `rules` and `table`, which only change on
+size. Side bets settle on the deal: `win` names the winning hand (`"Mixed
+pair"`, `"Flush"`, ...) and `odds` its payout, or `null` and 0 on a loss. With
+a blackjack against an ace, `insurance.evenMoney` is true and `insurance`
+takes even money. The dealer peeks under a 10 or an ace unless `enhc` is set.
+Replies to steps leave out `rules` and `table`, which only change on
 `reset`; `observe` and `reset` include them.
 
 ## MCP server

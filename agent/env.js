@@ -188,7 +188,9 @@
           cost: g.phase === 'insurance' ? round2(g.insuranceCost) : 0,
           stake: g.insurance, net: g.insuranceNet,
         },
-        sideBets: g.sideBets.map((s) => ({ bet: s.bet, stake: s.stake, win: s.win, net: s.net })),
+        sideBets: g.sideBets.map((s) => ({
+          bet: s.bet, stake: s.stake, outcome: s.win ? 'win' : 'lose', win: s.win, odds: s.odds, net: s.net,
+        })),
         net: g.phase === 'done' ? round2(g.net) : null,
         broke: g.isBroke,
       };

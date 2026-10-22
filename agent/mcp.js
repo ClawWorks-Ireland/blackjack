@@ -21,7 +21,8 @@ const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05
 const RULES_SCHEMA = {
   type: 'object',
   description: 'Partial rules: decks (1, 2, 6, 8), h17, payout (1.5 or 1.2), das, lateSurrender, rsa, enhc, obo, '
-    + 'doubleOn ("any", "9-11", "10-11"), penetration (0.5 to 0.85 in 0.05 steps). Unset rules take the defaults.',
+    + 'doubleOn ("any", "9-11", "10-11"), penetration (0.5 to 0.85 in 0.05 steps). Unset rules take the defaults. '
+    + 'The dealer peeks for blackjack under a 10 or an ace unless enhc is set.',
 };
 
 const TOOLS = [
@@ -56,7 +57,9 @@ const TOOLS = [
           type: 'object',
           properties: { pairs: { type: 'number' }, t213: { type: 'number' } },
           additionalProperties: false,
-          description: 'Side bets on the first spot: Perfect Pairs and 21+3.',
+          description: 'Side bets on the first spot, each up to table.sideMax: Perfect Pairs (your first two cards) '
+            + 'and 21+3 (your first two cards and the dealer up card). They settle on the deal; '
+            + 'obs.sideBets gives each outcome, the winning hand and its odds.',
         },
       },
       required: ['bet'],
@@ -65,7 +68,9 @@ const TOOLS = [
   },
   {
     name: 'act',
-    description: 'Play the active hand, or answer the insurance offer. Only actions in obs.legal are accepted.',
+    description: 'Play the active hand, or answer the insurance offer. Only actions in obs.legal are accepted. '
+      + 'When you hold a blackjack against an ace, obs.insurance.evenMoney is true and "insurance" takes even money '
+      + '(a sure 1:1 win); "decline_insurance" plays on for 3:2.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -100,6 +105,10 @@ function summary(obs) {
     const mark = obs.phase === 'player' && i === obs.active ? '> ' : '';
     const result = h.result ? `, ${h.result.outcome} ${h.result.net > 0 ? '+' : ''}${h.result.net}` : '';
     parts.push(`${mark}hand ${i + 1}: ${cards(h.cards)} (${h.soft ? 'soft ' : ''}${h.total}), bet ${h.bet}${result}`);
+  });
+  if (obs.insurance.offered) parts.push(`${obs.insurance.evenMoney ? 'even money' : 'insurance'} offered (cost ${obs.insurance.cost})`);
+  obs.sideBets.forEach((s) => {
+    parts.push(`${s.bet === 'pairs' ? 'Perfect Pairs' : '21+3'} ${s.stake}: ${s.win ? `${s.win} ${s.odds}:1, +${s.net}` : `lose ${s.net}`}`);
   });
   if (obs.net !== null) parts.push(`net ${obs.net > 0 ? '+' : ''}${obs.net}`);
   if (obs.legal.length) parts.push(`legal: ${obs.legal.join(', ')}`);
