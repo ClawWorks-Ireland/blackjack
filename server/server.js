@@ -3,7 +3,7 @@
  * Live table server (CLA-111): agents and people sit at the same tables.
  * Plain HTTP + Server-Sent Events, no dependencies. Serves the web pages too.
  *
- *   node server/server.js [--port 8787] [--host 0.0.0.0] [--data server/data/players.json]
+ *   node server/server.js [--port 8787] [--host 0.0.0.0] [--data server/data/players.json] [--log server/data/requests.log]
  *
  * Listens on the home network by default (every interface of this machine);
  * --host 127.0.0.1 keeps it to this machine. It is not meant to face the
@@ -71,8 +71,13 @@ function serveStatic(req, res, pathname) {
   return true;
 }
 
-function createServer({ hub, log = () => {} }) {
-  return http.createServer(async (req, res) => {
+function createServer({ hub, log = () => {}, logRequests = null }) {
+  const server = http.createServer(async (req, res) => {
+    if (logRequests) {
+      const t0 = Date.now();
+      res.on('finish', () => logRequests(`${req.socket.remoteAddress} ${req.method} ${req.url.replace(/token=[0-9a-f]+/, 'token=…')} ${res.statusCode} ${Date.now() - t0}ms ${req.headers['user-agent'] || ''}`));
+      if ((req.url || '').includes('/events')) logRequests(`${req.socket.remoteAddress} ${req.method} ${req.url.replace(/token=[0-9a-f]+/, 'token=…')} stream opened`);
+    }
     const url = new URL(req.url, 'http://localhost');
     const parts = url.pathname.split('/').filter(Boolean);
     try {
@@ -145,6 +150,13 @@ function createServer({ hub, log = () => {} }) {
       return send(res, 500, { error: 'Server error' });
     }
   });
+  // Requests that aren't HTTP at all (a browser trying HTTPS on this port, say) never reach the handler.
+  server.on('clientError', (err, socket) => {
+    if (logRequests) logRequests(`${socket.remoteAddress} not HTTP: ${err.code || err.message}`);
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nconnection: close\r\n\r\n');
+  });
+  if (logRequests) server.on('connection', (s) => logRequests(`${s.remoteAddress} connected`));
+  return server;
 }
 
 function lanAddresses() {
@@ -161,7 +173,9 @@ function main(argv) {
   const hub = new Hub({ leaderboard, log });
   hub.create({ name: 'Main table', minBet: 10, maxBet: 500 });
   hub.create({ name: 'Practice (with bots)', minBet: 10, maxBet: 500, bots: 3 });
-  const server = createServer({ hub, log });
+  const logFile = flag('--log', null);
+  const logRequests = logFile ? (m) => fs.appendFile(path.resolve(logFile), `${new Date().toISOString()} ${m}\n`, () => {}) : null;
+  const server = createServer({ hub, log, logRequests });
   server.listen(port, host, () => {
     console.log(`Blackjack tables on port ${port}`);
     if (host === '0.0.0.0') {
@@ -171,6 +185,7 @@ function main(argv) {
       console.log(`  only at:       http://${host}:${port}/`);
     }
     console.log(`  leaderboard data: ${path.relative(process.cwd(), data)}`);
+    if (logFile) console.log(`  request log: ${path.relative(process.cwd(), path.resolve(logFile))}`);
   });
   const stop = () => { hub.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1000).unref(); };
   process.on('SIGINT', stop);
