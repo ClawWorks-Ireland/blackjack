@@ -8,6 +8,7 @@
     "start": "node qa/serve.js . 8080",
     "agent": "node agent/cli.js",
     "mcp": "node agent/mcp.js",
-    "qa": "node qa/run-round.js"
+    "qa": "node qa/run-round.js",
+    "tables": "node server/server.js"
   }
 }

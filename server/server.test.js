@@ -1,0 +1,139 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { Hub } = require('./hub.js');
+const { Leaderboard } = require('./leaderboard.js');
+const { createServer } = require('./server.js');
+
+const FAST = { betSeconds: 0.3, turnSeconds: 0.3, botDelayMs: 5, nextRoundMs: 20, idleRounds: 3 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Start a server on a free port; returns {url, hub, board, close}. */
+async function start(opts = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tables-'));
+  const board = new Leaderboard({ file: path.join(dir, 'players.json'), minRounds: 5 });
+  const hub = new Hub({ leaderboard: board, timing: FAST });
+  const server = createServer({ hub });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  return { url, hub, board, dir, ...opts, close: () => { hub.close(); server.closeAllConnections(); return new Promise((r) => server.close(r)); } };
+}
+
+async function api(url, method, p, body, token) {
+  const res = await fetch(url + p, {
+    method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+/** A basic agent over HTTP: bets 10 for `rounds` rounds, standing on 17+ and hitting below; returns once the last round is settled. */
+async function agent(url, table, name, kind, rounds) {
+  const { body: j } = await api(url, 'POST', `/api/tables/${table}/join`, { name, kind });
+  let bets = 0;
+  let since;
+  for (let guard = 0; guard < 2000; guard++) {
+    const { body: v } = await api(url, 'GET', `/api/tables/${table}/wait?timeout=5${since !== undefined ? `&since=${since}` : ''}`, null, j.token);
+    since = v.version;
+    if (!v.you) throw new Error(`${name} lost its seat`);
+    const me = v.seats[v.you.seat];
+    const betting = v.phase === 'betting' || v.phase === 'done';
+    if (bets >= rounds && betting && (v.phase === 'betting' || me.net !== null)) return j; // the last round is settled
+    if (v.you.legal.includes('bet') && v.phase === 'betting' && me.bet === 0 && !me.out && bets < rounds) {
+      const r = await api(url, 'POST', `/api/tables/${table}/bet`, { amount: 10 }, j.token);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      bets++;
+    } else if (v.you.yourTurn) {
+      const a = v.phase === 'insurance' ? 'decline_insurance' : (me.hands[me.active].total < 17 ? 'hit' : 'stand');
+      const r = await api(url, 'POST', `/api/tables/${table}/act`, { action: a }, j.token);
+      assert.ok(r.status === 200 || r.status === 409, JSON.stringify(r.body)); // 409: the clock beat us
+    }
+  }
+  throw new Error(`${name} did not finish`);
+}
+
+test('server: an AI and a human play the same table over HTTP, and both reach the leaderboard', async () => {
+  const s = await start();
+  try {
+    const { body: t } = await api(s.url, 'POST', '/api/tables', { name: 'Test', minBet: 10, maxBet: 100 });
+    const [a, h] = await Promise.all([agent(s.url, t.id, 'Robo', 'ai', 8), agent(s.url, t.id, 'Ada', 'human', 8)]);
+    assert.notEqual(a.seat, h.seat);
+    const { body: list } = await api(s.url, 'GET', '/api/tables');
+    const seats = list.tables.find((x) => x.id === t.id).seats.filter(Boolean);
+    assert.deepEqual(seats.map((x) => x.kind).sort(), ['ai', 'human']);
+    const { body: lb } = await api(s.url, 'GET', '/api/leaderboard');
+    const kinds = Object.fromEntries(lb.players.map((p) => [p.name, p.kind]));
+    assert.deepEqual(kinds, { Robo: 'ai', Ada: 'human' });
+    assert.ok(lb.players.every((p) => p.rounds >= 7));
+    assert.equal((await api(s.url, 'GET', '/api/leaderboard?kind=human')).body.players.length, 1);
+    assert.ok(fs.existsSync(path.join(s.dir, 'players.json')), 'saved to disk');
+  } finally { await s.close(); }
+});
+
+test('server: each viewer gets its own view, and the hole card and seed stay hidden', async () => {
+  const s = await start();
+  try {
+    const { body: t } = await api(s.url, 'POST', '/api/tables', { name: 'Views', bots: 2 });
+    const { body: j } = await api(s.url, 'POST', `/api/tables/${t.id}/join`, { name: 'Viewer', kind: 'human' });
+    assert.equal(j.view.you.seat, j.seat);
+    await api(s.url, 'POST', `/api/tables/${t.id}/bet`, { amount: 10 }, j.token);
+    // Events: subscribe and collect a few states.
+    const res = await fetch(`${s.url}/api/tables/${t.id}/events?token=${j.token}`);
+    const reader = res.body.getReader();
+    let buf = '';
+    const states = [];
+    while (states.length < 2) {
+      const { value } = await reader.read();
+      buf += Buffer.from(value).toString('utf8');
+      for (const m of buf.split('\n\n').slice(0, -1)) if (m.includes('event: state')) states.push(JSON.parse(m.split('data: ')[1]));
+      buf = buf.split('\n\n').pop();
+    }
+    reader.cancel();
+    const live = states.find((v) => v.phase === 'player' || v.phase === 'insurance') || states[0];
+    if (live.phase === 'player' || live.phase === 'insurance') assert.equal(live.dealer.cards.length, 1);
+    assert.equal(JSON.stringify(states).includes(s.hub.get(t.id).table.seed), false, 'the seed never leaves the server');
+    const spectator = (await api(s.url, 'GET', `/api/tables/${t.id}`)).body;
+    assert.equal(spectator.you, undefined);
+    assert.equal(spectator.seats.filter(Boolean).filter((x) => x.player.kind === 'bot').length, 2);
+  } finally { await s.close(); }
+});
+
+test('server: the clock stands for a slow player, sits out a non-bettor, and frees idle seats', async () => {
+  const s = await start();
+  try {
+    const { body: t } = await api(s.url, 'POST', '/api/tables', { name: 'Clock' });
+    const { body: fast } = await api(s.url, 'POST', `/api/tables/${t.id}/join`, { name: 'Fast', kind: 'ai' });
+    const { body: slow } = await api(s.url, 'POST', `/api/tables/${t.id}/join`, { name: 'Slow', kind: 'human' });
+    const lt = s.hub.get(t.id);
+    // Fast bets every round and lets the clock play its hand; Slow never does anything.
+    for (let i = 0; i < 40 && lt.players.has(slow.token); i++) {
+      if (lt.table.phase === 'betting' || lt.table.phase === 'done') {
+        const me = lt.table.seats[fast.seat];
+        if (me && me.bet === 0) await api(s.url, 'POST', `/api/tables/${t.id}/bet`, { amount: 10 }, fast.token);
+      }
+      await sleep(150);
+    }
+    assert.equal(lt.players.has(slow.token), false, 'Slow lost the seat after missing rounds');
+    assert.ok(lt.table.round >= 3, `rounds played: ${lt.table.round}`);
+    assert.equal(s.board.rows().find((p) => p.name === 'Slow'), undefined, 'sitting out is not playing');
+  } finally { await s.close(); }
+});
+
+test('server: bad requests are refused with a reason', async () => {
+  const s = await start();
+  try {
+    const { body: t } = await api(s.url, 'POST', '/api/tables', { name: 'Bad' });
+    assert.equal((await api(s.url, 'POST', '/api/tables', { rules: { decks: 3 } })).status, 400);
+    assert.equal((await api(s.url, 'POST', `/api/tables/${t.id}/join`, { name: '', kind: 'ai' })).status, 400);
+    assert.equal((await api(s.url, 'POST', `/api/tables/${t.id}/join`, { name: 'X', kind: 'robot' })).status, 400);
+    assert.equal((await api(s.url, 'POST', `/api/tables/${t.id}/bet`, { amount: 10 }, 'nope')).status, 403);
+    const { body: j } = await api(s.url, 'POST', `/api/tables/${t.id}/join`, { name: 'Y', kind: 'ai' });
+    assert.equal((await api(s.url, 'POST', `/api/tables/${t.id}/act`, { action: 'hit' }, j.token)).status, 409);
+    assert.equal((await api(s.url, 'POST', `/api/tables/${t.id}/bet`, { amount: 5 }, j.token)).status, 409);
+    assert.equal((await api(s.url, 'GET', '/api/tables/99')).status, 404);
+    assert.equal((await fetch(`${s.url}/server/data/players.json`)).status, 404, 'data is never served');
+    assert.equal((await fetch(`${s.url}/web/../server/hub.js`)).status, 404);
+  } finally { await s.close(); }
+});

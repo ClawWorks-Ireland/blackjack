@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 # KiroCrew workspace settings, not part of the game
 .kiro/
+# Live table server data (players leaderboard): local only
+server/data/
