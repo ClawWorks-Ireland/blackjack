@@ -143,9 +143,12 @@ async function main() {
     let usedKey = false;
     while (steps++ < 40) {
       // B16: the delayed F18 shoe report can open after the next deal and block the hand.
+      // Open once the hand has settled (no longer in-hand) is correct: close it and go on (T8).
       if (await page.$eval('#report', (d) => d.open).catch(() => false)) {
-        flag('shoe report opened during a hand (B16)', { round: i + 1, step: steps });
-        if (!firsts.reportMidHand) { firsts.reportMidHand = true; await shot(page, 'b16-report-mid-hand'); }
+        if (await page.evaluate(() => document.body.classList.contains('in-hand'))) {
+          flag('shoe report opened during a hand (B16)', { round: i + 1, step: steps });
+          if (!firsts.reportMidHand) { firsts.reportMidHand = true; await shot(page, 'b16-report-mid-hand'); }
+        }
         await page.evaluate(() => document.getElementById('report').close());
       }
       if (await enabled(SEL.noInsure)) {
