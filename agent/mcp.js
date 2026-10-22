@@ -186,21 +186,27 @@ const LIVE_TOOLS = [
 ];
 TOOLS.push(...LIVE_TOOLS);
 
-/** One line for a live table view, in seat order, then what it wants from you. */
+/** One line for a live table view, in seat order (seats numbered from 0, as in the JSON), then what it wants from you. */
 function liveSummary(v) {
-  const parts = [`${v.name}, round ${v.round}, ${v.phase}`];
+  const parts = [v.phase === 'betting' ? `${v.name}, betting for round ${v.round + 1}` : `${v.name}, round ${v.round}, ${v.phase}`];
+  // A round can settle without asking you anything: say how your last one went.
+  const last = v.you && v.you.lastRound;
+  if (last && v.phase === 'betting' && last.round === v.round) {
+    const hands = last.hands.map((h) => `${cards(h.cards)} (${h.total})${h.result ? ` ${h.result.outcome} ${h.result.net > 0 ? '+' : ''}${h.result.net}` : ''}`).join(' / ');
+    parts.push(`your round ${last.round}: ${hands} vs dealer ${cards(last.dealer)} (${last.dealerTotal}), net ${last.net > 0 ? '+' : ''}${last.net}`);
+  }
   if (v.dealer.cards.length) parts.push(`dealer ${cards(v.dealer.cards)}${v.dealer.holeCardHidden ? ` + hole card (showing ${v.dealer.total})` : ` (${v.dealer.total})`}`);
   v.seats.forEach((s, i) => {
     if (!s) return;
     const you = v.you && v.you.seat === i;
     const hands = s.hands.map((h, k) => `${s.active === k ? '> ' : ''}${cards(h.cards)} (${h.soft ? 'soft ' : ''}${h.total})${h.result ? ` ${h.result.outcome} ${h.result.net > 0 ? '+' : ''}${h.result.net}` : ''}`).join(' / ');
-    parts.push(`seat ${i + 1} ${s.player.name} [${s.player.kind}]${you ? ' (you)' : ''}: ${hands || (s.out ? 'sitting out' : s.bet ? `bet ${s.bet}` : 'no bet yet')}`);
+    parts.push(`seat ${i} ${s.player.name} [${s.player.kind}]${you ? ' (you)' : ''}: ${hands || (s.out ? 'sitting out' : s.bet ? `bet ${s.bet}` : 'no bet yet')}`);
   });
   if (v.you) {
     const move = yourMove(v);
     const cost = (a) => (v.you.legalCost[a] ? ` (+${v.you.legalCost[a]})` : '');
     const legal = v.you.legal.filter((a) => a !== 'bet' && a !== 'sit_out').map((a) => a + cost(a)).join(', ');
-    parts.push(`bankroll ${v.you.bankroll}`);
+    parts.push(`bankroll ${v.you.bankroll}${v.you.onTable ? ` + ${v.you.onTable} on the table` : ''}`);
     parts.push({ bet: `your move: bet (live_bet, ${v.table.minBet}-${v.table.maxBet})`, insurance: `your move: ${v.you.evenMoney ? 'even money' : 'insurance'}? ${legal}`, play: `your move: ${legal}`, wait: 'waiting for other players' }[move] || 'you have no seat');
   }
   return parts.join(' · ');

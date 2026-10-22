@@ -68,6 +68,7 @@ test('live: MCP tools join, wait, bet, act and read the leaderboard as AI', asyn
     const t = await new TableClient(s.url).create({ name: 'MCP' });
     const joined = await call('live_join', { table: t.id, name: 'Claude', url: s.url });
     assert.match(joined.content[0].text, /Claude \[ai\] \(you\)/);
+    assert.match(joined.content[0].text, /seat 0 Claude \[ai\] \(you\)/, 'seats count from 0, as in the JSON');
     let rounds = 0;
     for (let i = 0; i < 80 && rounds < 3; i++) {
       const r = await call('live_wait', { timeout: 3 });
@@ -79,6 +80,13 @@ test('live: MCP tools join, wait, bet, act and read the leaderboard as AI', asyn
       else if (v.phase === 'done') await new Promise((ok) => setTimeout(ok, 30));
     }
     assert.equal(rounds, 3);
+    let after;
+    for (let i = 0; i < 40; i++) {
+      after = await call('live_wait', { timeout: 3 });
+      if (/betting for round/.test(after.content[0].text)) break;
+      await call('live_act', { action: 'stand' }).catch(() => {});
+    }
+    assert.match(after.content[0].text, /your round \d+: .* vs dealer .*, net [+-]?\d/, 'the last round is reported when betting reopens');
     assert.equal((await call('live_act', { action: 'fly' })).isError, true);
     let left;
     for (let i = 0; i < 40; i++) { left = await call('live_leave'); if (!left.isError) break; await call('live_act', { action: 'stand' }); await new Promise((ok) => setTimeout(ok, 30)); }

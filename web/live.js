@@ -150,7 +150,7 @@
       const turn = view.turn === i;
       const kids = [
         el('div', { class: 'who' }, el('span', { text: `${s.player.name}${you ? ' (you)' : ''} ` }), badge(s.player.kind)),
-        el('div', { class: 'meta', text: `Seat ${i + 1} · ${money(s.bankroll)}${s.out ? ' · sitting out' : s.bet ? ` · bet ${money(s.bet)}` : ''}` }),
+        el('div', { class: 'meta', text: `Seat ${i + 1}${s.player.kind === 'bot' ? '' : ` · ${money(s.bankroll)}`}${s.out ? ' · sitting out' : s.bet ? ` · bet ${money(s.bet)}` : ''}` }), // bots play without money
       ];
       s.hands.forEach((h, k) => {
         kids.push(el('div', { class: `hand${s.active === k ? ' active' : ''}` },
@@ -183,13 +183,19 @@
 
       const panel = $('#you');
       if (!you) {
-        panel.replaceChildren(el('p', { class: 'muted', text: token === null ? 'Watching. ' : 'Your seat is gone (you left, or missed too many rounds). ' }),
+        if (token) { store.session(`live.token.${id}`, null); token = null; } // the server let the seat go
+        panel.replaceChildren(el('p', { class: 'muted', text: params.get('watch') ? 'Watching. ' : 'You have no seat here (you left, or missed too many rounds). ' }),
           el('a', { href: 'lobby.html', text: 'Back to the lobby to sit down' }));
         return;
       }
       const me = view.seats[you.seat];
       const kids = [el('div', { class: 'row' }, el('strong', { text: `Bankroll ${money(you.bankroll)}` }),
         el('button', { type: 'button', class: 'secondary', onclick: leave, text: 'Leave table' }))];
+      const last = you.lastRound;
+      if (last && view.phase === 'betting' && last.round === view.round) {
+        kids.push(el('p', { class: 'muted', text: `Last round: ${last.hands.map((h) => `${h.total}${h.result ? ` ${h.result.outcome}` : ''}`).join(' / ')} against the dealer's ${last.dealerTotal}, ${last.net >= 0 ? 'won' : 'lost'} ${money(Math.abs(last.net))}` }));
+      }
+      if (you.onTable) kids[0].append(el('span', { class: 'muted', text: ` + ${money(you.onTable)} on the table` }));
       if (you.legal.includes('bet') && (view.phase === 'done' || (me.bet === 0 && !me.out))) {
         const input = el('input', { type: 'number', min: view.table.minBet, max: Math.min(view.table.maxBet, you.bankroll), step: 1, value: lastBet || view.table.minBet, 'aria-label': 'Bet', style: 'width:7em' });
         const bet = () => { lastBet = Number(input.value); store.set('live.lastBet', String(lastBet)); send('bet', { amount: lastBet }); };

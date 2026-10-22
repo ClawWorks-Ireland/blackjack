@@ -42,6 +42,7 @@ class LiveTable {
     this.deadline = null; // {at, what} for the current timer
     this.timer = null;
     this.waiters = new Set(); // long-poll resolvers
+    this.lastRounds = new Map(); // seat -> how that seat's last round went
     for (let i = 0; i < bots; i++) this.seatBot(i);
     this.created = new Date().toISOString();
   }
@@ -81,6 +82,7 @@ class LiveTable {
     const p = this.player(t);
     try { this.table.leave(p.seat); } catch (e) { throw new HubError(e.message, 409); }
     this.players.delete(t);
+    this.lastRounds.delete(p.seat);
     this.changed();
   }
 
@@ -124,6 +126,10 @@ class LiveTable {
     if (t.phase === 'done' && !this.recorded) {
       this.recorded = true;
       this.hub.record(this);
+      // Keep each seat's result: a round can settle without asking you anything (a blackjack),
+      // and betting for the next one opens before a slow client looks again.
+      const v = t.view(null);
+      v.seats.forEach((s, i) => { if (s && s.hands.length) this.lastRounds.set(i, { round: v.round, dealer: v.dealer.cards, dealerTotal: v.dealer.total, hands: s.hands, net: s.net }); });
       this.after(this.timing.nextRoundMs, 'next round', () => this.openBetting());
     } else if (t.phase === 'betting') {
       this.recorded = false;
@@ -212,6 +218,12 @@ class LiveTable {
   view(t = null) {
     const p = t ? this.players.get(t) : null;
     const v = this.table.view(p ? p.seat : null);
+    if (v.you) {
+      v.you.lastRound = this.lastRounds.get(p.seat) || null;
+      // Chips out on the table this round (bets, doubles, splits, insurance), not in your bankroll.
+      const s = this.table.seats[p.seat];
+      v.you.onTable = s.inRound && v.phase !== 'done' ? s.hands.reduce((a, h) => a + h.bet, 0) + s.insurance : 0;
+    }
     return {
       id: this.id, name: this.name, version: this.version,
       deadline: this.deadline ? { what: this.deadline.what, ms: this.deadline.ms, msLeft: Math.max(0, this.deadline.at - Date.now()) } : null,
