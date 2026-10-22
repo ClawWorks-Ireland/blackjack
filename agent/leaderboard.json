@@ -1,0 +1,91 @@
+{
+  "benchVersion": 1,
+  "config": {
+    "rules": {},
+    "minBet": 10,
+    "maxBet": 500,
+    "bankroll": 10000000,
+    "seeds": [
+      "bench-1",
+      "bench-2",
+      "bench-3",
+      "bench-4",
+      "bench-5"
+    ],
+    "rounds": 200000
+  },
+  "entries": [
+    {
+      "policy": "hilo",
+      "description": "Hi-Lo counter: 1-2-4-8-12 unit ramp on the true count, Illustrious 18 and Fab 4 index plays, insurance at +3.",
+      "rounds": 1000000,
+      "initialBets": 15927800,
+      "wagered": 18249160,
+      "net": 195765,
+      "per100": 1.96,
+      "per100CI": 0.57,
+      "return": 0.01229,
+      "returnCI": 0.00357,
+      "avgBetUnits": 1.593,
+      "chartAgreement": 0.9675,
+      "offChartPct": 0.00167,
+      "kind": "baseline",
+      "commit": "33adcf6",
+      "date": "2026-10-22"
+    },
+    {
+      "policy": "basic",
+      "description": "Flat minimum bet; plays the hint (basic strategy for the table rules) every time.",
+      "rounds": 1000000,
+      "initialBets": 10000000,
+      "wagered": 11320540,
+      "net": -32035,
+      "per100": -0.32,
+      "per100CI": 0.22,
+      "return": -0.0032,
+      "returnCI": 0.00224,
+      "avgBetUnits": 1,
+      "chartAgreement": 1,
+      "offChartPct": 0.00023,
+      "kind": "baseline",
+      "commit": "33adcf6",
+      "date": "2026-10-22"
+    },
+    {
+      "policy": "never-bust",
+      "description": "Flat minimum bet; hits only when it cannot bust (hard 11 or less, soft 17 or less), never insures.",
+      "rounds": 1000000,
+      "initialBets": 10000000,
+      "wagered": 10000000,
+      "net": -610320,
+      "per100": -6.1,
+      "per100CI": 0.19,
+      "return": -0.06103,
+      "returnCI": 0.00195,
+      "avgBetUnits": 1,
+      "chartAgreement": 0.6526,
+      "offChartPct": 0.05693,
+      "kind": "baseline",
+      "commit": "33adcf6",
+      "date": "2026-10-22"
+    },
+    {
+      "policy": "random",
+      "description": "Flat minimum bet; a uniformly random legal move at every decision.",
+      "rounds": 1000000,
+      "initialBets": 10000000,
+      "wagered": 12670025,
+      "net": -4203030,
+      "per100": -42.03,
+      "per100CI": 0.23,
+      "return": -0.4203,
+      "returnCI": 0.00231,
+      "avgBetUnits": 1,
+      "chartAgreement": 0.2969,
+      "offChartPct": 0.41972,
+      "kind": "baseline",
+      "commit": "33adcf6",
+      "date": "2026-10-22"
+    }
+  ]
+}
