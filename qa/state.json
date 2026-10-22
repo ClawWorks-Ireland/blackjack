@@ -1,14 +1,12 @@
 {
-  "round": 11,
-  "last_tested": "6ec4a0e",
-  "last_report": "qa/reports/6ec4a0e.md",
-  "open": [
-    "B15",
-    "B16"
-  ],
+  "round": 12,
+  "last_tested": "01155fe",
+  "last_report": "qa/reports/01155fe.md",
+  "open": [],
   "runner": "node qa/run-round.js <commit>",
   "tools": [
     "b14_ui_check.js",
+    "b16_ui_check.js",
     "count_drill_check.js",
     "count_sim.js",
     "engine_fuzz.js",

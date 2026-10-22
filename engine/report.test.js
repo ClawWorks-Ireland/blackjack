@@ -114,3 +114,38 @@ test('F18: shoe reports keep the last 20 and export as CSV', () => {
   assert.equal(lines[0], Rep.REPORT_COLUMNS.join(','));
   assert.match(lines[1], /^2026-01-01T00:05:00.000Z,/, 'oldest kept report first');
 });
+
+test('B15: an index play is correct even when the coach, with the count hidden, says basic strategy', () => {
+  let deviations = 0;
+  for (let seed = 1; seed <= 40 && deviations < 5; seed++) {
+    const game = new BJ.Game({ bankroll: 1e9, rng: seededRng(seed) });
+    do {
+      game.deal(UNIT);
+      while (game.phase === 'insurance' || game.phase === 'player') {
+        const spot = Rep.countSpot(game);
+        let basic;
+        if (game.phase === 'insurance') basic = S.insuranceAdvice(game.evenMoneyOffered);
+        else {
+          const allowed = { canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(), canHit: game.canHit() };
+          basic = S.recommend(game.currentHand.cards, game.dealer[0], allowed, game.rules);
+        }
+        const move = spot ? spot.play : basic.action;
+        if (move !== basic.action) deviations++;
+        assert.ok(Rep.moveCorrect(basic, spot, move), `${move} at ${spot && spot.hand} v ${spot && spot.up}`);
+        if (move === 'insurance') game.takeInsurance();
+        else if (move === 'no-insurance') game.declineInsurance();
+        else game[move]();
+      }
+    } while (!game.cutCardReached);
+  }
+  assert.ok(deviations > 0, 'some index play differed from basic strategy');
+});
+
+test('B15: a move that is neither the advice nor the index play is still a mistake', () => {
+  const advice = { action: 'hit' };
+  assert.equal(Rep.moveCorrect(advice, null, 'hit'), true);
+  assert.equal(Rep.moveCorrect(advice, null, 'stand'), false);
+  assert.equal(Rep.moveCorrect(advice, { play: 'stand' }, 'stand'), true);
+  assert.equal(Rep.moveCorrect(advice, { play: 'stand' }, 'double'), false);
+  assert.equal(Rep.moveCorrect(null, null, 'hit'), false);
+});

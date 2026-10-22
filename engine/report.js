@@ -58,6 +58,16 @@
     if (!play.deviation) return null;
     return { hand: cardText(h.cards), up: upText(game.dealer[0]), tc, index: play.index, play: play.action };
   }
+
+  /**
+   * Whether `move` is right at this decision: what the coach advises, or
+   * the index play at `spot`. With the count hidden the coach falls back to
+   * basic strategy, but a counter keeping the count in their head still
+   * plays the index, and that is not a mistake (B15).
+   */
+  function moveCorrect(advice, spot, move) {
+    return (!!advice && advice.action === move) || (!!spot && spot.play === move);
+  }
   const REPORTS_MAX = 20;
 
   function newShoe(meta = {}) {
@@ -196,7 +206,7 @@
   }
 
   const api = {
-    EDGE_PER_TRUE_COUNT, REPORTS_MAX, countSpot, newShoe, recordBet, recordResult, recordSpot, recordCheck,
+    EDGE_PER_TRUE_COUNT, REPORTS_MAX, countSpot, moveCorrect, newShoe, recordBet, recordResult, recordSpot, recordCheck,
     pearson, edgeAt, grade, summary, addReport, parseReports, reportsCSV, REPORT_COLUMNS,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

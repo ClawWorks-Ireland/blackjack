@@ -39,6 +39,7 @@
   let shoeTracker = Report.newShoe(); // F18: this shoe's bets, index spots and count checks
   let sessionShoes = []; // finished shoes this session
   let reports = [];      // saved shoe summaries, newest first (set after storage is ready)
+  let pendingReport = null; // a shoe report held back because a hand was dealt before it opened (B16)
   let reportShown = null; // the shoe the report dialog is showing (for the end-count check)
   let roundBefore = null; // F19: bankroll and count at this round's deal, for its replay record
   const REPLAY_KEEP = 20; // rounds that keep a replay record
@@ -490,6 +491,19 @@
     els[ADVICE_BUTTON[advice.action]].classList.add('suggested');
   }
 
+  /**
+   * Open a shoe report after `delay` ms, but only between rounds: if a new
+   * hand was dealt meanwhile, hold it, and render() opens it once that hand
+   * has settled and its cards have landed, before Deal unlocks. It never
+   * covers Hit and Stand (B16).
+   */
+  function queueReport(shoe, delay) {
+    setTimeout(() => {
+      if (!inFlight && game.phase !== 'player' && game.phase !== 'insurance') showReport(shoe);
+      else pendingReport = shoe;
+    }, delay);
+  }
+
   /** Fold a finished round into stats once, and play its outcome cue. */
   function maybeRecord(settleAt) {
     if (game.phase !== 'done' || recordedRound === round) return;
@@ -504,7 +518,8 @@
     Report.recordResult(shoeTracker, { net: game.net, evLost: roundMistakes.reduce((s, m) => s + m.dollars, 0) });
     if (game.cutCardReached) {
       const done = finishShoe(true);
-      if (done && prefs.shoeReport) setTimeout(() => showReport(done), settleAt + 700);
+      pendingReport = null; // a newer shoe's report replaces one still waiting
+      if (done && prefs.shoeReport) queueReport(done, settleAt + 700);
     }
     const outcome = netOutcome();
     const cue = outcome === 'blackjack' ? 'blackjack'
@@ -608,6 +623,12 @@
       els.chips.querySelectorAll('[data-chip]').forEach((b) => { b.disabled = true; });
       revealTimer = setTimeout(render, settleAt + landMs());
       return;
+    }
+
+    if (pendingReport && game.phase !== 'player' && game.phase !== 'insurance') {
+      const held = pendingReport;
+      pendingReport = null;
+      showReport(held);
     }
 
     els.dealerTotal.textContent = !game.dealer.length ? ''
@@ -759,7 +780,7 @@
     const hinted = hintFor === decisionKey();
     hintFor = null;
     if (!advice) return;
-    const correct = advice.action === move;
+    const correct = Report.moveCorrect(advice, spot, move);
     const hand = game.currentHand;
     if (!correct && hand && !advice.deviation && game.phase === 'player') {
       const key = Chart.cellKey(hand.cards, game.dealer[0], game.canSplit());
