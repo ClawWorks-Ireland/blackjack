@@ -164,8 +164,12 @@ function main(argv) {
   const server = createServer({ hub, log });
   server.listen(port, host, () => {
     console.log(`Blackjack tables on port ${port}`);
-    console.log(`  this Mac:      http://localhost:${port}/`);
-    if (host === '0.0.0.0') for (const a of lanAddresses()) console.log(`  home network:  http://${a}:${port}/`);
+    if (host === '0.0.0.0') {
+      console.log(`  this Mac:      http://localhost:${port}/`);
+      for (const a of lanAddresses()) console.log(`  home network:  http://${a}:${port}/`);
+    } else {
+      console.log(`  only at:       http://${host}:${port}/`);
+    }
     console.log(`  leaderboard data: ${path.relative(process.cwd(), data)}`);
   });
   const stop = () => { hub.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1000).unref(); };
