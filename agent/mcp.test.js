@@ -21,7 +21,7 @@ test('MCP: initialize agrees a protocol version and offers tools', () => {
   assert.equal(handleMessage(env, { jsonrpc: '2.0', method: 'notifications/initialized' }), null);
   assert.deepEqual(call(env, 'ping').result, {});
   const names = call(env, 'tools/list').result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['new_table', 'deal', 'act', 'observe', 'hint']);
+  assert.deepEqual(names, ['new_table', 'deal', 'act', 'auto_play', 'observe', 'hint']);
   for (const t of TOOLS) assert.equal(t.inputSchema.type, 'object', t.name);
 });
 

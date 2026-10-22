@@ -6,7 +6,7 @@
  *
  *   node agent/mcp.js [--seed S] [--rules '{"h17":true}'] [--bankroll N] [--min-bet N] [--max-bet N]
  *
- * Tools: new_table, deal, act, observe, hint. Each returns a one-line table
+ * Tools: new_table, deal, act, observe, hint, auto_play. Each returns a one-line table
  * summary followed by the same JSON the CLI sends. Errors come back as tool
  * results with isError set, never as a changed table.
  */
@@ -14,6 +14,7 @@
 const readline = require('readline');
 const { BlackjackEnv, EnvError } = require('./env.js');
 const { parseArgs } = require('./cli.js');
+const { autoPlay, describe, MAX_ROUNDS } = require('./auto.js');
 
 const SERVER_INFO = { name: 'blackjack', version: '1.0.0' };
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -81,6 +82,27 @@ const TOOLS = [
     },
   },
   {
+    name: 'auto_play',
+    description: 'Play many rounds in one call with a built-in policy, then report the result and the table. '
+      + 'Use it to move through rounds you do not need to decide yourself, e.g. to the next shuffle or until the count '
+      + 'is worth acting on. Only between rounds. Policies: basic (basic strategy, the default), hilo (Hi-Lo counter, '
+      + 'bets its own ramp), never-bust, random.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rounds: { type: 'integer', minimum: 1, maximum: MAX_ROUNDS, description: `Most rounds to play (1 to ${MAX_ROUNDS}).` },
+        policy: { type: 'string', enum: ['basic', 'hilo', 'never-bust', 'random'], description: 'Who plays the hands (default basic).' },
+        bet: {
+          oneOf: [{ type: 'number' }, { type: 'array', items: { type: 'number' }, minItems: 1, maxItems: 3 }],
+          description: 'Flat bet per spot for every round. Omit to let the policy bet (the minimum; hilo follows the count).',
+        },
+        untilShuffle: { type: 'boolean', description: 'Stop after the round that brings out the cut card.' },
+      },
+      required: ['rounds'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'observe',
     description: 'Look at the table, including the rules and table limits. Shows only what a seated player can see.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -137,6 +159,10 @@ function callTool(env, name, args = {}) {
         return text(`${summary(obs)}\n${JSON.stringify({ obs })}`);
       }
       case 'hint': return text(JSON.stringify({ hint: env.hint() }));
+      case 'auto_play': {
+        const { obs, ...auto } = autoPlay(env, args);
+        return text(`${describe(auto)}\n${summary(obs)}\n${JSON.stringify({ auto, obs })}`);
+      }
       default: throw new EnvError(`unknown tool "${name}"`);
     }
   } catch (e) {

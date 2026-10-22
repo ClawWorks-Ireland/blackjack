@@ -36,6 +36,7 @@ Any `"id"` you send is echoed back.
 | `{"cmd":"observe"}` | `{"ok":true,"obs":{...}}` (full, including rules and table) |
 | `{"cmd":"legal"}` | `{"ok":true,"legal":["hit","stand",...]}` |
 | `{"cmd":"hint"}` | `{"ok":true,"hint":{"action":"hit","reason":"Hard 12 vs dealer 10","ev":{"hit":-0.3784,"stand":-0.5398,...},"evBasis":"two-card"}}`: basic strategy as a baseline, with the EV of each legal action (see below) |
+| `{"cmd":"auto","rounds":200,"policy":"basic","bet":10,"untilShuffle":false}` | `{"ok":true,"auto":{"played":200,"stopped":"rounds","net":-35,...},"obs":{...}}`: batch play, see below |
 | `{"cmd":"reset","seed":"s2","rules":{...},"bankroll":500}` | new table, full `obs` |
 | `{"cmd":"quit"}` | `{"ok":true,"event":"bye"}`, then the process exits |
 | anything invalid | `{"ok":false,"error":"...","legal":[...]}` |
@@ -101,6 +102,25 @@ expect index plays to beat them. `evBasis` says how exact the numbers are:
 `ev` is null for a hand the table doesn't cover (a pair you can't split, played
 as its total).
 
+### Batch play
+
+`auto` (CLI) and `auto_play` (MCP) let a built-in policy play up to 10,000
+rounds in one request, so an agent spends its own moves on the rounds it
+cares about: skip to the next shuffle, or play flat until the count is worth
+acting on. Every round goes through the same `step`, so the table and seed
+end exactly where they would if the agent had played those moves itself.
+
+- `rounds` (required, 1 to 10,000); `policy`: `basic` (default), `hilo`,
+  `never-bust` or `random` (the benchmark baselines); `bet`: a flat bet per
+  spot (a number or a list), or omit it to let the policy bet (the minimum;
+  `hilo` follows its count); `untilShuffle`: stop after the round that brings
+  out the cut card.
+- Play also stops when the bankroll can't cover the next bet. `stopped` says
+  why: `rounds`, `shuffle` or `bankroll`.
+- The reply has `played`, `net`, `wagered`, `bankroll` (`start`, `end`), a
+  tally of hand outcomes, the best and worst round, and the table's `obs`.
+  Only between rounds; a bad request is an error and changes nothing.
+
 ## MCP server
 
 `agent/mcp.js` puts the same table behind the Model Context Protocol, so an
@@ -119,6 +139,7 @@ claude mcp add blackjack -- node /path/to/blackjack/agent/mcp.js --seed s1
 | `act` | `action`: `hit`, `stand`, `double`, `split`, `surrender`, `insurance`, `decline_insurance` | play the active hand |
 | `observe` | | the full observation, with rules and table |
 | `hint` | | basic strategy as a baseline, with the EV of each legal action |
+| `auto_play` | `rounds`, `policy`, `bet`, `untilShuffle` | play many rounds with a built-in policy and report |
 
 Each result is a one-line summary of the table, then the same JSON the CLI
 replies with. An illegal move is a tool error (`isError`) naming the legal

@@ -27,11 +27,9 @@ const flat = (obs, ctx) => ctx.table.minBet;
 const random = {
   name: 'random',
   description: 'Flat minimum bet; a uniformly random legal move at every decision.',
-  bet(obs, ctx) {
-    if (!ctx.random) ctx.random = rng(ctx.seed);
-    return flat(obs, ctx);
-  },
+  bet: flat,
   act(obs, hint, ctx) {
+    if (!ctx.random) ctx.random = rng(ctx.seed);
     return obs.legal[Math.floor(ctx.random() * obs.legal.length)];
   },
 };

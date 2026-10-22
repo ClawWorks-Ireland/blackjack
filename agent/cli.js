@@ -7,12 +7,14 @@
  *
  * Requests:  {"action":"deal","bet":10}   {"action":"hit"}   {"cmd":"observe"}
  *            {"cmd":"reset","seed":"s1","rules":{...}}   {"cmd":"hint"}   {"cmd":"quit"}
+ *            {"cmd":"auto","rounds":100,"policy":"basic","bet":10,"untilShuffle":false}
  * Responses: {"ok":true,"obs":{...},"reward":0,"done":false}  or  {"ok":false,"error":"..."}
  * Any "id" in a request is echoed back.
  */
 'use strict';
 const readline = require('readline');
 const { BlackjackEnv, EnvError } = require('./env.js');
+const { autoPlay } = require('./auto.js');
 
 function parseArgs(argv) {
   const opts = {};
@@ -44,11 +46,15 @@ function handle(env, req) {
     case 'observe': return { obs: env.observe() };
     case 'legal': return { legal: env.legalActions() };
     case 'hint': return { hint: env.hint() };
+    case 'auto': {
+      const { obs, ...auto } = autoPlay(env, { rounds: req.rounds, policy: req.policy, bet: req.bet, untilShuffle: req.untilShuffle });
+      return { auto, obs };
+    }
     case 'reset': {
       const { seed, rules, bankroll, minBet, maxBet } = req;
       return { obs: env.reset({ seed, rules, bankroll, minBet, maxBet }) };
     }
-    default: throw new EnvError('request needs "action" or "cmd" (step, observe, legal, hint, reset, quit)');
+    default: throw new EnvError('request needs "action" or "cmd" (step, observe, legal, hint, auto, reset, quit)');
   }
 }
 
