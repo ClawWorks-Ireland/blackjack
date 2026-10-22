@@ -62,6 +62,7 @@ double any two, 75% penetration.
   "round": 1,
   "bankroll": 975,                    // chips not on the table
   "legal": ["hit", "stand", "double", "surrender"],
+  "legalCost": { "hit": 0, "stand": 0, "double": 25, "surrender": 0 },  // chips each move takes
   "shoe": { "seed": "demo-1", "decks": 6, "cardsLeft": 309, "cutCardReached": false,
             "seen": { "A": 0, "2": 0, "3": 0, "4": 1, "5": 1, "...": 0, "T": 0, "J": 0, "Q": 0, "K": 0 } },
   "dealer": { "cards": ["4d"], "total": 4, "holeCardHidden": true },
@@ -77,7 +78,10 @@ double any two, 75% penetration.
 
 Cards are rank (`A 2-9 T J Q K`) + suit (`s h d c`). `cardsLeft` counts the
 hole card while it is hidden, so `sum(seen) + cardsLeft` is always the shoe
-size. Side bets settle on the deal: `win` names the winning hand (`"Mixed
+size. `legalCost` gives the chips each legal in-round move takes from the
+bankroll now: double and split another copy of the hand's bet, insurance (or
+even money) half of the initial bets, everything else 0. It is empty between
+rounds, where the deal costs whatever you bet. Side bets settle on the deal: `win` names the winning hand (`"Mixed
 pair"`, `"Flush"`, ...) and `odds` its payout, or `null` and 0 on a loss. With
 a blackjack against an ace, `insurance.evenMoney` is true and `insurance`
 takes even money. The dealer peeks under a 10 or an ace unless `enhc` is set.

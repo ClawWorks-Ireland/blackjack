@@ -1460,6 +1460,24 @@ enum EngineJS {
     }
 
     /**
+     * Chips each legal in-round move takes from the bankroll now: double and
+     * split another copy of the hand's bet, insurance (or even money) half of
+     * the initial bets; hit, stand, surrender and declining take nothing.
+     * Empty between rounds, where the deal costs whatever you bet.
+     */
+    legalCost() {
+      const g = this.game;
+      const out = {};
+      for (const a of this.legalActions()) {
+        if (a === 'deal') continue;
+        if (a === 'double' || a === 'split') out[a] = round2(g.currentHand.bet);
+        else if (a === 'insurance') out[a] = round2(g.insuranceCost);
+        else out[a] = 0;
+      }
+      return out;
+    }
+
+    /**
      * Apply one action: a name ("hit") or an object ({action: "deal", bet: 10,
      * side: {pairs: 5}}). `bet` may be an array for up to three spots.
      * Returns {obs, reward, done}: reward is the round's total chip change
@@ -1532,6 +1550,7 @@ enum EngineJS {
         round: this.round,
         bankroll: round2(g.bankroll),
         legal: this.legalActions(),
+        legalCost: this.legalCost(),
         ...(full ? {
           rules: g.rules,
           table: { minBet: g.minBet, maxBet: g.maxBet, maxSpots: BJ.MAX_SPOTS, maxHandsPerSpot: BJ.MAX_HANDS, sideMax: BJ.SIDE_MAX },

@@ -146,7 +146,10 @@ function summary(obs) {
     parts.push(`${s.bet === 'pairs' ? 'Perfect Pairs' : '21+3'} ${s.stake}: ${s.win ? `${s.win} ${s.odds}:1, +${s.net}` : `lose ${s.net}`}`);
   });
   if (obs.net !== null) parts.push(`net ${obs.net > 0 ? '+' : ''}${obs.net}`);
-  if (obs.legal.length) parts.push(`legal: ${obs.legal.join(', ')}`);
+  if (obs.legal.length) {
+    const cost = (a) => (obs.legalCost && obs.legalCost[a] ? ` (+${obs.legalCost[a]})` : '');
+    parts.push(`legal: ${obs.legal.map((a) => a + cost(a)).join(', ')}`);
+  }
   return parts.join(' · ');
 }
 
@@ -196,7 +199,8 @@ function handleMessage(env, msg) {
         capabilities: { tools: {} },
         serverInfo: SERVER_INFO,
         instructions: 'A blackjack table. Call deal to bet, then act until the round is done. '
-          + 'obs.legal lists the moves allowed now; obs.shoe.seen counts the cards revealed since the shuffle.',
+          + 'obs.legal lists the moves allowed now and obs.legalCost the chips each one takes; '
+          + 'obs.shoe.seen counts the cards revealed since the shuffle.',
       });
     }
     case 'ping': return reply({});

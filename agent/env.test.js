@@ -208,3 +208,27 @@ test('insurance EV comes from the cards seen, never the shoe', () => {
   }
   assert.ok(checked > 50);
 });
+
+test('legalCost lists every in-round legal move and matches what it takes from the bankroll', () => {
+  const env = new BlackjackEnv({ seed: 'legal-cost', bankroll: 1e6 });
+  const rand = lcg(7);
+  const seen = { double: 0, split: 0, insurance: 0 };
+  for (let r = 0; r < 3000; r++) {
+    let res = env.step({ action: 'deal', bet: r % 3 ? 10 : [10, 25] });
+    while (!res.done) {
+      const { legal, legalCost, bankroll } = res.obs;
+      assert.deepEqual(Object.keys(legalCost).sort(), legal.filter((a) => a !== 'deal').sort());
+      // Mostly basic strategy, sometimes a random legal move, so splits and insurance both come up.
+      const a = rand() < 0.3 ? legal[Math.floor(rand() * legal.length)] : env.hint().action;
+      res = env.step(a);
+      if (!res.done && a in seen) {
+        assert.equal(Math.round((bankroll - res.obs.bankroll) * 100) / 100, legalCost[a], `${a} cost`);
+        seen[a]++;
+      } else if (!['double', 'split', 'insurance'].includes(a)) {
+        assert.equal(legalCost[a], 0);
+      }
+    }
+    assert.deepEqual(res.obs.legalCost, {});
+  }
+  for (const [a, n] of Object.entries(seen)) assert.ok(n > 10, `${a} checked ${n} times`);
+});
