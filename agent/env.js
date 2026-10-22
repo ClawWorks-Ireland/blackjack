@@ -21,6 +21,8 @@
   const BJ = node ? require('../engine/blackjack.js') : root.Blackjack;
   const Rules = node ? require('../engine/rules.js') : root.BlackjackRules;
   const Strategy = node ? require('../engine/strategy.js') : root.BlackjackStrategy;
+  const Chart = node ? require('../engine/chart.js') : root.BlackjackChart;
+  const EV = node ? require('../engine/ev.js') : root.BlackjackEV;
 
   const SUIT = { '♠': 's', '♥': 'h', '♦': 'd', '♣': 'c' };
   const RANK_KEYS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
@@ -196,18 +198,52 @@
       };
     }
 
-    /** The basic-strategy play for the current decision (a baseline, not part of the game). */
+    /**
+     * The basic-strategy play for the current decision (a baseline, not part
+     * of the game), with `ev`: the expected value of each legal action per
+     * unit of the hand's bet. Plays are priced from the solver's full-shoe
+     * table (engine/ev.js), which ignores the count; `evBasis` is "two-card"
+     * for an exact cell and "estimate" for a split hand or three or more
+     * cards. Insurance is priced from the cards seen so far ("seen-cards").
+     * `ev` is null for a hand the table doesn't cover.
+     */
     hint() {
       const g = this.game;
-      if (g.phase === 'insurance') return { action: 'decline_insurance', reason: 'Basic strategy never takes insurance' };
+      if (g.phase === 'insurance') {
+        return { action: 'decline_insurance', reason: 'Basic strategy never takes insurance', ev: this.insuranceEV(), evBasis: 'seen-cards' };
+      }
       if (g.phase !== 'player') return null;
       const allowed = { canDouble: g.canDouble(), canSplit: g.canSplit(), canSurrender: g.canSurrender(), canHit: g.canHit() };
-      const r = Strategy.recommend(g.currentHand.cards, g.dealer[0], allowed, g.rules);
-      return { action: r.action, reason: r.reason };
+      const hand = g.currentHand;
+      const r = Strategy.recommend(hand.cards, g.dealer[0], allowed, g.rules);
+      const cell = EV.cellEV(g.rules, Chart.cellKey(hand.cards, g.dealer[0], allowed.canSplit));
+      if (!cell) return { action: r.action, reason: r.reason, ev: null, evBasis: null };
+      const ev = {};
+      for (const a of this.legalActions()) if (cell[a] !== undefined) ev[a] = round4(cell[a]);
+      const exact = hand.cards.length === 2 && !hand.fromSplit;
+      return { action: r.action, reason: r.reason, ev, evBasis: exact ? 'two-card' : 'estimate' };
+    }
+
+    /**
+     * Insurance against declining, per unit of the bets insured, from the
+     * chance that the hole card is a ten given every card seen so far.
+     * Insurance costs half the bet and pays 2:1; even money is a sure 1:1
+     * against 3:2 (or 6:5) that pushes on a dealer blackjack.
+     */
+    insuranceEV() {
+      const g = this.game;
+      const { shoe } = this.observe({ full: false });
+      const tens = 16 * g.decks - ['T', 'J', 'Q', 'K'].reduce((n, r) => n + shoe.seen[r], 0);
+      const p = tens / shoe.cardsLeft;
+      const ev = g.evenMoneyOffered
+        ? { insurance: 1, decline_insurance: g.rules.payout * (1 - p) }
+        : { insurance: (3 * p - 1) / 2, decline_insurance: 0 };
+      return Object.fromEntries(this.legalActions().map((a) => [a, round4(ev[a])]));
     }
   }
 
   const round2 = (n) => Math.round(n * 100) / 100;
+  const round4 = (n) => Math.round(n * 1e4) / 1e4;
 
   const api = { BlackjackEnv, EnvError, ACTIONS, RULE_KEYS, checkRules, cardText };
   if (node) module.exports = api;

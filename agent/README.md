@@ -35,7 +35,7 @@ Any `"id"` you send is echoed back.
 | `{"action":"insurance"}` / `{"action":"decline_insurance"}` | when `obs.phase` is `insurance` |
 | `{"cmd":"observe"}` | `{"ok":true,"obs":{...}}` (full, including rules and table) |
 | `{"cmd":"legal"}` | `{"ok":true,"legal":["hit","stand",...]}` |
-| `{"cmd":"hint"}` | `{"ok":true,"hint":{"action":"stand","reason":"Hard 16 vs dealer 10"}}`: basic strategy, as a baseline |
+| `{"cmd":"hint"}` | `{"ok":true,"hint":{"action":"hit","reason":"Hard 12 vs dealer 10","ev":{"hit":-0.3784,"stand":-0.5398,...},"evBasis":"two-card"}}`: basic strategy as a baseline, with the EV of each legal action (see below) |
 | `{"cmd":"reset","seed":"s2","rules":{...},"bankroll":500}` | new table, full `obs` |
 | `{"cmd":"quit"}` | `{"ok":true,"event":"bye"}`, then the process exits |
 | anything invalid | `{"ok":false,"error":"...","legal":[...]}` |
@@ -83,6 +83,24 @@ takes even money. The dealer peeks under a 10 or an ace unless `enhc` is set.
 Replies to steps leave out `rules` and `table`, which only change on
 `reset`; `observe` and `reset` include them.
 
+### Hints and EV
+
+`hint` is basic strategy for the decision in front of you, plus `ev`: the
+expected value of each legal action per unit of the hand's bet (+0.07 is 7%
+of the bet won on average). Plays are priced from the solver's full-shoe
+table (`engine/ev.js`), so they ignore the count; a counting agent should
+expect index plays to beat them. `evBasis` says how exact the numbers are:
+
+- `two-card`: the hand's first two cards, exact for a full shoe.
+- `estimate`: a split hand, or three or more cards, priced as its total.
+- `seen-cards`: the insurance offer, from the chance that the hole card is a
+  ten given every card seen since the shuffle. `insurance` is the gain over
+  declining per unit of the bets insured; with even money it is the sure +1
+  against `decline_insurance` at the blackjack payout unless the dealer has one.
+
+`ev` is null for a hand the table doesn't cover (a pair you can't split, played
+as its total).
+
 ## MCP server
 
 `agent/mcp.js` puts the same table behind the Model Context Protocol, so an
@@ -100,7 +118,7 @@ claude mcp add blackjack -- node /path/to/blackjack/agent/mcp.js --seed s1
 | `deal` | `bet` (a number, or up to 3 for several spots), `side` | bet and deal a round |
 | `act` | `action`: `hit`, `stand`, `double`, `split`, `surrender`, `insurance`, `decline_insurance` | play the active hand |
 | `observe` | | the full observation, with rules and table |
-| `hint` | | basic strategy, as a baseline |
+| `hint` | | basic strategy as a baseline, with the EV of each legal action |
 
 Each result is a one-line summary of the table, then the same JSON the CLI
 replies with. An illegal move is a tool error (`isError`) naming the legal

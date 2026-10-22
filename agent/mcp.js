@@ -87,7 +87,9 @@ const TOOLS = [
   },
   {
     name: 'hint',
-    description: 'Basic strategy for the current decision, as a baseline. It ignores the count.',
+    description: 'Basic strategy for the current decision, as a baseline, with ev: the expected value of each legal action '
+      + 'per unit of the bet (full-shoe solver values that ignore the count; evBasis says how exact). '
+      + 'For insurance, ev is the gain over declining given the cards seen so far.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
 ];

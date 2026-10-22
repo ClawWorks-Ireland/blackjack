@@ -165,3 +165,46 @@ test('CLI speaks JSON lines and echoes ids', async () => {
   assert.equal(msgs[4].ok, false);
   assert.deepEqual([msgs[5].id, msgs[5].event], [4, 'bye']);
 });
+
+test('hint prices every legal action, and basic strategy is the best two-card play', () => {
+  for (const rules of [{}, { h17: true, payout: 1.2 }, { enhc: true }, { doubleOn: '10-11', decks: 2 }]) {
+    const env = new BlackjackEnv({ seed: 'hint-ev', rules, bankroll: 1e6 });
+    let exact = 0;
+    for (const res of play(env, 1500, basic)) {
+      if (res.done) continue;
+      const h = env.hint();
+      const legal = res.obs.legal;
+      if (h.ev === null) continue;
+      for (const a of Object.keys(h.ev)) assert.ok(legal.includes(a), `${a} priced but not legal`);
+      if (res.obs.phase === 'insurance') {
+        assert.equal(h.evBasis, 'seen-cards');
+        continue;
+      }
+      assert.ok('hit' in h.ev || !legal.includes('hit'));
+      assert.ok('stand' in h.ev);
+      if (h.evBasis !== 'two-card') continue;
+      exact++;
+      const best = Math.max(...Object.values(h.ev));
+      assert.ok(h.ev[h.action] >= best - 0.002, `${JSON.stringify(rules)}: ${h.reason} ${JSON.stringify(h.ev)}`);
+    }
+    assert.ok(exact > 1000);
+  }
+});
+
+test('insurance EV comes from the cards seen, never the shoe', () => {
+  const env = new BlackjackEnv({ seed: 'hint-ins', bankroll: 1e6 });
+  let checked = 0;
+  for (const res of play(env, 3000, basic)) {
+    if (res.obs.phase !== 'insurance' || !res.obs.legal.includes('insurance')) continue;
+    const { seen, cardsLeft } = res.obs.shoe;
+    const p = (16 * 6 - seen.T - seen.J - seen.Q - seen.K) / cardsLeft;
+    const { ev } = env.hint();
+    if (res.obs.insurance.evenMoney) {
+      assert.deepEqual(ev, { insurance: 1, decline_insurance: Math.round(1.5 * (1 - p) * 1e4) / 1e4 });
+    } else {
+      assert.deepEqual(ev, { insurance: Math.round(((3 * p - 1) / 2) * 1e4) / 1e4, decline_insurance: 0 });
+    }
+    checked++;
+  }
+  assert.ok(checked > 50);
+});
