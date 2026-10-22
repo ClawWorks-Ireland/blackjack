@@ -161,6 +161,20 @@
       return el('div', { class: `seat${you ? ' you' : ''}${turn ? ' turn' : ''}`, 'aria-current': turn ? 'true' : null }, ...kids);
     }
 
+    /** "You win +$10" and "Your 19 against the dealer's 22 (bust)", one line per hand after a split. */
+    function outcomeEl({ hands, dealerTotal, dealerCards, net }) {
+      const one = hands.length === 1 ? hands[0].result && hands[0].result.outcome : null;
+      const head = one === 'blackjack' ? 'Blackjack!' : one === 'bust' ? 'Bust: you lose' : one === 'surrender' ? 'Surrendered'
+        : net > 0 ? 'You win' : net < 0 ? 'You lose' : 'Push: a draw';
+      const tone = one === 'blackjack' ? 'blackjack' : net > 0 ? 'win' : net < 0 ? 'lose' : 'push';
+      const dealer = dealerTotal > 21 ? `the dealer's ${dealerTotal} (bust)` : dealerCards === 2 && dealerTotal === 21 ? "the dealer's blackjack" : `the dealer's ${dealerTotal}`;
+      const WORD = { win: 'win', blackjack: 'blackjack', push: 'push', lose: 'lose', bust: 'bust', surrender: 'surrendered' };
+      const lines = hands.map((h, k) => `${hands.length > 1 ? `Hand ${k + 1}: ` : 'Your '}${h.total}${h.total > 21 ? ' (bust)' : ''} against ${dealer}${hands.length > 1 && h.result ? `, ${WORD[h.result.outcome]} ${signed(h.result.net)}` : ''}`);
+      return el('div', { class: `outcome ${tone}`, role: 'status' },
+        el('div', { class: 'outcome-head' }, el('span', { text: head }), el('span', { class: 'outcome-net', text: net === 0 ? '±$0' : `${net > 0 ? '+' : '−'}${money(Math.abs(net))}` })),
+        ...lines.map((l) => el('div', { class: 'outcome-line', text: l })));
+    }
+
     const LABEL = { hit: 'Hit', stand: 'Stand', double: 'Double', split: 'Split', surrender: 'Surrender', insurance: 'Insurance', decline_insurance: 'No insurance' };
 
     function render() {
@@ -191,10 +205,11 @@
       const me = view.seats[you.seat];
       const kids = [el('div', { class: 'row' }, el('strong', { text: `Bankroll ${money(you.bankroll)}` }),
         el('button', { type: 'button', class: 'secondary', onclick: leave, text: 'Leave table' }))];
+      // How your round went, big and in words; it stays up while betting for the next round is open.
       const last = you.lastRound;
-      if (last && view.phase === 'betting' && last.round === view.round) {
-        kids.push(el('p', { class: 'muted', text: `Last round: ${last.hands.map((h) => `${h.total}${h.result ? ` ${h.result.outcome}` : ''}`).join(' / ')} against the dealer's ${last.dealerTotal}, ${last.net >= 0 ? 'won' : 'lost'} ${money(Math.abs(last.net))}` }));
-      }
+      const settled = view.phase === 'done' && me.hands.some((h) => h.result) ? { hands: me.hands, dealerTotal: view.dealer.total, dealerCards: view.dealer.cards.length, net: me.net }
+        : last && view.phase === 'betting' && last.round === view.round ? { hands: last.hands, dealerTotal: last.dealerTotal, dealerCards: last.dealer.length, net: last.net } : null;
+      if (settled) kids.push(outcomeEl(settled));
       if (you.onTable) kids[0].append(el('span', { class: 'muted', text: ` + ${money(you.onTable)} on the table` }));
       // Your hand, big and next to your buttons: on a phone your seat can be anywhere in the grid.
       if (me.hands.length) {

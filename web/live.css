@@ -85,6 +85,14 @@ label { display: inline-flex; align-items: center; gap: 0.4rem; }
 .timer > div { height: 100%; background: var(--gold); width: 0; }
 .you-panel { display: grid; gap: 0.6rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+.outcome { border-radius: 10px; padding: 0.7rem 1rem; text-align: center; color: #111; }
+.outcome-head { display: flex; justify-content: center; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; font-size: 1.6rem; font-weight: 800; }
+.outcome-net { font-variant-numeric: tabular-nums; }
+.outcome-line { font-size: 0.95rem; font-weight: 600; margin-top: 0.2rem; }
+.outcome.win { background: #8ef0a6; }
+.outcome.blackjack { background: var(--gold); }
+.outcome.lose { background: #ffb3b3; }
+.outcome.push { background: #dfe6e2; }
 .your-hands { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; }
 .your-hands .hand { text-align: center; }
 .your-hands .hand.active .cards { outline: 2px dashed var(--gold); outline-offset: 4px; border-radius: 6px; }
