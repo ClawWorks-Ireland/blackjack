@@ -93,8 +93,18 @@ function judge(name, { code, text }) {
 }
 
 (async () => {
-  const server = spawn(process.execPath, [path.join(QA, 'serve.js'), snap, String(port)], { stdio: 'ignore' });
-  await new Promise((r) => setTimeout(r, 500));
+  const server = spawn(process.execPath, [path.join(QA, 'serve.js'), snap, String(port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  // A server left on the port (an earlier round) would answer for the wrong commit: refuse to run (T7).
+  const up = await new Promise((resolve) => {
+    server.stdout.on('data', (d) => { if (/serving /.test(d)) resolve(true); });
+    server.on('exit', () => resolve(false));
+  });
+  const served = !up ? '' : await fetch(`http://127.0.0.1:${port}/.git-archive-done`).then((r) => r.text()).catch(() => '');
+  if (served.trim() !== sha) {
+    console.error(`harness error: could not serve ${sha7} on port ${port} (in use?); stop that server or pass --port`);
+    server.kill();
+    process.exit(2);
+  }
   const results = [];
   try {
     for (const [name, script, argv, needs] of STEPS) {
