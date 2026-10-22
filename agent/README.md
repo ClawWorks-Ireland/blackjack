@@ -79,6 +79,30 @@ hole card while it is hidden, so `sum(seen) + cardsLeft` is always the shoe
 size. Replies to steps leave out `rules` and `table`, which only change on
 `reset`; `observe` and `reset` include them.
 
+## MCP server
+
+`agent/mcp.js` puts the same table behind the Model Context Protocol, so an
+MCP client such as Claude Code or Claude Desktop can play it. It takes the
+CLI's options and has no dependencies. Opening this repository in Claude Code
+offers it through `.mcp.json`; elsewhere, add it with:
+
+```bash
+claude mcp add blackjack -- node /path/to/blackjack/agent/mcp.js --seed s1
+```
+
+| Tool | Arguments | Does |
+|---|---|---|
+| `new_table` | `seed`, `rules`, `bankroll`, `minBet`, `maxBet` (all optional) | sit at a new table |
+| `deal` | `bet` (a number, or up to 3 for several spots), `side` | bet and deal a round |
+| `act` | `action`: `hit`, `stand`, `double`, `split`, `surrender`, `insurance`, `decline_insurance` | play the active hand |
+| `observe` | | the full observation, with rules and table |
+| `hint` | | basic strategy, as a baseline |
+
+Each result is a one-line summary of the table, then the same JSON the CLI
+replies with. An illegal move is a tool error (`isError`) naming the legal
+ones, and the table does not change. The fairness rules above hold: the hole
+card shows as `+ hole card` until the round ends.
+
 ## From JavaScript
 
 ```js

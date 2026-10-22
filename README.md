@@ -2,8 +2,8 @@
 
 One blackjack engine, three ways to play it:
 
-- **Agents** (`agent/`): a reset/step/observe environment and a JSON-lines
-  CLI, so programs and models can play. Seeded and reproducible; they see
+- **Agents** (`agent/`): a reset/step/observe environment, a JSON-lines
+  CLI and an MCP server, so programs and models can play. Seeded and reproducible; they see
   only what a seated player sees. See [agent/README.md](agent/README.md).
 - **Browser** (`web/`): a single-page game with no build step and no
   dependencies, with a basic-strategy coach, card-counting trainer and
@@ -260,7 +260,7 @@ and history; it doesn't touch the bankroll.
 | Folder | What it holds |
 |---|---|
 | `engine/` | The rules and everything computed from them. No DOM code; runs in the browser, Node and JavaScriptCore |
-| `agent/` | `env.js` (reset/step/observe), `cli.js` (JSON lines), examples |
+| `agent/` | `env.js` (reset/step/observe), `cli.js` (JSON lines), `mcp.js` (MCP server), examples |
 | `web/` | The browser UI on top of the engine |
 | `macos/` | SwiftUI app; `BlackjackCore` runs `agent/env.js` and the engine it needs in JavaScriptCore |
 | `qa/` | QA harness: fuzzers, rule checks, Playwright UI checks, per-round reports and backlog |
