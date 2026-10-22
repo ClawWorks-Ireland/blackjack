@@ -124,8 +124,13 @@ srv.listen(0, '127.0.0.1', async () => {
     // ---- phone: 3 spots mid-hand ----
     const ph = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
     await ph.goto(url); await ph.evaluate(() => localStorage.clear()); await ph.reload();
-    await ph.check('input[name="spots"][value="3"]'); await ph.fill('#bet', '10'); await ph.click('#deal'); await ph.waitForTimeout(800);
-    if (await ph.$eval('#no-insure', (e) => !e.disabled && !e.closest('[hidden]')).catch(() => false)) { await ph.click('#no-insure'); await ph.waitForTimeout(500); }
+    await ph.check('input[name="spots"][value="3"]'); await ph.fill('#bet', '10');
+    // A dealer blackjack ends the round at the peek, with no Hit to measure: deal again (as T10 in f11_check).
+    for (let tries = 0; tries < 10; tries++) {
+      await ph.click('#deal'); await ph.waitForTimeout(800);
+      if (await ph.$eval('#no-insure', (e) => !e.disabled && !e.closest('[hidden]')).catch(() => false)) { await ph.click('#no-insure'); await ph.waitForTimeout(500); }
+      if (await ph.evaluate(() => document.body.classList.contains('in-hand'))) break;
+    }
     const lay = await ph.evaluate(() => ({ hitBottom: document.getElementById('hit').getBoundingClientRect().bottom, vw: document.documentElement.scrollWidth, handsTop: document.getElementById('player-hands').getBoundingClientRect().top }));
     await ph.screenshot({ path: path.join(out, 'phone-3-spots.png') });
     ok('Phone 390x844: 3-spot hand fits (Hit on screen, no overflow)', lay.hitBottom <= 844 && lay.vw <= 390, lay);
