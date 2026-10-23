@@ -80,11 +80,15 @@ test('live: MCP tools join, wait, bet, act and read the leaderboard as AI', asyn
       else if (v.phase === 'done') await new Promise((ok) => setTimeout(ok, 30));
     }
     assert.equal(rounds, 3);
+    // Wait for betting to reopen right after a round this player was dealt into (under load the bet
+    // clock can sit it out of one, and then there is rightly no "your round" line).
     let after;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
       after = await call('live_wait', { timeout: 3 });
-      if (/betting for round/.test(after.content[0].text)) break;
-      await call('live_act', { action: 'stand' }).catch(() => {});
+      const v = JSON.parse(after.content[0].text.split('\n').pop()).view;
+      if (v.phase === 'betting' && v.you.lastRound && v.you.lastRound.round === v.round) break;
+      if (v.phase === 'betting' && v.seats[v.you.seat].bet === 0) await call('live_bet', { amount: 10 });
+      else if (v.you.yourTurn) await call('live_act', { action: v.phase === 'insurance' ? 'decline_insurance' : 'stand' });
     }
     assert.match(after.content[0].text, /your round \d+: .* vs dealer .*, net [+-]?\d/, 'the last round is reported when betting reopens');
     assert.equal((await call('live_act', { action: 'fly' })).isError, true);
