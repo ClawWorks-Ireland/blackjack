@@ -123,13 +123,10 @@ class LiveTable {
     clearTimeout(this.timer);
     this.timer = null;
     this.deadline = null;
-    if (t.phase === 'done' && !this.recorded) {
-      this.recorded = true;
-      this.hub.record(this);
-      // Keep each seat's result: a round can settle without asking you anything (a blackjack),
-      // and betting for the next one opens before a slow client looks again.
-      const v = t.view(null);
-      v.seats.forEach((s, i) => { if (s && s.hands.length) this.lastRounds.set(i, { round: v.round, dealer: v.dealer.cards, dealerTotal: v.dealer.total, hands: s.hands, net: s.net }); });
+    if (t.phase === 'done') {
+      // Every change clears the timer above, so a join or leave between rounds must set it again,
+      // or the table never reopens betting (CLA-117).
+      if (!this.recorded) this.settle();
       this.after(this.timing.nextRoundMs, 'next round', () => this.openBetting());
     } else if (t.phase === 'betting') {
       this.recorded = false;
@@ -143,6 +140,17 @@ class LiveTable {
     }
     this.version++;
     this.broadcast();
+  }
+
+  /** A round just ended: record it once, and keep each seat's result for the next views. */
+  settle() {
+    const t = this.table;
+    this.recorded = true;
+    this.hub.record(this);
+    // Keep each seat's result: a round can settle without asking you anything (a blackjack),
+    // and betting for the next one opens before a slow client looks again.
+    const v = t.view(null);
+    v.seats.forEach((s, i) => { if (s && s.hands.length) this.lastRounds.set(i, { round: v.round, dealer: v.dealer.cards, dealerTotal: v.dealer.total, hands: s.hands, net: s.net }); });
   }
 
   after(ms, what, fn) {

@@ -137,3 +137,25 @@ test('server: bad requests are refused with a reason', async () => {
     assert.equal((await fetch(`${s.url}/web/../server/hub.js`)).status, 404);
   } finally { await s.close(); }
 });
+
+test('hub: a join or leave between rounds does not freeze the table (CLA-117)', async () => {
+  const hub = new Hub({ timing: { ...FAST, nextRoundMs: 100, botDelayMs: 1 } });
+  try {
+    const lt = hub.create({ name: 'Freeze', bots: 1 });
+    const a = lt.join({ name: 'A', kind: 'ai' });
+    lt.bet(a.token, 10);
+    for (let i = 0; i < 50 && lt.table.phase !== 'done'; i++) {
+      if (lt.table.turn === a.seat) lt.act(a.token, 'stand');
+      await sleep(10);
+    }
+    assert.equal(lt.table.phase, 'done');
+    // Between rounds: A leaves and B sits down, as a restarted agent does.
+    lt.leave(a.token);
+    const b = lt.join({ name: 'B', kind: 'ai' });
+    await sleep(250);
+    assert.equal(lt.table.phase, 'betting', 'betting reopened after the round');
+    lt.bet(b.token, 10);
+    await sleep(400);
+    assert.ok(lt.table.round >= 2, `round ${lt.table.round}: the next round was dealt`);
+  } finally { hub.close(); }
+});
