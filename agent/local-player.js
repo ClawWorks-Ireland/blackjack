@@ -29,7 +29,25 @@ const { liveSummary } = require('./mcp.js');
 const { FeedbackQueue } = require('./feedback.js');
 
 const DEFAULT_LLM = `/usr/bin/python3 ${os.homedir()}/.claude/skills/local-models/scripts/llm.py`;
-const MOVE_SYSTEM = 'You are an AI playing blackjack at a live table against the dealer. Choose the best move. '
+/**
+ * Basic strategy as plain rules, for the tables' default rules (6 decks,
+ * dealer stands on soft 17, double after split, late surrender). Added after
+ * a breakdown of 558 decisions: without them the model hit 12-16 against a
+ * weak dealer, stood on 12-16 against a strong one, and split 5s.
+ */
+const STRATEGY_RULES = [
+  'Play by these rules (the dealer stands on soft 17; "dealer" means the dealer\'s up card; A = ace, worth 11):',
+  'Pairs, on your first two cards: always split aces and 8s. Never split 5s (play them as hard 10) or 10s (stand).',
+  '  Split 2s, 3s and 7s against dealer 2-7. Split 6s against 2-6. Split 9s against 2-6, 8 and 9 (stand on 9s against 7, 10, A). Split 4s against 5-6 only.',
+  'Hard totals: 17 or more: stand. 13-16: stand against dealer 2-6, hit against 7-A. 12: stand against 4-6, hit against 2, 3 and 7-A.',
+  '  11: double against 2-10, hit against A. 10: double against 2-9, hit against 10 and A. 9: double against 3-6, otherwise hit. 8 or less: hit.',
+  '  Surrender (when legal) 16 against 9, 10 and A, and 15 against 10; otherwise do not surrender.',
+  'Soft totals (an ace counted as 11): soft 19 or more: stand. Soft 18: double against 3-6 (stand if you can\'t double), stand against 2, 7, 8, hit against 9, 10, A.',
+  '  Soft 17: double against 3-6, otherwise hit. Soft 15-16: double against 4-6, otherwise hit. Soft 13-14: double against 5-6, otherwise hit.',
+  'If the rule says double but double is not legal, hit (stand on soft 18). Never take insurance.',
+].join('\n');
+const MOVE_SYSTEM = 'You are an AI playing blackjack against the dealer. Choose the best move.\n'
+  + `${STRATEGY_RULES}\n`
   + 'Answer with exactly one of the legal moves, as written, and nothing else.';
 const REFLECT_SYSTEM = 'You are an AI player testing a blackjack table web service. You will see the messages the table sent you. '
   + 'Report only problems the messages themselves show: information that was missing, unclear, inconsistent or wrong, or play that broke the rules. '
@@ -225,4 +243,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { LocalPlayer, askModel, pickMove, decisionPrompt };
+module.exports = { LocalPlayer, askModel, pickMove, decisionPrompt, MOVE_SYSTEM, STRATEGY_RULES };

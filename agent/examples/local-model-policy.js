@@ -5,11 +5,12 @@
 //
 //   node agent/bench.js --policy agent/examples/local-model-policy.js --rounds 300 --seeds bench-1
 'use strict';
-const { askModel, pickMove } = require('../local-player.js');
+const { askModel, pickMove, MOVE_SYSTEM } = require('../local-player.js');
 
 const LLM = process.env.LOCAL_LLM_CMD || `/usr/bin/python3 ${require('os').homedir()}/.claude/skills/local-models/scripts/llm.py`;
-const SYSTEM = 'You are playing blackjack against the dealer. Choose the best move. '
-  + 'Answer with exactly one of the legal moves, as written, and nothing else.';
+// The same prompt the live player uses (basic strategy as rules); LOCAL_MODEL_BARE=1 asks with no rules.
+const SYSTEM = process.env.LOCAL_MODEL_BARE ? 'You are playing blackjack against the dealer. Choose the best move. '
+  + 'Answer with exactly one of the legal moves, as written, and nothing else.' : MOVE_SYSTEM;
 
 const stats = { asked: 0, fallbacks: 0 };
 
