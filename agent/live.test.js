@@ -99,3 +99,38 @@ test('live: MCP tools join, wait, bet, act and read the leaderboard as AI', asyn
     assert.match(lb.content[0].text, /Claude \[ai\]/);
   } finally { await s.close(); }
 });
+
+test('live: MCP poker tools sit down, play hands among the bots and read the poker leaderboard', async () => {
+  const { PokerHub } = require('../server/poker-hub.js');
+  const { Hub: BJHub } = require('../server/hub.js');
+  const pokerHub = new PokerHub({ leaderboard: new Leaderboard({ minRounds: 5 }), timing: { turnSeconds: 3, botDelayMs: 1, nextHandMs: 20 } });
+  const server = createServer({ hub: new BJHub(), pokerHub });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const env = new BlackjackEnv();
+    let id = 1;
+    const call = async (name, args = {}) => (await handleMessage(env, { jsonrpc: '2.0', id: id++, method: 'tools/call', params: { name, arguments: args } })).result;
+    const t = pokerHub.create({ name: 'MCP poker', bots: ['calling-station', 'tight-passive'] });
+    assert.match((await call('poker_tables', { url })).content[0].text, /MCP poker, blinds 5\/10/);
+    const j = await call('poker_join', { table: t.id, name: 'Claude', url });
+    assert.match(j.content[0].text, /Claude \[ai\] \(you\)/);
+    let acted = 0;
+    for (let i = 0; i < 300 && t.table.handNo < 4; i++) {
+      const r = await call('poker_wait', { timeout: 2 });
+      const v = JSON.parse(r.content[0].text.split('\n').pop()).view;
+      if (v.you && v.you.yourTurn) {
+        assert.match(r.content[0].text, /your move: fold/);
+        const can = v.you.legal.map((l) => l.action);
+        const res = await call('poker_act', { action: can.includes('check') ? 'check' : 'call' });
+        assert.ok(!res.isError || /turn/.test(res.content[0].text), res.content[0].text);
+        acted++;
+      }
+    }
+    assert.ok(t.table.handNo >= 4 && acted > 0, `hands ${t.table.handNo}, moves ${acted}`);
+    assert.equal((await call('poker_act', { action: 'raise', amount: 1 })).isError, true);
+    const lb = await call('poker_leaderboard', { url });
+    assert.match(lb.content[0].text, /Claude \[ai\] .* bb\/100/);
+    for (let i = 0; i < 40; i++) { const r = await call('poker_leave'); if (!r.isError) break; await new Promise((ok) => setTimeout(ok, 50)); }
+  } finally { pokerHub.close(); server.closeAllConnections(); await new Promise((r) => server.close(r)); }
+});

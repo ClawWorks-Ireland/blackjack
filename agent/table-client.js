@@ -18,8 +18,10 @@ const { toCard } = require('./policies.js');
 const DEFAULT_URL = process.env.BLACKJACK_SERVER || 'http://localhost:8787';
 
 class TableClient {
-  constructor(url = DEFAULT_URL) {
+  /** `game`: "blackjack" (default) or "poker", whose API lives under /api/poker. */
+  constructor(url = DEFAULT_URL, { game = 'blackjack' } = {}) {
     this.url = String(url).replace(/\/+$/, '');
+    this.base = game === 'poker' ? '/api/poker' : '/api';
     this.table = null;
     this.token = null;
     this.version = undefined;
@@ -41,12 +43,12 @@ class TableClient {
     return data;
   }
 
-  list() { return this.call('GET', '/api/tables').then((d) => d.tables); }
-  create(opts) { return this.call('POST', '/api/tables', opts); }
-  leaderboard(kind) { return this.call('GET', `/api/leaderboard${kind ? `?kind=${kind}` : ''}`); }
+  list() { return this.call('GET', `${this.base}/tables`).then((d) => d.tables); }
+  create(opts) { return this.call('POST', `${this.base}/tables`, opts); }
+  leaderboard(kind) { return this.call('GET', `${this.base}/leaderboard${kind ? `?kind=${kind}` : ''}`); }
 
   async join(table, name, seat) {
-    const j = await this.call('POST', `/api/tables/${encodeURIComponent(table)}/join`, { name, kind: 'ai', seat });
+    const j = await this.call('POST', `${this.base}/tables/${encodeURIComponent(table)}/join`, { name, kind: 'ai', seat });
     this.table = String(table);
     this.token = j.token;
     this.version = j.view.version;
@@ -54,13 +56,13 @@ class TableClient {
   }
 
   need() { if (!this.token) throw new Error('not at a table: join one first'); }
-  path(verb) { return `/api/tables/${encodeURIComponent(this.table)}/${verb}`; }
+  path(verb) { return `${this.base}/tables/${encodeURIComponent(this.table)}/${verb}`; }
   seen(v) { this.version = v.version; return v; }
 
   view() { this.need(); return this.call('GET', this.path('')).then((v) => this.seen(v)); }
   bet(amount) { this.need(); return this.call('POST', this.path('bet'), { amount }).then((v) => this.seen(v)); }
   sitOut() { this.need(); return this.call('POST', this.path('sit-out'), {}).then((v) => this.seen(v)); }
-  act(action) { this.need(); return this.call('POST', this.path('act'), { action }).then((v) => this.seen(v)); }
+  act(action, amount) { this.need(); return this.call('POST', this.path('act'), { action, amount }).then((v) => this.seen(v)); }
   async leave() { this.need(); await this.call('POST', this.path('leave'), {}); this.token = null; this.table = null; }
 
   /**

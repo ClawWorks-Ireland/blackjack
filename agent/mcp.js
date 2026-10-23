@@ -9,7 +9,8 @@
  * Tools: new_table, deal, act, observe, hint, auto_play for a private table;
  * live_tables, live_join, live_wait, live_bet, live_act, live_leave and
  * live_leaderboard to sit with other agents and people at the live table
- * server (server/server.js), where this session plays as an AI. Each returns a one-line table
+ * server (server/server.js), where this session plays as an AI; poker_* the
+ * same for its no-limit Hold'em tables. Each returns a one-line table
  * summary followed by the same JSON the CLI sends. Errors come back as tool
  * results with isError set, never as a changed table.
  */
@@ -186,6 +187,70 @@ const LIVE_TOOLS = [
 ];
 TOOLS.push(...LIVE_TOOLS);
 
+const POKER_TOOLS = [
+  {
+    name: 'poker_tables',
+    description: "List the live no-limit Hold'em tables on the table server (BLACKJACK_SERVER or http://localhost:8787). "
+      + 'In poker you play the other players, not the house; bots don\'t say how they play.',
+    inputSchema: { type: 'object', properties: { url: { type: 'string' } }, additionalProperties: false },
+  },
+  {
+    name: 'poker_join',
+    description: 'Sit down at a poker table as an AI player (play chips; a busted stack rebuys). Then poker_wait and poker_act on your turn. '
+      + 'A seat that doesn\'t move in time checks or folds; one that keeps missing hands loses its seat.',
+    inputSchema: {
+      type: 'object',
+      properties: { table: { type: 'string' }, name: { type: 'string' }, seat: { type: 'integer', minimum: 0, maximum: 5 }, url: { type: 'string' } },
+      required: ['table', 'name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'poker_wait',
+    description: 'Wait (up to `timeout` seconds) until it is your turn, or the table changes. Returns the table: board, pot, every seat, your cards and legal moves.',
+    inputSchema: { type: 'object', properties: { timeout: { type: 'integer', minimum: 1, maximum: 55 } }, additionalProperties: false },
+  },
+  {
+    name: 'poker_act',
+    description: 'Your move: fold, check, call, bet or raise (amount = the total you put in this street, "to"), or allin.',
+    inputSchema: {
+      type: 'object',
+      properties: { action: { type: 'string', enum: ['fold', 'check', 'call', 'bet', 'raise', 'allin'] }, amount: { type: 'number' } },
+      required: ['action'],
+      additionalProperties: false,
+    },
+  },
+  { name: 'poker_leave', description: 'Leave your poker table.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  {
+    name: 'poker_leaderboard',
+    description: 'Poker leaderboard: big blinds won per 100 hands, each player marked AI or human.',
+    inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['ai', 'human'] }, url: { type: 'string' } }, additionalProperties: false },
+  },
+];
+TOOLS.push(...POKER_TOOLS);
+
+/** One line for a poker view: the board and pot, each seat in order, then what you may do. */
+function pokerSummary(v) {
+  const parts = [`${v.name}, hand ${v.handNo}, ${v.phase}`, `board ${v.board.length ? cards(v.board) : '-'}`, `pot ${v.pot}`];
+  v.seats.forEach((s, i) => {
+    if (!s) return;
+    const you = v.you && v.you.seat === i;
+    const state = s.folded ? 'folded' : s.allIn ? 'all-in' : s.lastAction || '';
+    parts.push(`seat ${i}${v.button === i ? ' (dealer)' : ''} ${s.player.name} [${s.player.kind}]${you ? ' (you)' : ''}: stack ${s.stack}${s.bet ? `, bet ${s.bet}` : ''}${state ? `, ${state}` : ''}${s.cards.length && s.cards[0] !== '??' ? `, ${cards(s.cards)}` : ''}`);
+  });
+  if (v.phase === 'done' && v.lastHand) {
+    const h = v.lastHand;
+    parts.push(`hand ${h.handNo}: ${h.pots.map((p) => `${p.winners.map((w) => (v.seats[w] ? v.seats[w].player.name : `seat ${w}`)).join(' and ')} won ${p.amount}${p.hand ? ` with ${p.hand}` : ''}`).join('; ')}`);
+  }
+  if (v.you) {
+    const moves = v.you.legal.map((l) => (l.min !== undefined ? `${l.action} ${l.min}-${l.max}` : l.amount !== undefined ? `${l.action} ${l.amount}` : l.action)).join(', ');
+    parts.push(`you: ${v.you.cards.join(' ') || 'no cards'}${v.you.hand ? ` (${v.you.hand})` : ''}, stack ${v.you.stack}`);
+    parts.push(v.you.yourTurn ? `your move: ${moves}` : 'waiting for other players');
+  }
+  return parts.join(' · ');
+}
+
+
 /** One line for a live table view, in seat order (seats numbered from 0, as in the JSON), then what it wants from you. */
 function liveSummary(v) {
   const parts = [v.phase === 'betting' ? `${v.name}, betting for round ${v.round + 1}` : `${v.name}, round ${v.round}, ${v.phase}`];
@@ -246,12 +311,13 @@ function summary(obs) {
 
 const text = (s) => ({ content: [{ type: 'text', text: s }] });
 
-const live = { client: null };
+const live = { client: null, poker: null };
 const errorResult = (message) => ({ ...text(JSON.stringify({ error: message })), isError: true });
 
 /** Live table tools: async, against the table server. Errors are tool errors. */
 async function callLive(name, args) {
   try {
+    if (name.startsWith('poker_')) return await callPoker(name, args);
     if (name === 'live_tables') {
       const tables = await new TableClient(args.url || (live.client && live.client.url) || undefined).list();
       const lines = tables.map((t) => `table ${t.id}: ${t.name}, $${t.minBet}-$${t.maxBet}, ${t.free} free: ${t.seats.filter(Boolean).map((s) => `${s.name} [${s.kind}]`).join(', ') || 'nobody yet'}`);
@@ -284,9 +350,37 @@ async function callLive(name, args) {
   }
 }
 
+async function callPoker(name, args) {
+  const urlOf = () => args.url || (live.poker && live.poker.url) || undefined;
+  if (name === 'poker_tables') {
+    const tables = await new TableClient(urlOf(), { game: 'poker' }).list();
+    const lines = tables.map((t) => `table ${t.id}: ${t.name}, blinds ${t.smallBlind}/${t.bigBlind}, ${t.free} free: ${t.seats.filter(Boolean).map((s) => `${s.name} [${s.kind}]`).join(', ') || 'nobody yet'}`);
+    return text(`${lines.join('\n') || 'No poker tables.'}\n${JSON.stringify({ tables })}`);
+  }
+  if (name === 'poker_leaderboard') {
+    const lb = await new TableClient(urlOf(), { game: 'poker' }).leaderboard(args.kind);
+    const rows = lb.players.map((p) => `${p.rank === null ? '-' : p.rank}. ${p.name} [${p.kind}] ${p.per100} bb/100 over ${p.rounds} hands${p.provisional ? ' (provisional)' : ''}`);
+    return text(`${rows.join('\n') || 'Nobody has played poker yet.'}\n${JSON.stringify(lb)}`);
+  }
+  if (name === 'poker_join') {
+    if (live.poker && live.poker.token) throw new Error('already at a poker table: poker_leave first');
+    const c = new TableClient(args.url || undefined, { game: 'poker' });
+    const j = await c.join(args.table, args.name, args.seat);
+    live.poker = c;
+    return text(`${pokerSummary(j.view)}\n${JSON.stringify({ seat: j.seat, view: j.view })}`);
+  }
+  const c = live.poker;
+  if (!c || !c.token) throw new Error('not at a poker table: poker_join first');
+  let v;
+  if (name === 'poker_wait') v = await c.wait(args.timeout || 25);
+  else if (name === 'poker_act') v = await c.act(args.action, args.amount);
+  else if (name === 'poker_leave') { await c.leave(); live.poker = null; return text('Left the poker table.'); }
+  return text(`${pokerSummary(v)}\n${JSON.stringify({ view: v })}`);
+}
+
 /** Run one tool call against `env`; a bad request is an isError result and leaves the table as it was. */
 function callTool(env, name, args = {}) {
-  if (name.startsWith('live_')) return callLive(name, args);
+  if (name.startsWith('live_') || name.startsWith('poker_')) return callLive(name, args);
   try {
     switch (name) {
       case 'new_table': {
@@ -372,4 +466,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { TOOLS, summary, liveSummary, callTool, handleMessage };
+module.exports = { TOOLS, summary, liveSummary, pokerSummary, callTool, handleMessage };
