@@ -47,7 +47,7 @@ async function playHand(seed, players, profiles, rngs) {
  * player draws its randomness from its own stream, seeded by the deal, so
  * different heroes meet the same cards and the same villain tendencies.
  */
-async function match(hero, villainPolicy, { hands = 1000, seed = 'bench', log = () => {} } = {}) {
+async function match(hero, villainPolicy, { hands = 1000, seed = 'bench', log = () => {}, onPair = null } = {}) {
   const profiles = new Profiles();
   const style = villainPolicy.name;
   const villain = { ...villainPolicy, name: 'Opponent' };
@@ -62,6 +62,7 @@ async function match(hero, villainPolicy, { hands = 1000, seed = 'bench', log = 
     const a = await playHand(deal, [hero2, villain], profiles, [hr(0), vr(0)]); // hero on the button
     const b = await playHand(deal, [villain, hero2], profiles, [vr(1), hr(1)]); // same cards, seats swapped
     const pair = (a[0] + b[1]) / BB; // the hero's result over the pair, in big blinds
+    if (onPair) await onPair(i, pair);
     n++;
     sum += pair;
     sum2 += pair * pair;
