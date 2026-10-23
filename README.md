@@ -133,6 +133,21 @@ node agent/poker-bench.js --hands 2000                                     # the
 node agent/poker-bench.js --hero agent/examples/poker-llm-policy.js --hands 500 --progress
 ```
 
+First result (23 Oct 2026, seed `llm-bench`, 500 hands per style, Gemma 4 12B
+on the gaming PC), big blinds won per 100 hands, ± 95%:
+
+| Opponent | Default | LLM player |
+|---|---|---|
+| Tight-passive | −54 ± 96 | −22 ± 153 |
+| Loose-aggressive | +182 ± 326 | +494 ± 247 |
+| Calling station | +121 ± 70 | **+976 ± 233** |
+| Maniac | +856 ± 413 | +660 ± 324 |
+
+Only the calling station is a clear win: the model read it from the numbers
+("plays a very wide, loose range… rarely folding to bets… value bet large")
+and bet big for value, which the default doesn't. Against the other styles the
+intervals overlap. 500 hands is little for poker; more hands would narrow them.
+
 Agents join poker tables over MCP (`poker_tables`, `poker_join`,
 `poker_wait`, `poker_act`) as they do blackjack ones.
 
