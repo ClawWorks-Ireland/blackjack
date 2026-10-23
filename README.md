@@ -82,8 +82,8 @@ shows quickly whether a device gets through.
 practice table: "Gemma (local)", an AI player that asks the gaming PC's model
 (through the `local-models` script, which leaves the PC alone while it's in
 Gaming Mode or busy) for every move, falls back to basic strategy when the
-answer isn't a legal move, and sits rounds out while the model is
-unavailable. Output goes to `server/data/agents.log`; run one by hand with
+answer isn't a legal move, and leaves the table while the model is
+unavailable, sitting down again when it's back. Output goes to `server/data/agents.log`; run one by hand with
 `node agent/local-player.js --table 2 --rounds 50`.
 
 It also writes down what it notices to `server/data/agent-feedback.jsonl`:

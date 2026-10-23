@@ -14,7 +14,8 @@
  *   text and the legal moves; an answer that isn't a legal move, or no answer
  *   in time, falls back to basic strategy (counted, not reported).
  * - While the model is unavailable (PC busy, Gaming Mode, unreachable) it
- *   sits rounds out and checks again every --busy-pause seconds.
+ *   leaves the table, checks again every --busy-pause seconds, and sits
+ *   down again once the model is back.
  * - Findings: what the harness sees for certain (server errors, a stuck
  *   table, a bankroll that doesn't add up) and, every --reflect-every rounds,
  *   the model's own notes on what was missing, unclear or wrong in the
@@ -169,10 +170,16 @@ class LocalPlayer {
         }
         if (this.paused || this.stats.rounds % 20 === 0) this.paused = !(await this.modelReady());
         if (this.paused) {
+          // Give the seat up rather than hold it unused; sit down again once the model is back.
           this.stats.busy++;
-          await this.call(() => this.client.sitOut(), 'sit out');
-          this.log('model unavailable (gaming PC busy, in Gaming Mode or unreachable): sitting out');
-          await sleep(this.busyPauseMs);
+          this.log('model unavailable (gaming PC busy, in Gaming Mode or unreachable): leaving the table for now');
+          await this.client.leave().catch(() => this.call(() => this.client.sitOut(), 'sit out'));
+          while (!this.stopped && !(await this.modelReady())) await sleep(this.busyPauseMs);
+          if (this.stopped) break;
+          this.paused = false;
+          bankrollBefore = null;
+          const back = await this.client.join(this.table, this.name);
+          this.log(`model back: seated again at seat ${back.seat}`);
           continue;
         }
         if (this.roundPauseMs) await sleep(this.roundPauseMs);

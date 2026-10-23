@@ -61,7 +61,7 @@ test('local player: plays rounds with the model, reflects, and queues findings o
   } finally { await s.close(); }
 });
 
-test('local player: sits out while the model is busy', async () => {
+test('local player: leaves the table while the model is busy', async () => {
   const dir = tmp();
   const s = await server();
   try {
@@ -74,6 +74,7 @@ test('local player: sits out while the model is busy', async () => {
     assert.ok(p.stats.busy >= 1);
     assert.equal(p.stats.moves, 0);
     assert.equal(t.table.round, 0, 'no round was dealt for a busy model');
+    assert.equal(t.table.seats.filter(Boolean).length, 0, 'the seat was given up');
   } finally { await s.close(); }
 });
 
