@@ -23,7 +23,7 @@ const BB = 10;
 const STACK = 100 * BB;
 
 /** Play one hand at a fresh table; `players[0]` sits in seat 0 (the button). Returns each seat's net in chips. */
-async function playHand(seed, players, profiles, rng) {
+async function playHand(seed, players, profiles, rngs) {
   const t = new PokerTable({ seed, smallBlind: BB / 2, bigBlind: BB, seats: 2 });
   players.forEach((p, i) => t.sit({ id: p.name, name: p.name, kind: 'bot' }, STACK, i));
   t.startHand();
@@ -31,7 +31,7 @@ async function playHand(seed, players, profiles, rng) {
     if (steps > 200) throw new Error('hand did not end');
     const seat = t.toAct;
     const view = t.view(seat);
-    let d = await players[seat].decide(view, rng);
+    let d = await players[seat].decide(view, rngs[seat]);
     if (!d || !t.legal(seat).some((l) => l.action === d.action || d.action === 'allin')) d = { action: t.legal(seat).some((l) => l.action === 'check') ? 'check' : 'fold' };
     t.act(seat, d.action, d.amount);
   }
@@ -41,31 +41,40 @@ async function playHand(seed, players, profiles, rng) {
   return t.lastHand.net;
 }
 
-/** Hero against one style for `hands` duplicate pairs. */
-async function match(hero, villain, { hands = 1000, seed = 'bench', log = () => {} } = {}) {
+/**
+ * Hero against one style for `hands` duplicate pairs. At the table the
+ * villain is called "Opponent", so its style's name gives nothing away; each
+ * player draws its randomness from its own stream, seeded by the deal, so
+ * different heroes meet the same cards and the same villain tendencies.
+ */
+async function match(hero, villainPolicy, { hands = 1000, seed = 'bench', log = () => {} } = {}) {
   const profiles = new Profiles();
-  const rng = rngFor(`${seed}:${hero.name}:${villain.name}`);
+  const style = villainPolicy.name;
+  const villain = { ...villainPolicy, name: 'Opponent' };
+  const hero2 = { ...hero, name: hero.name === 'Opponent' ? 'Hero' : hero.name, decide: hero.decide.bind(hero), onHandEnd: hero.onHandEnd ? hero.onHandEnd.bind(hero) : undefined };
   let n = 0;
   let sum = 0;
   let sum2 = 0;
   for (let i = 0; i < hands; i++) {
     const deal = `${seed}-${i}`;
-    const a = await playHand(deal, [hero, villain], profiles, rng); // hero on the button
-    const b = await playHand(deal, [villain, hero], profiles, rng); // same cards, seats swapped
+    const hr = (k) => rngFor(`${deal}:hero:${k}`);
+    const vr = (k) => rngFor(`${deal}:${style}:${k}`);
+    const a = await playHand(deal, [hero2, villain], profiles, [hr(0), vr(0)]); // hero on the button
+    const b = await playHand(deal, [villain, hero2], profiles, [vr(1), hr(1)]); // same cards, seats swapped
     const pair = (a[0] + b[1]) / BB; // the hero's result over the pair, in big blinds
     n++;
     sum += pair;
     sum2 += pair * pair;
-    if (i % 100 === 99) log(`${hero.name} v ${villain.name}: ${i + 1} pairs, ${((sum / n) * 50).toFixed(1)} bb/100`);
+    if (i % 25 === 24) log(`${hero2.name} v ${style}: ${i + 1} pairs, ${((sum / n) * 50).toFixed(1)} bb/100`);
   }
   const mean = sum / n; // per pair = per 2 hands
   const sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
   return {
-    hero: hero.name, villain: villain.name, hands: 2 * n,
+    hero: hero2.name, villain: style, hands: 2 * n,
     bbPer100: Math.round(mean * 50 * 10) / 10,
     ci95: Math.round(1.96 * (sd / Math.sqrt(n)) * 50 * 10) / 10,
-    villainStats: profiles.stats(villain.name),
-    heroStats: profiles.stats(hero.name),
+    villainStats: profiles.stats('Opponent'),
+    heroStats: profiles.stats(hero2.name),
   };
 }
 
@@ -82,8 +91,7 @@ async function main(argv) {
   const hands = Number(flag('--hands', 2000));
   const seed = flag('--seed', 'bench');
   for (const s of styles) {
-    const villain = { ...POLICIES[s], name: s };
-    const r = await match(hero, villain, { hands: Math.ceil(hands / 2), seed, log: argv.includes('--progress') ? console.log : () => {} });
+    const r = await match(hero, { ...POLICIES[s], name: s }, { hands: Math.ceil(hands / 2), seed, log: argv.includes('--progress') ? console.log : () => {} });
     const v = r.villainStats;
     console.log(`${r.hero.padEnd(16)} v ${s.padEnd(17)} ${r.bbPer100 >= 0 ? '+' : ''}${r.bbPer100} ± ${r.ci95} bb/100 over ${r.hands} hands`
       + `   | ${s}: VPIP ${v.vpip}%, PFR ${v.pfr}%, aggression ${v.aggression}, folds to a bet ${v.foldToBet}%`);

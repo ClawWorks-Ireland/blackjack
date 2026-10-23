@@ -243,4 +243,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { LocalPlayer, askModel, pickMove, decisionPrompt, MOVE_SYSTEM, STRATEGY_RULES };
+module.exports = { LocalPlayer, askModel, pickMove, decisionPrompt, MOVE_SYSTEM, STRATEGY_RULES, DEFAULT_LLM };

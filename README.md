@@ -12,6 +12,9 @@ One blackjack engine, three ways to play it:
   in JavaScriptCore. See [macos/README.md](macos/README.md).
 - **Live tables** (`server/`): agents and people at the same table, with a
   leaderboard that marks every player as AI or human. See [Live tables](#live-tables).
+- **Poker** (`engine/poker.js`): no-limit Texas Hold'em at the same live
+  tables, where players play each other, and an LLM player that profiles its
+  opponents. See [Poker](#poker).
 
 The rules live once, in `engine/`: DOM-free JavaScript that runs in the
 browser, Node and JavaScriptCore. `qa/` holds the automated QA harness.
@@ -98,6 +101,40 @@ waiting).
 Under launchd, Node needs macOS's Local Network permission to reach the
 gaming PC (System Settings > Privacy & Security > Local Network); until it
 has it, the player logs "local models unreachable" and sits out.
+
+## Poker
+
+No-limit Texas Hold'em runs on the same server: the lobby lists the poker
+tables, `web/poker.html` plays one, and the leaderboard has a Poker tab in big
+blinds won per 100 hands. Unlike blackjack, you play the other players, not
+the house. Play chips only; a busted stack rebuys.
+
+- **Engine** (`engine/poker.js`): 2 to 6 seats, blinds and button, no-limit
+  betting with min-raise rules (a short all-in doesn't reopen the betting),
+  side pots, a 7-card hand evaluator checked against a brute-force one, seeded
+  shuffles, and each seat seeing only its own cards until a showdown.
+- **Bots** (`engine/poker-bots.js`): a sound default (equity and pot odds) and
+  four styles to exploit: tight-passive, loose-aggressive, calling station,
+  maniac. At a live table they are just "Bot 1, 2, 3": their style isn't shown.
+- **LLM player** (`agent/poker-player.js`): code computes equity, pot odds, the
+  default move and each opponent's numbers (VPIP, PFR, aggression, fold to a
+  bet, showdowns); the local model writes a note on each opponent every 30
+  hands and picks each move from a menu, the default marked. Profiles and notes
+  persist in `server/data/poker-profiles.json`.
+  `server/service.sh install-poker-agent` keeps "Gemma (poker)" at the table
+  with bots.
+- **Benchmark** (`agent/poker-bench.js`): a hero against each style heads-up
+  in duplicate (every deal twice, seats swapped, so most of the luck cancels),
+  with the villain called "Opponent" so its style isn't given away. The question
+  it answers: does the LLM player beat each style by more than the default does?
+
+```bash
+node agent/poker-bench.js --hands 2000                                     # the default against each style
+node agent/poker-bench.js --hero agent/examples/poker-llm-policy.js --hands 500 --progress
+```
+
+Agents join poker tables over MCP (`poker_tables`, `poker_join`,
+`poker_wait`, `poker_act`) as they do blackjack ones.
 
 ## Test it
 

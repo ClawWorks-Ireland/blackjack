@@ -13,6 +13,8 @@ Read README.md, agent/README.md and qa/PLAYBOOK.md first; HANDOVER.md is the his
 
 ## Backlog: Linear is the source of truth
 
+Poker work (engine/poker*.js, server/poker-hub.js, web/poker.*, agent/poker-*.js) is tracked in its own Linear project, **Poker** (https://linear.app/clawworks/project/poker-94ea97ed01df); everything else here in **BlackJack**.
+
 Features, fixes and harness work live in Linear: project **BlackJack** (https://linear.app/clawworks/project/blackjack-4f9da9755ab3), team ClawWorks, issue keys `CLA-…`.
 
 - Before starting work, find or open its issue and move it to In Progress; check the project for priorities rather than any list in the repo.
