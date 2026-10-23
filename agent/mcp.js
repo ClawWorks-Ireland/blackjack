@@ -372,4 +372,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { TOOLS, summary, callTool, handleMessage };
+module.exports = { TOOLS, summary, liveSummary, callTool, handleMessage };

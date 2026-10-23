@@ -8,6 +8,10 @@
 #   server/service.sh status           is it loaded, running, listening?
 #   server/service.sh uninstall        stop it and remove the plist
 #
+#   server/service.sh install-agents [host] [table]   also run a local-model player (agent/local-player.js)
+#                                      at that table (default the practice table, 2), always on
+#   server/service.sh uninstall-agents
+#
 # Output goes to server/data/server.log. The macOS firewall must allow the
 # Node binary (System Settings > Network > Firewall, or socketfilterfw);
 # re-check after `brew upgrade node`, since the binary's path changes.
@@ -15,6 +19,8 @@ set -euo pipefail
 
 LABEL=com.clawworks.blackjack-tables
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+AGENTS=com.clawworks.blackjack-agents
+AGENTS_PLIST="$HOME/Library/LaunchAgents/$AGENTS.plist"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NODE=/opt/homebrew/opt/node/bin/node   # Homebrew's stable path: survives node upgrades
 PORT=8787
@@ -53,16 +59,56 @@ EOF
     launchctl bootstrap "$DOMAIN" "$PLIST"
     echo "installed $LABEL: http://$HOST:$PORT/ (log: server/data/server.log)"
     ;;
+  install-agents)
+    HOST="${2:-192.168.4.43}"
+    TABLE="${3:-2}"
+    mkdir -p "$ROOT/server/data" "$(dirname "$AGENTS_PLIST")"
+    cat > "$AGENTS_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$AGENTS</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$NODE</string>
+    <string>$ROOT/agent/local-player.js</string>
+    <string>--url</string><string>http://$HOST:$PORT</string>
+    <string>--table</string><string>$TABLE</string>
+    <string>--name</string><string>Gemma (local)</string>
+  </array>
+  <key>WorkingDirectory</key><string>$ROOT</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>StandardOutPath</key><string>$ROOT/server/data/agents.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/server/data/agents.log</string>
+</dict>
+</plist>
+PLIST
+    plutil -lint "$AGENTS_PLIST" >/dev/null
+    launchctl bootout "$DOMAIN/$AGENTS" 2>/dev/null || true
+    launchctl bootstrap "$DOMAIN" "$AGENTS_PLIST"
+    echo "installed $AGENTS: a local-model player at table $TABLE on http://$HOST:$PORT/ (log: server/data/agents.log)"
+    ;;
+  uninstall-agents)
+    launchctl bootout "$DOMAIN/$AGENTS" 2>/dev/null || true
+    rm -f "$AGENTS_PLIST"
+    echo "removed $AGENTS"
+    ;;
   restart)
     launchctl kickstart -k "$DOMAIN/$LABEL"
     echo "restarted $LABEL"
+    if launchctl print "$DOMAIN/$AGENTS" >/dev/null 2>&1; then launchctl kickstart -k "$DOMAIN/$AGENTS"; echo "restarted $AGENTS"; fi
     ;;
   status)
-    if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
-      launchctl print "$DOMAIN/$LABEL" | grep -E '^\s*(state|pid|last exit code|runs) ' || true
-    else
-      echo "$LABEL is not loaded"
-    fi
+    for L in "$LABEL" "$AGENTS"; do
+      if launchctl print "$DOMAIN/$L" >/dev/null 2>&1; then
+        echo "$L:"; launchctl print "$DOMAIN/$L" | grep -E '^\s*(state|pid|last exit code|runs) ' | head -4 || true
+      else
+        echo "$L is not loaded"
+      fi
+    done
     lsof -nP -iTCP:$PORT -sTCP:LISTEN || echo "nothing listening on port $PORT"
     ;;
   uninstall)
@@ -71,7 +117,7 @@ EOF
     echo "removed $LABEL"
     ;;
   *)
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

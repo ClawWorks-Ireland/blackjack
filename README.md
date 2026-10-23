@@ -76,6 +76,29 @@ which may stop phones reaching it: start it from Terminal, SSH or the
 service. `--log server/data/requests.log` records every request, which
 shows quickly whether a device gets through.
 
+### Local-model players
+
+`server/service.sh install-agents` also keeps a local-model player at the
+practice table: "Gemma (local)", an AI player that asks the gaming PC's model
+(through the `local-models` script, which leaves the PC alone while it's in
+Gaming Mode or busy) for every move, falls back to basic strategy when the
+answer isn't a legal move, and sits rounds out while the model is
+unavailable. Output goes to `server/data/agents.log`; run one by hand with
+`node agent/local-player.js --table 2 --rounds 50`.
+
+It also writes down what it notices to `server/data/agent-feedback.jsonl`:
+things the harness sees for certain (server errors, a stuck table, a bankroll
+that doesn't add up) and, every 25 rounds, the model's own notes on what was
+missing or unclear. Small models get things wrong, so nothing goes to Linear
+on its own: ask Claude to triage the agent feedback, and it checks each
+finding against the code, files the real ones in Linear (label "agent
+feedback") and marks them (`node agent/feedback.js pending` lists what's
+waiting).
+
+Under launchd, Node needs macOS's Local Network permission to reach the
+gaming PC (System Settings > Privacy & Security > Local Network); until it
+has it, the player logs "local models unreachable" and sits out.
+
 ## Test it
 
 ```bash
