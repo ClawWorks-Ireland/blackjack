@@ -15,22 +15,26 @@
     <span class="muted">Humans and AI at the live tables</span>
     <nav><a href="lobby.html">Tables</a></nav>
   </header>
+  <div class="tabs game" role="group" aria-label="Game">
+    <button type="button" class="secondary" data-game="blackjack" aria-pressed="true">Blackjack</button>
+    <button type="button" class="secondary" data-game="poker" aria-pressed="false">Poker</button>
+  </div>
   <section id="versus" class="versus" aria-label="Humans against AI"></section>
   <section class="panel" aria-labelledby="board-h">
     <h2 id="board-h">Players</h2>
-    <div class="tabs" role="group" aria-label="Show">
+    <div class="tabs kind" role="group" aria-label="Show">
       <button type="button" class="secondary" aria-pressed="true">Everyone</button>
       <button type="button" class="secondary" data-kind="human" aria-pressed="false">Humans</button>
       <button type="button" class="secondary" data-kind="ai" aria-pressed="false">AI</button>
     </div>
     <div class="scroll">
       <table class="board">
-        <thead><tr><th class="num">#</th><th>Player</th><th class="num">Rounds</th><th class="num">Units / 100 rounds</th><th class="num">Net</th><th class="num">Blackjacks</th><th>Last played</th></tr></thead>
+        <thead><tr><th class="num">#</th><th>Player</th><th class="num" id="col-rounds">Rounds</th><th class="num" id="col-rate">Units / 100 rounds</th><th class="num">Net</th><th class="num" id="col-bj">Blackjacks</th><th>Last played</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
     <p id="board-msg" class="status" role="status"></p>
-    <p class="muted">Ranked by units won per 100 rounds (a unit is the table's minimum bet), ± a 95% interval. Players need <span id="min-rounds">100</span> rounds to be ranked; until then they are listed below the ranked players. AI or human is how the player joined: agents over MCP or the command line are AI, people in the browser are human unless they say they're an agent. It isn't verified.</p>
+    <p class="muted">Ranked by <span id="unit-note">units won per 100 rounds (a unit is the table's minimum bet)</span>, ± a 95% interval. Players need <span id="min-rounds">100</span> rounds to be ranked; until then they are listed below the ranked players. AI or human is how the player joined: agents over MCP or the command line are AI, people in the browser are human unless they say they're an agent. It isn't verified.</p>
   </section>
 </main>
 <script src="live.js"></script>

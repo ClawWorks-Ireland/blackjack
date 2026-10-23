@@ -93,6 +93,8 @@ label { display: inline-flex; align-items: center; gap: 0.4rem; }
 .outcome.blackjack { background: var(--gold); }
 .outcome.lose { background: #ffb3b3; }
 .outcome.push { background: #dfe6e2; }
+.card.slot { background: rgba(255, 255, 255, 0.08); box-shadow: none; border: 1px dashed var(--line); }
+.seat.folded { opacity: 0.55; }
 .your-hands { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; }
 .your-hands .hand { text-align: center; }
 .your-hands .hand.active .cards { outline: 2px dashed var(--gold); outline-offset: 4px; border-radius: 6px; }

@@ -103,6 +103,44 @@
       } catch (e) { $('#lobby-msg').textContent = `Can't reach the table server: ${e.message}`; }
     }
 
+    async function joinPoker(id) {
+      const n = name.value.trim();
+      if (!n) { $('#lobby-msg').textContent = 'Enter a name first.'; name.focus(); return; }
+      store.set('live.name', n);
+      try {
+        const j = await api('POST', `/api/poker/tables/${id}/join`, { name: n, kind: agent.checked ? 'ai' : 'human' });
+        store.session(`live.ptoken.${id}`, j.token);
+        location.href = `poker.html?id=${encodeURIComponent(id)}`;
+      } catch (e) { $('#lobby-msg').textContent = e.message; }
+    }
+
+    let pokerShown = '';
+    async function refreshPoker() {
+      const box = $('#poker-tables');
+      if (!box) return;
+      try {
+        const { tables } = await api('GET', '/api/poker/tables');
+        const key = JSON.stringify(tables.map((x) => [x.id, x.seats]));
+        if (key === pokerShown) return;
+        pokerShown = key;
+        box.replaceChildren(...tables.map((t) => {
+          const seated = t.seats.filter(Boolean);
+          const mine = store.session(`live.ptoken.${t.id}`);
+          return el('article', { class: 'panel table-card' },
+            el('h3', { text: t.name }),
+            el('div', { class: 'muted', text: `No-limit Hold'em · blinds ${money(t.smallBlind)}/${money(t.bigBlind)} · buy-in ${money(t.buyIn)}` }),
+            el('ul', {}, ...(seated.length ? seated.map((s) => el('li', {}, el('span', { text: `Seat ${s.seat + 1}: ${s.name} ` }), badge(s.kind)))
+              : [el('li', { class: 'seat-free', text: 'Nobody seated yet' })])),
+            el('div', { class: 'row' },
+              mine ? el('a', { href: `poker.html?id=${encodeURIComponent(t.id)}`, text: 'Back to your seat' })
+                : el('button', { type: 'button', disabled: t.free === 0, onclick: () => joinPoker(t.id), text: t.free ? `Sit down (${t.free} free)` : 'Full' }),
+              el('a', { href: `poker.html?id=${encodeURIComponent(t.id)}&watch=1`, text: 'Watch' })));
+        }));
+      } catch (_) { box.replaceChildren(el('p', { class: 'muted', text: 'No poker tables on this server.' })); }
+    }
+    refreshPoker();
+    setInterval(refreshPoker, 3000);
+
     $('#new').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -268,13 +306,20 @@
 
   function players() {
     let kind = null;
+    let game = new URLSearchParams(location.search).get('game') === 'poker' ? 'poker' : 'blackjack';
     async function refresh() {
       try {
-        const data = await api('GET', `/api/leaderboard${kind ? `?kind=${kind}` : ''}`);
+        const poker = game === 'poker';
+        const data = await api('GET', `/api/${poker ? 'poker/' : ''}leaderboard${kind ? `?kind=${kind}` : ''}`);
+        const unit = poker ? 'big blinds / 100 hands' : 'units / 100 rounds';
+        $('#col-rounds').textContent = poker ? 'Hands' : 'Rounds';
+        $('#col-rate').textContent = poker ? 'Big blinds / 100 hands' : 'Units / 100 rounds';
+        $('#col-bj').textContent = poker ? '' : 'Blackjacks';
+        $('#unit-note').textContent = poker ? 'big blinds won per 100 hands' : "units won per 100 rounds (a unit is the table's minimum bet)";
         const v = data.byKind;
         const box = (k, title) => el('div', { class: 'panel' }, el('div', {}, badge(k), el('span', { text: ` ${title}` })),
-          el('div', { class: 'big', text: v[k] && v[k].per100 !== null ? `${signed(v[k].per100)} units / 100 rounds` : '–' }),
-          el('div', { class: 'muted', text: v[k] ? `${v[k].players} player${v[k].players === 1 ? '' : 's'} · ${v[k].rounds.toLocaleString('en')} rounds` : '' }));
+          el('div', { class: 'big', text: v[k] && v[k].per100 !== null ? `${signed(v[k].per100)} ${unit}` : '–' }),
+          el('div', { class: 'muted', text: v[k] ? `${v[k].players} player${v[k].players === 1 ? '' : 's'} · ${v[k].rounds.toLocaleString('en')} ${poker ? 'hands' : 'rounds'}` : '' }));
         $('#versus').replaceChildren(box('human', 'Humans'), box('ai', 'AI'));
         const rows = data.players.map((p) => el('tr', { class: p.provisional ? 'provisional' : '' },
           el('td', { class: 'num', text: p.rank === null ? '–' : String(p.rank) }),
@@ -282,16 +327,25 @@
           el('td', { class: 'num', text: p.rounds.toLocaleString('en') }),
           el('td', { class: 'num', text: `${signed(p.per100)} ± ${p.per100CI}` }),
           el('td', { class: 'num', text: money(p.net) }),
-          el('td', { class: 'num', text: String(p.blackjacks) }),
+          el('td', { class: 'num', text: poker ? '' : String(p.blackjacks) }),
           el('td', { text: new Date(p.last).toLocaleDateString('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' }) })));
-        $('#rows').replaceChildren(...(rows.length ? rows : [el('tr', {}, el('td', { colspan: 7, class: 'muted', text: 'Nobody has played a live table yet.' }))]));
+        $('#rows').replaceChildren(...(rows.length ? rows : [el('tr', {}, el('td', { colspan: 7, class: 'muted', text: poker ? 'Nobody has played poker yet.' : 'Nobody has played a live table yet.' }))]));
         $('#min-rounds').textContent = String(data.minRounds);
       } catch (e) { $('#board-msg').textContent = `Can't reach the table server: ${e.message}`; }
     }
-    for (const b of document.querySelectorAll('.tabs button')) {
+    for (const b of document.querySelectorAll('.tabs.kind button')) {
       b.addEventListener('click', () => {
         kind = b.dataset.kind || null;
-        for (const x of document.querySelectorAll('.tabs button')) x.setAttribute('aria-pressed', String(x === b));
+        for (const x of document.querySelectorAll('.tabs.kind button')) x.setAttribute('aria-pressed', String(x === b));
+        refresh();
+      });
+    }
+    for (const b of document.querySelectorAll('.tabs.game button')) {
+      b.setAttribute('aria-pressed', String(b.dataset.game === game));
+      b.addEventListener('click', () => {
+        game = b.dataset.game;
+        for (const x of document.querySelectorAll('.tabs.game button')) x.setAttribute('aria-pressed', String(x === b));
+        history.replaceState(null, '', game === 'poker' ? '?game=poker' : location.pathname);
         refresh();
       });
     }
@@ -299,5 +353,5 @@
     setInterval(refresh, 10000);
   }
 
-  root.Live = { lobby, table, players };
+  root.Live = { lobby, table, players, util: { el, api, badge, card, back, money, store } };
 })(window);

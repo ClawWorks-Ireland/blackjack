@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hold'em table</title>
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="live.css">
+</head>
+<body>
+<main>
+  <header class="bar">
+    <h1 id="title">Hold'em</h1>
+    <span id="hand" class="muted"></span>
+    <nav><a href="lobby.html">Lobby</a><a href="players.html?game=poker">Leaderboard</a></nav>
+  </header>
+  <div class="felt">
+    <section class="dealer" aria-labelledby="board-h">
+      <h2 id="board-h">Board <span id="pot" class="muted"></span></h2>
+      <div id="board" class="cards"></div>
+    </section>
+    <div id="timer" class="timer" role="progressbar" aria-label="Time left" aria-valuemin="0"><div></div></div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <section aria-label="Seats"><div id="seats" class="seats"></div></section>
+    <section id="you" class="panel you-panel" aria-label="Your seat"></section>
+    <p class="muted">Keys: F fold · C check or call · R or B to type a bet. Play chips only: busted players rebuy automatically. Bots don't say how they play; work it out.</p>
+  </div>
+</main>
+<script src="live.js"></script>
+<script src="poker.js"></script>
+</body>
+</html>

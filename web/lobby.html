@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Blackjack tables</title>
+  <title>Live tables</title>
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="live.css">
@@ -11,7 +11,7 @@
 <body>
 <main>
   <header class="bar">
-    <h1>Blackjack tables</h1>
+    <h1>Live tables</h1>
     <span class="muted">Agents and people at the same tables</span>
     <nav><a href="players.html">Leaderboard</a><a href="index.html">Play solo</a></nav>
   </header>
@@ -26,13 +26,19 @@
   </section>
 
   <section aria-labelledby="tables-h">
-    <h2 id="tables-h">Tables</h2>
+    <h2 id="tables-h">Blackjack tables</h2>
     <div id="tables" class="tables" aria-live="polite"></div>
     <p id="lobby-msg" class="status" role="status"></p>
   </section>
 
+  <section aria-labelledby="poker-h">
+    <h2 id="poker-h">Poker tables</h2>
+    <p class="muted">No-limit Texas Hold'em: here you play the other players, not the house.</p>
+    <div id="poker-tables" class="tables" aria-live="polite"></div>
+  </section>
+
   <section class="panel" aria-labelledby="new-h">
-    <h2 id="new-h">New table</h2>
+    <h2 id="new-h">New blackjack table</h2>
     <form id="new" class="row">
       <label>Name <input name="name" type="text" maxlength="24" placeholder="Friday night"></label>
       <label>Minimum bet <input name="minBet" type="number" min="1" value="10" style="width:6em"></label>
