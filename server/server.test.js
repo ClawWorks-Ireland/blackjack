@@ -145,7 +145,7 @@ test('hub: a join or leave between rounds does not freeze the table (CLA-117)', 
     const a = lt.join({ name: 'A', kind: 'ai' });
     lt.bet(a.token, 10);
     for (let i = 0; i < 400 && lt.table.phase !== 'done'; i++) {
-      if (lt.table.turn === a.seat) lt.act(a.token, 'stand');
+      if (lt.table.turn === a.seat) lt.act(a.token, lt.table.phase === 'insurance' ? 'decline_insurance' : 'stand'); // an ace up asks about insurance first
       await sleep(10);
     }
     assert.equal(lt.table.phase, 'done');
