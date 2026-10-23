@@ -64,3 +64,34 @@ test('poker player: in a benchmark it profiles the opponent and writes notes on 
   assert.equal(brain.notes.Opponent, 'Calls a lot. Value bet.');
   assert.ok(!JSON.stringify(brain.profiles.toJSON()).includes('calling-station'), 'the style name never reaches the player');
 });
+
+test('poker player with feedback: keeps a ledger, states facts, and stops bluffing a calling station', async () => {
+  const { facts, kindOf } = require('./poker-player.js');
+  assert.deepEqual([kindOf('raise', 0.2), kindOf('bet', 0.5), kindOf('allin', 0.8), kindOf('call', 0.1), kindOf('fold', 0.9), kindOf('check', 0.5)], ['bluff', 'thin', 'value', 'call', 'fold', null]);
+  const prompts = [];
+  const notesIn = [];
+  const brain = makeBrain({
+    feedback: true,
+    notesEvery: 20,
+    ask: async (llm, sys, instr, prompt) => {
+      if (/coach/.test(sys)) { notesIn.push(prompt); return { ok: true, text: 'Never folds. Stop bluffing, value bet big.' }; }
+      prompts.push(prompt);
+      // A small bet or raise when offered (so hands reach the flop), else check or call.
+      const line = prompt.split('\n').find((x) => /^[A-H]\) .*\(small\)/.test(x)) || prompt.split('\n').find((x) => /^[A-H]\) (check|call)/.test(x)) || 'A)';
+      return { ok: true, text: line[0] };
+    },
+  });
+  await match(brain, { ...POLICIES['calling-station'], name: 'calling-station' }, { hands: 60, seed: 'feedback' });
+  const l = brain.ledger.Opponent;
+  assert.ok(l && Object.keys(l).length >= 2, JSON.stringify(l));
+  assert.ok(Object.values(l).every((e) => e.n > 0 && Number.isFinite(e.bb)));
+  assert.ok(facts(brain.profiles, 'Opponent').some((f) => /folds to a bet only/.test(f)), facts(brain.profiles, 'Opponent').join('; '));
+  assert.ok(prompts.some((p) => /Fact: folds to a bet only/.test(p)), 'facts reach the decision prompt');
+  assert.ok(prompts.some((p) => /Your results against them: /.test(p)), 'its own results reach the decision prompt');
+  assert.ok(notesIn.some((p) => /Your results against them: (bluffs|thin bets|value bets|calls|folds) \d+/.test(p)), 'and the note prompt');
+  assert.ok(brain.stats.guarded > 0, 'weak-hand bets came off the menu once the station showed it never folds');
+  const plain = makeBrain({ ask: async () => ({ ok: true, text: 'A' }) });
+  assert.equal(plain.feedback, false);
+  assert.equal(plain.name, 'llm');
+  assert.equal(brain.name, 'llm-feedback');
+});

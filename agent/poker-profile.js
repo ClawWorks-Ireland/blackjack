@@ -90,6 +90,7 @@ class Profiles {
       foldToBet: rate(p.foldedToBet, p.facedBet),
       showdown: rate(p.showdowns, p.sawFlop),
       shown: p.shown.slice(-6),
+      facedBets: p.facedBet,
     };
   }
 

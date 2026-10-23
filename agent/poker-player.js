@@ -16,6 +16,14 @@
  *
  * As a benchmark policy: makeBrain({...}) has decide(view, rng) and
  * onHandEnd(view, names), as agent/poker-bench.js expects.
+ *
+ * With `feedback: true` (CLA-124) it also learns from its own results: a
+ * ledger per opponent of its main move type each hand (bluff, thin bet, value
+ * bet, call, fold, by its equity at the time) and what it won or lost in big
+ * blinds, plus plain facts from the opponent's numbers ("folds to a bet only
+ * 4%: bluffs lose here"), both in its notes and in every decision; and a code
+ * guardrail takes weak-hand bets off the menu against players who almost never
+ * fold. `feedback: false` is the player as first benchmarked (CLA-123).
  */
 'use strict';
 const fs = require('fs');
@@ -42,6 +50,33 @@ const SYSTEM = [
 
 const NOTE_SYSTEM = 'You are a poker coach. From an opponent\'s statistics and the hands they showed, write two short sentences: '
   + 'how this player plays, and how to beat them. Use only what the numbers and hands show. No preamble.';
+const NOTE_SYSTEM_FEEDBACK = 'You are a poker coach. From an opponent\'s statistics, the facts about them, and the player\'s own results '
+  + 'against them by move type (in big blinds), write two or three short sentences: how this opponent plays, which of the player\'s moves '
+  + 'are working against them and which are losing, and what to do more and less of. Respect the facts. No preamble.';
+
+const KINDS = ['bluff', 'thin', 'value', 'call', 'fold'];
+const KIND_NAME = { bluff: 'bluffs', thin: 'thin bets', value: 'value bets', call: 'calls', fold: 'folds' };
+
+/** What a move was, by the equity the player had when it made it. */
+function kindOf(action, eq) {
+  if (action === 'fold') return 'fold';
+  if (action === 'call') return 'call';
+  if (action === 'bet' || action === 'raise' || action === 'allin') return eq < 0.4 ? 'bluff' : eq < 0.6 ? 'thin' : 'value';
+  return null; // a check
+}
+
+/** Plain facts from an opponent's numbers, stated only with enough evidence. */
+function facts(profiles, name) {
+  const s = profiles.stats(name);
+  const out = [];
+  if (s.facedBets >= 15 && s.foldToBet !== null && s.foldToBet < 12) out.push(`folds to a bet only ${s.foldToBet}%: bluffs lose against them; bet big when you have it`);
+  if (s.facedBets >= 15 && s.foldToBet !== null && s.foldToBet > 50) out.push(`folds to a bet ${s.foldToBet}%: bets and raises win pots against them even with weak hands`);
+  if (s.hands >= 30 && s.pfr !== null && s.pfr > 40) out.push(`raises preflop ${s.pfr}% of hands: often with nothing; call down lighter`);
+  if (s.hands >= 30 && s.vpip !== null && s.vpip < 20) out.push(`plays only ${s.vpip}% of hands: their bets and raises usually mean strength`);
+  return out;
+}
+
+const neverFolds = (profiles, name) => { const s = profiles.stats(name); return s.facedBets >= 15 && s.foldToBet !== null && s.foldToBet < 12; };
 
 /** The menu: concrete legal moves, sizes from the pot. `def` is the default move to mark. */
 function menu(view, def) {
@@ -71,23 +106,50 @@ function menu(view, def) {
   return opts.map((o, i) => ({ ...o, letter: 'ABCDEFGH'[i], isDefault: o === best }));
 }
 
-function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, notesEvery = 30, log = () => {}, ask = askModel } = {}) {
-  const stats = { decisions: 0, modelPicks: 0, followedDefault: 0, fallbacks: 0, notes: 0, hands: 0 };
+function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, ledger = {}, feedback = false, notesEvery = 30, log = () => {}, ask = askModel } = {}) {
+  const stats = { decisions: 0, modelPicks: 0, followedDefault: 0, fallbacks: 0, notes: 0, hands: 0, guarded: 0 };
+  let thisHand = []; // [{kind, opponents}] for the hand in play
+
+  /** "bluffs 14 tries, -38 bb; value bets 22, +140 bb; ..." */
+  const ledgerLine = (name) => {
+    const l = ledger[name];
+    if (!l) return null;
+    const parts = KINDS.filter((k) => l[k] && l[k].n).map((k) => `${KIND_NAME[k]} ${l[k].n}, ${l[k].bb >= 0 ? '+' : ''}${Math.round(l[k].bb)} bb`);
+    return parts.length ? parts.join('; ') : null;
+  };
+
   const self = {
-    name: 'llm', stats, profiles, notes,
+    name: feedback ? 'llm-feedback' : 'llm', stats, profiles, notes, ledger, feedback,
     description: 'LLM player: profiles opponents and bends the default to exploit them.',
 
     async decide(view, rng = Math.random) {
       stats.decisions++;
       const def = POLICIES.default.decide(view, rng);
       const s = situation(view, rng, 300);
-      const opts = menu(view, def);
-      const fallback = opts.find((o) => o.isDefault) || opts[0];
       const you = view.you;
+      const inHand = view.seats.filter((x, i) => x && i !== you.seat && x.inHand && !x.folded).map((x) => x.player.name);
+      let opts = menu(view, def);
+      // Guardrail: against players who almost never fold, a weak-hand bet is just a donation.
+      if (feedback && s.eq < 0.35 && inHand.length && inHand.every((n) => neverFolds(profiles, n))) {
+        const kept = opts.filter((o) => o.action !== 'bet' && o.action !== 'raise');
+        if (kept.length < opts.length) {
+          stats.guarded++;
+          if (!kept.some((o) => o.isDefault)) {
+            const safe = kept.find((o) => o.action === 'check') || kept.find((o) => o.action === 'fold') || kept[0];
+            safe.isDefault = true;
+          }
+          opts = kept.map((o, i) => ({ ...o, letter: 'ABCDEFGH'[i] }));
+        }
+      }
+      const fallback = opts.find((o) => o.isDefault) || opts[0];
       const handName = view.board.length >= 3 ? evaluate([...you.cards, ...view.board]).name : null;
       const opponents = view.seats.filter((x, i) => x && i !== you.seat && x.inHand && !x.folded).map((x) => {
         const n = x.player.name;
-        return `- ${n}: stack ${x.stack}${x.bet ? `, bet ${x.bet} this street` : ''}${x.lastAction ? `, last move ${x.lastAction}` : ''}. Stats: ${profiles.line(n)}.${notes[n] ? ` Your notes: ${notes[n]}` : ''}`;
+        const extra = feedback ? [
+          ...facts(profiles, n).map((f) => ` Fact: ${f}.`),
+          ledgerLine(n) ? ` Your results against them: ${ledgerLine(n)}.` : '',
+        ].join('') : '';
+        return `- ${n}: stack ${x.stack}${x.bet ? `, bet ${x.bet} this street` : ''}${x.lastAction ? `, last move ${x.lastAction}` : ''}. Stats: ${profiles.line(n)}.${extra}${notes[n] ? ` Your notes: ${notes[n]}` : ''}`;
       });
       const prompt = [
         `Street: ${view.phase}. Your cards: ${you.cards.join(' ')}. Board: ${view.board.join(' ') || 'none yet'}.${handName ? ` You have ${handName}.` : ''}`,
@@ -97,10 +159,10 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, n
       ].join('\n');
       const r = await ask(llm, SYSTEM, 'Which move? Answer with the letter only.', prompt, { maxTokens: 4, timeoutMs: 20000 });
       const letter = r.ok ? (r.text.toUpperCase().match(/\b([A-H])\b/) || r.text.toUpperCase().match(/([A-H])/) || [])[1] : null;
-      const pick = letter && opts.find((o) => o.letter === letter);
-      if (!pick) { stats.fallbacks++; return { action: fallback.action, amount: fallback.amount }; }
-      stats.modelPicks++;
-      if (pick.isDefault) stats.followedDefault++;
+      let pick = letter && opts.find((o) => o.letter === letter);
+      if (!pick) { stats.fallbacks++; pick = fallback; } else { stats.modelPicks++; if (pick.isDefault) stats.followedDefault++; }
+      const kind = kindOf(pick.action, s.eq);
+      if (kind) thisHand.push({ kind, opponents: inHand });
       return { action: pick.action, amount: pick.amount };
     },
 
@@ -108,11 +170,29 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, n
       if (!view.lastHand) return;
       stats.hands++;
       profiles.addHand(names, view.log, view.lastHand);
+      // The ledger: this hand's main move against the opponents it was made against, and the result.
+      const moves = thisHand;
+      thisHand = [];
+      if (view.you && moves.length) {
+        const net = view.lastHand.net[view.you.seat];
+        const rank = { bluff: 3, value: 3, thin: 3, call: 2, fold: 1 };
+        const main = moves.reduce((a, m) => (rank[m.kind] >= rank[a.kind] ? m : a));
+        const against = main.opponents.length ? main.opponents : [];
+        for (const o of against) {
+          const l = (ledger[o] = ledger[o] || {});
+          const e = (l[main.kind] = l[main.kind] || { n: 0, bb: 0 });
+          e.n++;
+          e.bb += net / view.bigBlind / against.length;
+        }
+      }
       if (stats.hands % notesEvery !== 0) return;
       const me = view.you ? view.seats[view.you.seat].player.name : null;
       for (const n of new Set(names)) {
         if (n === me || profiles.stats(n).hands < 20) continue;
-        const r = await ask(llm, NOTE_SYSTEM, 'Write the note.', `Opponent: ${n}\nStatistics: ${profiles.line(n)}`, { maxTokens: 120, timeoutMs: 60000 });
+        const input = feedback
+          ? `Opponent: ${n}\nStatistics: ${profiles.line(n)}\nFacts: ${facts(profiles, n).join('; ') || 'none yet'}\nYour results against them: ${ledgerLine(n) || 'none yet'}`
+          : `Opponent: ${n}\nStatistics: ${profiles.line(n)}`;
+        const r = await ask(llm, feedback ? NOTE_SYSTEM_FEEDBACK : NOTE_SYSTEM, 'Write the note.', input, { maxTokens: 160, timeoutMs: 60000 });
         if (r.ok && r.text) { notes[n] = r.text.replace(/\s+/g, ' ').slice(0, 300); stats.notes++; log(`note on ${n}: ${notes[n]}`); }
       }
     },
@@ -121,17 +201,17 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, n
 }
 
 function loadData(file = DATA) {
-  try { const d = JSON.parse(fs.readFileSync(file, 'utf8')); return { profiles: new Profiles(d.profiles || {}), notes: d.notes || {} }; } catch (_) { return { profiles: new Profiles(), notes: {} }; }
+  try { const d = JSON.parse(fs.readFileSync(file, 'utf8')); return { profiles: new Profiles(d.profiles || {}), notes: d.notes || {}, ledger: d.ledger || {} }; } catch (_) { return { profiles: new Profiles(), notes: {}, ledger: {} }; }
 }
 function saveData(brain, file = DATA) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ profiles: brain.profiles.toJSON(), notes: brain.notes }, null, 1));
+  fs.writeFileSync(file, JSON.stringify({ profiles: brain.profiles.toJSON(), notes: brain.notes, ledger: brain.ledger }, null, 1));
 }
 
 /** Play live at a poker table until stopped. */
 async function playLive({ url, table, name, llm = DEFAULT_LLM, log = console.log, hands = 0 }) {
   const data = loadData();
-  const brain = makeBrain({ llm, ...data, log });
+  const brain = makeBrain({ llm, ...data, log, feedback: true });
   const c = new TableClient(url, { game: 'poker' });
   const j = await c.join(table, name);
   log(`${name} seated at poker table ${table}, seat ${j.seat}`);
@@ -168,4 +248,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { makeBrain, menu, SYSTEM };
+module.exports = { makeBrain, menu, facts, kindOf, SYSTEM };
