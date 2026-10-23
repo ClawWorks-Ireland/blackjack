@@ -24,6 +24,12 @@
  *   POST /api/tables/:id/act               {action: hit|stand|double|split|surrender|insurance|decline_insurance}
  *   POST /api/tables/:id/leave             {}
  *   GET  /api/leaderboard                  ?kind=ai|human: players ranked by units won per 100 rounds
+ *
+ * Poker (CLA-121) has the same routes under /api/poker/: tables (POST takes
+ * {name, smallBlind, bigBlind, buyIn, bots: [styles] or a count, turnSeconds}),
+ * a table, events, wait, join, act ({action, amount} where amount is the
+ * "to" total for bet and raise), leave, and /api/poker/leaderboard in big
+ * blinds per 100 hands.
  */
 'use strict';
 const http = require('http');
@@ -31,6 +37,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { Hub, HubError } = require('./hub.js');
+const { PokerHub } = require('./poker-hub.js');
 const { Leaderboard } = require('./leaderboard.js');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -71,7 +78,7 @@ function serveStatic(req, res, pathname) {
   return true;
 }
 
-function createServer({ hub, log = () => {}, logRequests = null }) {
+function createServer({ hub, pokerHub = null, log = () => {}, logRequests = null }) {
   const server = http.createServer(async (req, res) => {
     if (logRequests) {
       const t0 = Date.now();
@@ -79,7 +86,15 @@ function createServer({ hub, log = () => {}, logRequests = null }) {
       if ((req.url || '').includes('/events')) logRequests(`${req.socket.remoteAddress} ${req.method} ${req.url.replace(/token=[0-9a-f]+/, 'token=…')} stream opened`);
     }
     const url = new URL(req.url, 'http://localhost');
-    const parts = url.pathname.split('/').filter(Boolean);
+    let parts = url.pathname.split('/').filter(Boolean);
+    // /api/poker/... is the same API against the poker tables.
+    let H = hub;
+    const poker = parts[0] === 'api' && parts[1] === 'poker';
+    if (poker) {
+      if (!pokerHub) return send(res, 404, { error: 'No poker tables here' });
+      H = pokerHub;
+      parts = ['api', ...parts.slice(2)];
+    }
     try {
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/play')) {
         res.writeHead(302, { location: '/web/lobby.html' });
@@ -92,12 +107,21 @@ function createServer({ hub, log = () => {}, logRequests = null }) {
       const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || null;
       if (parts[1] === 'leaderboard' && req.method === 'GET') {
         const kind = url.searchParams.get('kind');
-        if (!hub.leaderboard) return send(res, 200, { players: [], byKind: {} });
-        return send(res, 200, { players: hub.leaderboard.rows({ kind: kind === 'ai' || kind === 'human' ? kind : null }), byKind: hub.leaderboard.byKind(), minRounds: hub.leaderboard.minRounds });
+        if (!H.leaderboard) return send(res, 200, { players: [], byKind: {} });
+        return send(res, 200, { players: H.leaderboard.rows({ kind: kind === 'ai' || kind === 'human' ? kind : null }), byKind: H.leaderboard.byKind(), minRounds: H.leaderboard.minRounds, unit: poker ? 'big blinds per 100 hands' : 'units per 100 rounds' });
       }
       if (parts[1] !== 'tables') return send(res, 404, { error: 'Not found' });
       if (parts.length === 2) {
-        if (req.method === 'GET') return send(res, 200, { tables: hub.list() });
+        if (req.method === 'GET') return send(res, 200, { tables: H.list() });
+        if (req.method === 'POST' && poker) {
+          const b = await readBody(req);
+          const lt = H.create({
+            name: b.name, smallBlind: b.smallBlind ?? 5, bigBlind: b.bigBlind ?? 10, buyIn: b.buyIn, bots: b.bots ?? [],
+            ...(b.turnSeconds ? { turnSeconds: Math.min(120, Math.max(5, Number(b.turnSeconds))) } : {}),
+          });
+          log(`poker table ${lt.id} created: ${lt.name}`);
+          return send(res, 201, lt.summary());
+        }
         if (req.method === 'POST') {
           const b = await readBody(req);
           const lt = hub.create({
@@ -109,7 +133,7 @@ function createServer({ hub, log = () => {}, logRequests = null }) {
           return send(res, 201, lt.summary());
         }
       }
-      const lt = hub.get(parts[2]);
+      const lt = H.get(parts[2]);
       const verb = parts[3] || '';
       if (req.method === 'GET') {
         const tok = url.searchParams.get('token') || bearer;
@@ -136,9 +160,9 @@ function createServer({ hub, log = () => {}, logRequests = null }) {
           log(`table ${lt.id}: ${b.kind} "${b.name}" sat at seat ${joined.seat}`);
           return send(res, 200, { ...joined, view: lt.view(joined.token) });
         }
-        if (verb === 'bet') lt.bet(tok, b.amount);
-        else if (verb === 'sit-out') lt.sitOut(tok);
-        else if (verb === 'act') lt.act(tok, b.action);
+        if (verb === 'bet' && !poker) lt.bet(tok, b.amount);
+        else if (verb === 'sit-out' && !poker) lt.sitOut(tok);
+        else if (verb === 'act') lt.act(tok, b.action, b.amount);
         else if (verb === 'leave') { lt.leave(tok); return send(res, 200, { ok: true }); }
         else return send(res, 404, { error: 'Not found' });
         return send(res, 200, lt.view(tok));
@@ -173,13 +197,17 @@ function main(argv) {
   const hub = new Hub({ leaderboard, log });
   hub.create({ name: 'Main table', minBet: 10, maxBet: 500 });
   hub.create({ name: 'Practice (with bots)', minBet: 10, maxBet: 500, bots: 3 });
+  const pokerBoard = new Leaderboard({ file: path.join(path.dirname(data), 'poker-players.json'), minRounds: 200 });
+  const pokerHub = new PokerHub({ leaderboard: pokerBoard, log });
+  pokerHub.create({ name: "Hold'em (with bots)", smallBlind: 5, bigBlind: 10, bots: ['tight-passive', 'calling-station', 'loose-aggressive'] });
+  pokerHub.create({ name: "Hold'em", smallBlind: 5, bigBlind: 10 });
   const logFile = flag('--log', null) && path.resolve(flag('--log'));
   if (logFile) fs.mkdirSync(path.dirname(logFile), { recursive: true });
   let logFailed = false;
   const logRequests = logFile ? (m) => fs.appendFile(logFile, `${new Date().toISOString()} ${m}\n`, (e) => {
     if (e && !logFailed) { logFailed = true; console.error(`request log: can't write ${logFile}: ${e.message}`); }
   }) : null;
-  const server = createServer({ hub, log, logRequests });
+  const server = createServer({ hub, pokerHub, log, logRequests });
   server.listen(port, host, () => {
     console.log(`Blackjack tables on port ${port}`);
     if (host === '0.0.0.0') {
@@ -191,7 +219,7 @@ function main(argv) {
     console.log(`  leaderboard data: ${path.relative(process.cwd(), data)}`);
     if (logFile) console.log(`  request log: ${path.relative(process.cwd(), logFile)}`);
   });
-  const stop = () => { hub.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1000).unref(); };
+  const stop = () => { hub.close(); pokerHub.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1000).unref(); };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }
