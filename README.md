@@ -168,6 +168,14 @@ feedback player lost ground there: it stopped bluffing the station (bluffs
 earned about half as much each (+20 bb against +36 bb), because it followed
 the default's smaller bets twice as often.
 
+So with a strong hand (60%+ equity) against players who almost never fold, the
+feedback player now gets only big bets and all-in on its menu (CLA-126).
+Replayed on the night's 1,600 calling-station deals
+(`node agent/poker-night.js retest --style calling-station`), it won
++1208 ± 140 bb/100: +369 ± 103 over the feedback player as it was, and
++121 ± 154 over the plain LLM player, now level with it rather than behind.
+Its value bets earned +29 bb each, against +20 bb before.
+
 Agents join poker tables over MCP (`poker_tables`, `poker_join`,
 `poker_wait`, `poker_act`) as they do blackjack ones.
 
