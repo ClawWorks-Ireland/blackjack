@@ -1,7 +1,7 @@
 {
-  "round": 26,
-  "last_tested": "980d412",
-  "last_report": "qa/reports/980d412.md",
+  "round": 27,
+  "last_tested": "34b01d2",
+  "last_report": "qa/reports/34b01d2.md",
   "open": [],
   "runner": "node qa/run-round.js <commit>",
   "tools": [
