@@ -90,6 +90,7 @@ test('poker player with feedback: keeps a ledger, states facts, and stops bluffi
   assert.ok(prompts.some((p) => /Your results against them: /.test(p)), 'its own results reach the decision prompt');
   assert.ok(notesIn.some((p) => /Your results against them: (bluffs|thin bets|value bets|calls|folds) \d+/.test(p)), 'and the note prompt');
   assert.ok(brain.stats.guarded > 0, 'weak-hand bets came off the menu once the station showed it never folds');
+  assert.ok(brain.stats.sizedUp > 0, 'and strong hands got only big bets against it');
   const plain = makeBrain({ ask: async () => ({ ok: true, text: 'A' }) });
   assert.equal(plain.feedback, false);
   assert.equal(plain.name, 'llm');

@@ -23,7 +23,9 @@
  * blinds, plus plain facts from the opponent's numbers ("folds to a bet only
  * 4%: bluffs lose here"), both in its notes and in every decision; and a code
  * guardrail takes weak-hand bets off the menu against players who almost never
- * fold. `feedback: false` is the player as first benchmarked (CLA-123).
+ * fold, and takes the small and medium bets off it when it has a strong hand
+ * against them (CLA-126: they pay off big bets as readily as small ones).
+ * `feedback: false` is the player as first benchmarked (CLA-123).
  */
 'use strict';
 const fs = require('fs');
@@ -84,7 +86,7 @@ function menu(view, def) {
   const legal = Object.fromEntries(you.legal.map((l) => [l.action, l]));
   const pot = view.pot;
   const opts = [];
-  const add = (label, action, amount) => { if (!opts.some((o) => o.action === action && o.amount === amount)) opts.push({ label, action, amount }); };
+  const add = (label, action, amount, size) => { if (!opts.some((o) => o.action === action && o.amount === amount)) opts.push({ label, action, amount, size }); };
   if (legal.fold && you.toCall > 0) add('fold', 'fold');
   if (legal.check) add('check', 'check');
   if (legal.call) add(`call ${legal.call.amount}`, 'call');
@@ -94,8 +96,8 @@ function menu(view, def) {
     const base = legal.raise ? view.currentBet : 0;
     const after = pot + you.toCall;
     const verb = legal.raise ? 'raise to' : 'bet';
-    for (const [name, f] of [['small', legal.raise ? 0.5 : 0.33], ['medium', 0.75], ['big', 1.1]]) add(`${verb} ${clamp(base + after * f)} (${name})`, up.action, clamp(base + after * f));
-    add(`all-in (${up.max})`, up.action, up.max);
+    for (const [name, f] of [['small', legal.raise ? 0.5 : 0.33], ['medium', 0.75], ['big', 1.1]]) add(`${verb} ${clamp(base + after * f)} (${name})`, up.action, clamp(base + after * f), name);
+    add(`all-in (${up.max})`, up.action, up.max, 'all-in');
   }
   // Mark the default: same action, nearest amount.
   let best = null;
@@ -107,7 +109,7 @@ function menu(view, def) {
 }
 
 function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, ledger = {}, feedback = false, notesEvery = 30, log = () => {}, ask = askModel } = {}) {
-  const stats = { decisions: 0, modelPicks: 0, followedDefault: 0, fallbacks: 0, notes: 0, hands: 0, guarded: 0 };
+  const stats = { decisions: 0, modelPicks: 0, followedDefault: 0, fallbacks: 0, notes: 0, hands: 0, guarded: 0, sizedUp: 0 };
   let thisHand = []; // [{kind, opponents}] for the hand in play
 
   /** "bluffs 14 tries, -38 bb; value bets 22, +140 bb; ..." */
@@ -139,6 +141,15 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, l
             safe.isDefault = true;
           }
           opts = kept.map((o, i) => ({ ...o, letter: 'ABCDEFGH'[i] }));
+        }
+      }
+      // And with a strong hand against them, small bets leave money behind: they call big ones just as often.
+      if (feedback && s.eq >= 0.6 && inHand.length && inHand.every((n) => neverFolds(profiles, n))) {
+        const kept = opts.filter((o) => o.size !== 'small' && o.size !== 'medium');
+        if (kept.length < opts.length && kept.some((o) => o.size === 'big' || o.size === 'all-in')) {
+          stats.sizedUp++;
+          const wasBet = opts.some((o) => o.isDefault && (o.size === 'small' || o.size === 'medium'));
+          opts = kept.map((o, i) => ({ ...o, letter: 'ABCDEFGH'[i], isDefault: wasBet ? o.size === 'big' || (o.size === 'all-in' && !kept.some((k) => k.size === 'big')) : o.isDefault }));
         }
       }
       const fallback = opts.find((o) => o.isDefault) || opts[0];

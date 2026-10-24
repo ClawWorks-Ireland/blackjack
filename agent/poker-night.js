@@ -6,6 +6,12 @@
  *
  *   node agent/poker-night.js run [--until 07:30] [--pairs 100]   (Europe/Dublin time)
  *   node agent/poker-night.js report
+ *   node agent/poker-night.js retest --style calling-station --chunks 1-8 --as llm-feedback-2
+ *
+ * `retest` replays chunks already played, against one style, with the LLM
+ * player with feedback as the code now stands, recorded under a new hero name,
+ * so a change to the player (CLA-126) is compared with the night's players on
+ * the same deals.
  *
  * Every pair of hands is appended to server/data/poker-night.jsonl as it
  * finishes, so a run cut short still counts. Chunk k plays deals
@@ -98,6 +104,42 @@ async function run(argv) {
   }
 }
 
+async function retest(argv) {
+  const flag = (n, d) => { const i = argv.indexOf(n); return i === -1 ? d : argv[i + 1]; };
+  const style = flag('--style', 'calling-station');
+  const [from, to] = flag('--chunks', '1-8').split('-').map(Number);
+  const hero = flag('--as', 'llm-feedback-2');
+  const pairs = Number(flag('--pairs', 100));
+  if (!POLICIES[style]) throw new Error(`no style ${style}`);
+  const brain = makeBrain({ feedback: true });
+  const paused = pauseLive();
+  const save = () => {
+    const file = path.join(DATA, 'poker-night-brains.json');
+    let out = {};
+    try { out = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) {}
+    out[hero] = { [style]: { stats: brain.stats, notes: brain.notes, ledger: brain.ledger, opponent: brain.profiles.stats('Opponent') } };
+    fs.writeFileSync(file, JSON.stringify(out, null, 1));
+  };
+  const stop = () => { save(); resumeLive(paused); process.exit(0); };
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
+  log(`retest: ${hero} v ${style}, chunks ${from}-${to}, ${pairs} pairs each`);
+  try {
+    for (let chunk = from; chunk <= to; chunk++) {
+      const t0 = Date.now();
+      const r = await match(brain, { ...POLICIES[style], name: style }, {
+        hands: pairs, seed: `night-${chunk}`,
+        onPair: (i, bb) => fs.appendFileSync(OUT, JSON.stringify({ chunk, style, hero, i, bb }) + '\n'),
+      });
+      save();
+      log(`chunk ${chunk}: ${hero} v ${style}: ${r.bbPer100 >= 0 ? '+' : ''}${r.bbPer100} bb/100 over ${r.hands} hands in ${Math.round((Date.now() - t0) / 60000)} min`);
+    }
+  } finally {
+    save();
+    resumeLive(paused);
+  }
+}
+
 function saveBrains(brains) {
   const out = {};
   for (const hero of Object.keys(brains)) {
@@ -120,19 +162,20 @@ function report(file = OUT) {
     return { n, per100: Math.round(mean * 50 * 10) / 10, ci95: Math.round(1.96 * (sd / Math.sqrt(n)) * 50 * 10) / 10 };
   };
   const out = {};
+  const diff = (a, b) => [...a.entries()].filter(([k]) => b.has(k)).map(([k, v]) => v - b.get(k));
   for (const style of STYLES) {
     const h = by[style];
     if (!h) continue;
     out[style] = {};
-    for (const hero of HEROES) if (h[hero]) out[style][hero] = ci([...h[hero].values()]);
-    for (const hero of ['llm', 'llm-feedback']) {
-      if (!h[hero] || !h.default) continue;
-      const diffs = [...h[hero].entries()].filter(([k]) => h.default.has(k)).map(([k, v]) => v - h.default.get(k));
-      if (diffs.length) out[style][`${hero} minus default`] = ci(diffs);
-    }
-    if (h.llm && h['llm-feedback']) {
-      const diffs = [...h['llm-feedback'].entries()].filter(([k]) => h.llm.has(k)).map(([k, v]) => v - h.llm.get(k));
-      if (diffs.length) out[style]['feedback minus llm'] = ci(diffs);
+    // The night's heroes, then any retested ones in the order they first appear.
+    const heroes = [...HEROES.filter((x) => h[x]), ...Object.keys(h).filter((x) => !HEROES.includes(x))];
+    for (const hero of heroes) out[style][hero] = ci([...h[hero].values()]);
+    // Each hero minus every one before it, on the deals both played.
+    for (let j = 1; j < heroes.length; j++) {
+      for (let i = 0; i < j; i++) {
+        const d = diff(h[heroes[j]], h[heroes[i]]);
+        if (d.length) out[style][`${heroes[j]} minus ${heroes[i]}`] = ci(d);
+      }
     }
   }
   return out;
@@ -141,13 +184,14 @@ function report(file = OUT) {
 if (require.main === module) {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === 'run') run(rest).then(() => log('finished')).catch((e) => { log(`error: ${e.stack}`); process.exit(1); });
+  else if (cmd === 'retest') retest(rest).then(() => log('finished')).catch((e) => { log(`error: ${e.stack}`); process.exit(1); });
   else if (cmd === 'report') {
     const r = report();
     for (const [style, v] of Object.entries(r)) {
       console.log(style);
-      for (const [k, x] of Object.entries(v)) console.log(`  ${k.padEnd(26)} ${x.per100 >= 0 ? '+' : ''}${x.per100} ± ${x.ci95} bb/100 (${2 * x.n} hands)`);
+      for (const [k, x] of Object.entries(v)) console.log(`  ${k.padEnd(34)} ${x.per100 >= 0 ? '+' : ''}${x.per100} ± ${x.ci95} bb/100 (${2 * x.n} hands)`);
     }
-  } else { console.error('usage: node agent/poker-night.js run [--until 07:30] [--pairs 100] | report'); process.exit(1); }
+  } else { console.error('usage: node agent/poker-night.js run [--until 07:30] [--pairs 100] | report | retest [--style s] [--chunks 1-8] [--as name]'); process.exit(1); }
 }
 
 module.exports = { report, STYLES, HEROES };
