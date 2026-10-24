@@ -194,4 +194,4 @@ if (require.main === module) {
   } else { console.error('usage: node agent/poker-night.js run [--until 07:30] [--pairs 100] | report | retest [--style s] [--chunks 1-8] [--as name]'); process.exit(1); }
 }
 
-module.exports = { report, STYLES, HEROES };
+module.exports = { report, STYLES, HEROES, pauseLive, resumeLive };
