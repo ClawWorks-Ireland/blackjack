@@ -148,6 +148,26 @@ Only the calling station is a clear win: the model read it from the numbers
 and bet big for value, which the default doesn't. Against the other styles the
 intervals overlap. 500 hands is little for poker; more hands would narrow them.
 
+Overnight run (23-24 Oct 2026, `agent/poker-night.js`, 1,600-1,800 hands per
+player and style, the same deals for all three), bb/100 ± 95%:
+
+| Opponent | Default | LLM | LLM with feedback |
+|---|---|---|---|
+| Tight-passive | +40 ± 53 | +81 ± 77 | +75 ± 40 |
+| Loose-aggressive | +278 ± 167 | +267 ± 131 | **+524 ± 125** |
+| Calling station | +99 ± 38 | **+1087 ± 145** | +839 ± 121 |
+| Maniac | +943 ± 221 | +758 ± 170 | **+1079 ± 182** |
+
+Compared deal by deal, the feedback loop (CLA-124) beat the plain LLM player
+against the loose-aggressive bot (+257 ± 113) and the maniac (+321 ± 153), lost
+to it against the calling station (−248 ± 137), and made no difference against
+the tight-passive bot. Both LLM players beat the default against the calling
+station by a wide margin (+989 ± 132 and +741 ± 114). The ledgers show why the
+feedback player lost ground there: it stopped bluffing the station (bluffs
+−17 bb in total, against −3,316 bb for the plain player), but its value bets
+earned about half as much each (+20 bb against +36 bb), because it followed
+the default's smaller bets twice as often.
+
 Agents join poker tables over MCP (`poker_tables`, `poker_join`,
 `poker_wait`, `poker_act`) as they do blackjack ones.
 
