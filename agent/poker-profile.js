@@ -9,13 +9,29 @@
  * - fold to bet: how often they fold after the flop when facing a bet
  * - showdown: how often they reach a showdown when they see a flop
  *
+ * - weak bets shown (CLA-130): of the postflop bets and raises whose cards were
+ *   later shown, how many were made with no pair of their own (bluffs, draws)
+ *
  * A tight player has a low VPIP, a loose one a high VPIP; a passive player a
  * low PFR and aggression; a calling station a high VPIP, a low fold to bet
  * and low aggression; a maniac a high everything except folding.
+ *
+ * Hands come from a seat at our tables (addHand) or from any hand record
+ * (addRecord, agent/poker-history.js): a watched table, imported histories.
  */
 'use strict';
+const { evaluate } = require('../engine/poker.js');
 
-const blank = () => ({ hands: 0, vpip: 0, pfr: 0, aggr: 0, calls: 0, facedBet: 0, foldedToBet: 0, sawFlop: 0, showdowns: 0, shown: [] });
+const blank = () => ({ hands: 0, vpip: 0, pfr: 0, aggr: 0, calls: 0, facedBet: 0, foldedToBet: 0, sawFlop: 0, showdowns: 0, betsShown: 0, betsShownWeak: 0, shown: [] });
+const BOARD_AT = { flop: 3, turn: 4, river: 5 };
+const MADE = new Set(['straight', 'flush', 'full house', 'four of a kind', 'straight flush']);
+
+/** Whether a bet with these cards on this board was made with no pair of the player's own (and no straight or flush). */
+function weakBet(hole, board) {
+  const onBoard = new Set(board.map((c) => c[0]));
+  if (hole[0][0] === hole[1][0] || hole.some((c) => onBoard.has(c[0]))) return false;
+  return !MADE.has(evaluate([...hole, ...board]).category);
+}
 
 class Profiles {
   constructor(data = {}) {
@@ -38,6 +54,7 @@ class Profiles {
       if (e.street !== street) { street = e.street; top = 0; put.clear(); }
       const before = put.get(e.seat) || 0;
       const facing = top > before;
+      if (e.action === 'ante') continue;
       if (e.action === 'small blind' || e.action === 'big blind') {
         put.set(e.seat, before + e.amount);
         top = Math.max(top, before + e.amount);
@@ -71,12 +88,38 @@ class Profiles {
         const name = names[x.seat];
         if (name === undefined) continue;
         const p = this.get(name);
+        // What their bets turned out to be.
+        for (const e of log) {
+          if (e.seat !== x.seat || !BOARD_AT[e.street] || (e.action !== 'bet' && e.action !== 'raise')) continue;
+          const board = lastHand.board.slice(0, BOARD_AT[e.street]);
+          if (board.length < BOARD_AT[e.street]) continue;
+          p.betsShown = (p.betsShown || 0) + 1;
+          if (weakBet(x.cards, board)) p.betsShownWeak = (p.betsShownWeak || 0) + 1;
+        }
         p.showdowns++;
         p.shown.push(`${x.cards.join(' ')} (${x.hand})`);
         if (p.shown.length > 12) p.shown.shift();
       }
     }
   }
+
+  /** Add a hand record from any source (agent/poker-history.js). */
+  addRecord(record) {
+    const { names, log, lastHand } = require('./poker-history.js').toProfileInput(record);
+    this.addHand(names, log, lastHand);
+  }
+
+  /** Add everything another set of profiles has seen (a scouting report, say) to this one. */
+  merge(other) {
+    for (const [name, q] of other.players) {
+      const p = this.get(name);
+      for (const [k, v] of Object.entries(q)) if (typeof v === 'number') p[k] = (p[k] || 0) + v;
+      p.shown = [...(p.shown || []), ...(q.shown || [])].slice(-12);
+    }
+    return this;
+  }
+
+  names() { return [...this.players.keys()]; }
 
   /** The numbers, as rates. */
   stats(name) {
@@ -91,6 +134,8 @@ class Profiles {
       showdown: rate(p.showdowns, p.sawFlop),
       shown: p.shown.slice(-6),
       facedBets: p.facedBet,
+      weakBetsShown: rate(p.betsShownWeak || 0, p.betsShown || 0),
+      betsShown: p.betsShown || 0,
     };
   }
 
@@ -100,6 +145,7 @@ class Profiles {
     const f = (v, unit = '%') => (v === null ? '?' : `${v}${unit}`);
     return `plays ${f(s.vpip)} of hands (VPIP), raises ${f(s.pfr)} preflop (PFR), aggression ${f(s.aggression, '')}, `
       + `folds to a bet ${f(s.foldToBet)}, goes to showdown ${f(s.showdown)} after the flop, over ${s.hands} hands`
+      + (s.betsShown >= 5 ? `; ${s.weakBetsShown}% of the ${s.betsShown} bets and raises seen at showdown had no pair of their own` : '')
       + (s.shown.length ? `; recently showed ${s.shown.slice(-3).join(', ')}` : '');
   }
 

@@ -1,0 +1,81 @@
+PokerStars Hand #200000000001:  Hold'em No Limit ($0.05/$0.10 USD) - 2026/10/01 20:00:00 ET
+Table 'Alpha II' 6-max Seat #3 is the button
+Seat 1: Alice ($10 in chips)
+Seat 2: Bob ($4.50 in chips)
+Seat 3: Carol ($12.25 in chips)
+Seat 5: Dave ($8 in chips) is sitting out
+Alice: posts small blind $0.05
+Bob: posts big blind $0.10
+*** HOLE CARDS ***
+Dealt to Carol [As Kd]
+Carol: raises $0.20 to $0.30
+Alice: calls $0.25
+Bob: raises $4.20 to $4.50 and is all-in
+Carol: raises $7.75 to $12.25 and is all-in
+Alice: folds
+Uncalled bet ($7.75) returned to Carol
+*** FLOP *** [2c 7d 9h]
+*** TURN *** [2c 7d 9h] [Ts]
+*** RIVER *** [2c 7d 9h Ts] [3c]
+*** SHOW DOWN ***
+Bob: shows [Qh Qc] (a pair of Queens)
+Carol: shows [As Kd] (high card Ace)
+Bob collected $8.90 from pot
+*** SUMMARY ***
+Total pot $9.30 | Rake $0.40
+Board [2c 7d 9h Ts 3c]
+Seat 1: Alice (small blind) folded before Flop
+Seat 2: Bob (big blind) showed [Qh Qc] and won ($8.90) with a pair of Queens
+Seat 3: Carol (button) showed [As Kd] and lost with high card Ace
+
+
+
+PokerStars Hand #200000000002: Tournament #3000001, $1.00+$0.10 USD Hold'em No Limit - Level II (15/30) - 2026/10/01 20:05:00 ET
+Table '3000001 1' 9-max Seat #1 is the button
+Seat 1: Alice (1500 in chips)
+Seat 2: Bob (1500 in chips)
+Seat 3: Carol (1500 in chips)
+Alice: posts the ante 5
+Bob: posts the ante 5
+Carol: posts the ante 5
+Bob: posts small blind 15
+Carol: posts big blind 30
+*** HOLE CARDS ***
+Alice: calls 30
+Bob: calls 15
+Carol: checks
+*** FLOP *** [Kh 8s 4d]
+Bob: checks
+Carol: bets 60
+Alice: calls 60
+Bob: folds
+*** TURN *** [Kh 8s 4d] [5c]
+Carol: bets 150
+Alice: calls 150
+*** RIVER *** [Kh 8s 4d 5c] [Jd]
+Carol: bets 300
+Alice: calls 300
+*** SHOW DOWN ***
+Carol: shows [7c 6c] (a straight, Four to Eight)
+Alice: mucks hand
+Carol collected 1125 from pot
+*** SUMMARY ***
+Total pot 1125 | Rake 0
+Board [Kh 8s 4d 5c Jd]
+Seat 1: Alice (button) mucked [Kd Qc]
+Seat 3: Carol (big blind) showed [7c 6c] and won (1125) with a straight, Four to Eight
+
+
+
+PokerStars Hand #200000000003:  Omaha Pot Limit ($0.05/$0.10 USD) - 2026/10/01 20:10:00 ET
+Table 'Beta' 6-max Seat #1 is the button
+Seat 1: Alice ($10 in chips)
+Seat 2: Bob ($10 in chips)
+Alice: posts small blind $0.05
+Bob: posts big blind $0.10
+*** HOLE CARDS ***
+Alice: folds
+Uncalled bet ($0.05) returned to Bob
+Bob collected $0.10 from pot
+*** SUMMARY ***
+Total pot $0.10 | Rake $0
