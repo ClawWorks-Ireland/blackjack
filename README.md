@@ -179,6 +179,67 @@ Its value bets earned +29 bb each, against +20 bb before.
 Agents join poker tables over MCP (`poker_tables`, `poker_join`,
 `poker_wait`, `poker_act`) as they do blackjack ones.
 
+### Scouting: watch a game, learn the players, then join (CLA-127)
+
+`agent/poker-scout.js` learns how the players in a game play before sitting
+down. It learns from any game whose hands it can see:
+
+- **A live table, from the rail** (CLA-129): a spectator long-polls
+  `/api/poker/tables/:id/wait?since=N` with no token and sees what anyone
+  watching would: the actions, and hole cards only at a showdown. Claude
+  sessions can do the same with the MCP tool `poker_watch`.
+- **Hand histories from elsewhere** (CLA-128, `agent/poker-history.js`):
+  PokerStars-style text, the format most sites and trackers export (Hold'em,
+  cash and tournament; other games are skipped and counted), or JSON lines of
+  its hand record. Nothing here connects to a real-money site.
+
+For each player the scouting store (`server/data/poker-scouting.json`, with
+every hand seen in `poker-scouting.hands.jsonl`) holds the profile numbers,
+how often their bets turned out at showdown to have no pair of their own, a
+style read in code (tight-passive, tight-aggressive, calling station,
+loose-passive, loose-aggressive, maniac, or regular) with a confidence, how to
+beat that style, and a note from the local model (CLA-130). The style rules
+were checked against the styled bots, heads-up and five-handed. Joining hands
+the store to the LLM player with feedback, which states each opponent's style
+as a fact from its first hand at the table and keeps learning into the store.
+
+```bash
+node agent/poker-scout.js watch --table p1 --hands 200      # from the rail
+node agent/poker-scout.js import ~/Downloads/histories/*.txt
+node agent/poker-scout.js notes                             # the local model writes a note on each player
+node agent/poker-scout.js report --table p1                 # what we know about the players sitting there
+node agent/poker-scout.js join --table p1 --name "Gemma (scout)"
+```
+
+`poker_scouting` gives a Claude session the same report over MCP. Run one
+scout per table at a time: a watcher and a seated scout on the same table
+would count its hands twice.
+
+`agent/poker-scout-bench.js` measures what scouting is worth (CLA-131): the
+opponent plays a regular while the scout watches from the rail, then the LLM
+player with feedback plays it in duplicate, from the report and cold, on the
+same deals.
+
+First run (24 Oct 2026; 300 hands watched, 200 played per player and style),
+bb/100 ± 95%:
+
+| Opponent | Cold | Scouted | Scouted − cold |
+|---|---|---|---|
+| Tight-passive | −17 ± 47 | −66 ± 99 | −50 ± 71 |
+| Loose-aggressive | +303 ± 379 | +110 ± 378 | −193 ± 443 |
+| Calling station | +1005 ± 381 | +855 ± 369 | −150 ± 279 |
+| Maniac | +654 ± 389 | +290 ± 461 | −365 ± 412 |
+
+The scout read every style right, with high confidence, and wrote sensible
+notes, but the scouted player did not win more: no difference is outside the
+noise, and all of them lean the wrong way. Two reasons it can't show much
+yet. These bots are extreme, so the cold player learns them almost at once:
+its guardrails were already firing within the first few dozen hands. And any
+edge from scouting lasts only those first hands, while 200 hands with an LLM
+choosing every move is far too few to see it. A fair test needs many short
+sessions, each with a fresh player, and opponents whose leaks take longer to
+spot.
+
 ## Test it
 
 ```bash
