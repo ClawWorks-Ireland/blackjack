@@ -33,6 +33,39 @@ function weakBet(hole, board) {
   return !MADE.has(evaluate([...hole, ...board]).category);
 }
 
+/** How to beat each style (CLA-130). */
+const EXPLOIT = {
+  maniac: 'raises nearly everything and almost never folds: do not bluff; call down with medium hands and let them bet into you; raise strong hands for value',
+  'calling station': 'calls almost anything and rarely bets: never bluff; bet big and bet thin for value',
+  'loose-aggressive': 'plays many hands and bets a lot: call down lighter with medium hands, re-raise strong ones, bluff less',
+  'loose-passive': 'plays many hands but rarely bets: value bet more, bluff less; when they do raise, they have it',
+  'tight-passive': 'plays few hands and rarely raises: steal blinds and small pots; fold medium hands to their raises and big bets',
+  'tight-aggressive': 'plays few hands but bets them hard: respect their raises; steal when they fold',
+  regular: 'no clear leak yet: stay close to the default',
+};
+
+/**
+ * A style read from the numbers (CLA-130), with how sure it is from the
+ * sample size: {style, confidence: low|medium|high, hands, exploit}, or style
+ * "unknown" under 20 hands. Thresholds from the styled bots' own numbers,
+ * heads-up and five-handed (engine/poker-bots.js).
+ */
+function classify(s) {
+  if (!s || s.hands < 20 || s.vpip === null) return { style: 'unknown', confidence: 'none', hands: s ? s.hands : 0, exploit: 'not enough hands seen' };
+  const ag = s.aggression ?? 0;
+  const ftb = s.foldToBet ?? 50;
+  let style;
+  if (s.vpip >= 60 && (s.pfr >= 60 || ag >= 5)) style = 'maniac';
+  else if (s.vpip >= 50 && ftb <= 15 && ag < 1) style = 'calling station';
+  else if (s.vpip >= 40 && (s.pfr >= 20 || ag >= 1.5)) style = 'loose-aggressive';
+  else if (s.vpip >= 40) style = 'loose-passive';
+  else if (s.vpip < 30 && s.pfr < 10 && ag < 1) style = 'tight-passive';
+  else if (s.vpip < 30) style = 'tight-aggressive';
+  else style = 'regular';
+  const confidence = s.hands >= 200 ? 'high' : s.hands >= 50 ? 'medium' : 'low';
+  return { style, confidence, hands: s.hands, exploit: EXPLOIT[style] };
+}
+
 class Profiles {
   constructor(data = {}) {
     this.players = new Map(Object.entries(data));
@@ -121,6 +154,9 @@ class Profiles {
 
   names() { return [...this.players.keys()]; }
 
+  /** The style read from this player's numbers (classify). */
+  style(name) { return classify(this.stats(name)); }
+
   /** The numbers, as rates. */
   stats(name) {
     const p = this.get(name);
@@ -152,4 +188,4 @@ class Profiles {
   toJSON() { return Object.fromEntries(this.players); }
 }
 
-module.exports = { Profiles };
+module.exports = { Profiles, classify, EXPLOIT };

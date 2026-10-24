@@ -185,11 +185,15 @@ class LivePokerTable {
     for (const w of [...this.waiters]) w();
   }
 
-  /** Resolve when it is `t`'s move, or the table moves past `since`, or after `timeoutMs`. */
+  /**
+   * Resolve when it is `t`'s move, or the table moves past `since`, or after
+   * `timeoutMs`. With no token it is a spectator on the rail (CLA-129): the
+   * public view, hole cards only at a showdown, as soon as the table moves.
+   */
   wait(t, since, timeoutMs = 25000) {
-    const p = this.player(t);
-    const ready = () => this.table.toAct === p.seat || (since !== undefined && this.version > since);
-    if (ready()) return Promise.resolve(this.view(t));
+    const p = t ? this.player(t) : null;
+    const ready = () => (p && this.table.toAct === p.seat) || (since !== undefined && this.version > since);
+    if (ready() || (!p && since === undefined)) return Promise.resolve(this.view(t));
     return new Promise((resolve) => {
       const done = () => { clearTimeout(timer); this.waiters.delete(check); resolve(this.view(t)); };
       const check = () => { if (ready()) done(); };

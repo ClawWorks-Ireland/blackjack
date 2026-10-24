@@ -23,7 +23,7 @@ test('MCP: initialize agrees a protocol version and offers tools', () => {
   const names = call(env, 'tools/list').result.tools.map((t) => t.name);
   assert.deepEqual(names, ['new_table', 'deal', 'act', 'auto_play', 'observe', 'hint',
     'live_tables', 'live_join', 'live_wait', 'live_bet', 'live_act', 'live_leave', 'live_leaderboard',
-    'poker_tables', 'poker_join', 'poker_wait', 'poker_act', 'poker_leave', 'poker_leaderboard']);
+    'poker_tables', 'poker_join', 'poker_wait', 'poker_act', 'poker_leave', 'poker_watch', 'poker_scouting', 'poker_leaderboard']);
   for (const t of TOOLS) assert.equal(t.inputSchema.type, 'object', t.name);
 });
 

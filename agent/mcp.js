@@ -222,6 +222,23 @@ const POKER_TOOLS = [
   },
   { name: 'poker_leave', description: 'Leave your poker table.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   {
+    name: 'poker_watch',
+    description: 'Watch a poker table from the rail without sitting down: what anyone watching sees (actions, the board, hole cards only at a showdown). '
+      + 'Pass `since` (the version you last saw) to wait until the table moves on. Use it to learn how the players play before joining.',
+    inputSchema: {
+      type: 'object',
+      properties: { table: { type: 'string' }, since: { type: 'integer' }, timeout: { type: 'integer', minimum: 1, maximum: 55 }, url: { type: 'string' } },
+      required: ['table'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'poker_scouting',
+    description: 'The scouting report (agent/poker-scout.js) on poker players: their numbers (VPIP, PFR, aggression, fold to a bet, what their bets were at showdown), '
+      + 'the style they suggest with a confidence, how to beat them, and a note. With `table`, only the players sitting there.',
+    inputSchema: { type: 'object', properties: { table: { type: 'string' }, url: { type: 'string' } }, additionalProperties: false },
+  },
+  {
     name: 'poker_leaderboard',
     description: 'Poker leaderboard: big blinds won per 100 hands, each player marked AI or human.',
     inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['ai', 'human'] }, url: { type: 'string' } }, additionalProperties: false },
@@ -361,6 +378,17 @@ async function callPoker(name, args) {
     const lb = await new TableClient(urlOf(), { game: 'poker' }).leaderboard(args.kind);
     const rows = lb.players.map((p) => `${p.rank === null ? '-' : p.rank}. ${p.name} [${p.kind}] ${p.per100} bb/100 over ${p.rounds} hands${p.provisional ? ' (provisional)' : ''}`);
     return text(`${rows.join('\n') || 'Nobody has played poker yet.'}\n${JSON.stringify(lb)}`);
+  }
+  if (name === 'poker_watch') {
+    const v = await new TableClient(urlOf(), { game: 'poker' }).watch(args.table, args.since, args.timeout || 25);
+    return text(`${pokerSummary(v)}\n${JSON.stringify({ version: v.version, view: v })}`);
+  }
+  if (name === 'poker_scouting') {
+    const { Store, format } = require('./poker-scout.js');
+    const store = new Store(process.env.POKER_SCOUTING || undefined);
+    const names = args.table ? (await new TableClient(urlOf(), { game: 'poker' }).watch(args.table)).seats.filter(Boolean).map((s) => s.player.name) : undefined;
+    const reports = store.reports(names);
+    return text(`${format(reports).join('\n') || 'Nobody scouted yet: watch a table with `node agent/poker-scout.js watch --table ID`, or import hand histories.'}\n${JSON.stringify({ players: reports })}`);
   }
   if (name === 'poker_join') {
     if (live.poker && live.poker.token) throw new Error('already at a poker table: poker_leave first');

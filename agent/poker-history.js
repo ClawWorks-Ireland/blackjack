@@ -26,6 +26,7 @@
  * toProfileInput(record) gives Profiles.addHand its (names, log, lastHand).
  */
 'use strict';
+const crypto = require('crypto');
 const { evaluate } = require('../engine/poker.js');
 
 const STREETS = ['preflop', 'flop', 'turn', 'river'];
@@ -42,10 +43,14 @@ function fromTable(view, meta = {}) {
     players.push({ seat: i, name: s.player.name, kind: s.player.kind, stack: s.stack - h.net[i] });
     net[i] = h.net[i];
   });
+  const table = meta.table || view.id || 'table';
+  const actions = view.log.map((e) => ({ ...e }));
+  // Hand numbers start again when the server does, so the id carries a fingerprint of the hand too.
+  const print = crypto.createHash('sha1').update(JSON.stringify([players, actions, h.board, net])).digest('hex').slice(0, 10);
   return {
-    source: 'live', id: `${meta.table || view.id || 'table'}-${h.handNo}`, table: meta.table || view.id || null, game: 'holdem',
+    source: 'live', id: `${table}-${h.handNo}-${print}`, table, game: 'holdem',
     smallBlind: view.smallBlind, bigBlind: view.bigBlind, button: view.button,
-    players, actions: view.log.map((e) => ({ ...e })), board: [...h.board],
+    players, actions, board: [...h.board],
     shown: (h.shown || []).map((x) => ({ seat: x.seat, cards: [...x.cards] })), net,
   };
 }

@@ -13,6 +13,7 @@
  * back to the default.
  *
  *   node agent/poker-player.js --url http://192.168.4.43:8787 --table p1 --name "Gemma (poker)"
+ *   node agent/poker-player.js ... --scouting server/data/poker-scouting.json   (start from a scouting report, CLA-130)
  *
  * As a benchmark policy: makeBrain({...}) has decide(view, rng) and
  * onHandEnd(view, names), as agent/poker-bench.js expects.
@@ -75,6 +76,10 @@ function facts(profiles, name) {
   if (s.facedBets >= 15 && s.foldToBet !== null && s.foldToBet > 50) out.push(`folds to a bet ${s.foldToBet}%: bets and raises win pots against them even with weak hands`);
   if (s.hands >= 30 && s.pfr !== null && s.pfr > 40) out.push(`raises preflop ${s.pfr}% of hands: often with nothing; call down lighter`);
   if (s.hands >= 30 && s.vpip !== null && s.vpip < 20) out.push(`plays only ${s.vpip}% of hands: their bets and raises usually mean strength`);
+  if (s.betsShown >= 8 && s.weakBetsShown >= 45) out.push(`${s.weakBetsShown}% of their bets seen at showdown had no pair: call them down lighter`);
+  if (s.betsShown >= 8 && s.weakBetsShown <= 10) out.push(`their bets seen at showdown were almost always made hands: fold marginal hands to them`);
+  const st = profiles.style(name);
+  if (st.style !== 'unknown' && st.style !== 'regular' && st.confidence !== 'low') out.push(`plays like a ${st.style} (${st.confidence} confidence, ${st.hands} hands): ${st.exploit}`);
   return out;
 }
 
@@ -219,10 +224,19 @@ function saveData(brain, file = DATA) {
   fs.writeFileSync(file, JSON.stringify({ profiles: brain.profiles.toJSON(), notes: brain.notes, ledger: brain.ledger }, null, 1));
 }
 
-/** Play live at a poker table until stopped. */
-async function playLive({ url, table, name, llm = DEFAULT_LLM, log = console.log, hands = 0 }) {
-  const data = loadData();
-  const brain = makeBrain({ llm, ...data, log, feedback: true });
+/**
+ * Play live at a poker table until stopped. With `scouting` (a Store from
+ * agent/poker-scout.js, CLA-130) the player starts from what was scouted and
+ * keeps learning into it; otherwise from its own file.
+ */
+async function playLive({ url, table, name, llm = DEFAULT_LLM, log = console.log, hands = 0, scouting = null, ask = askModel }) {
+  const data = scouting ? { profiles: scouting.profiles, notes: scouting.notes, ledger: scouting.ledger } : loadData();
+  const save = scouting ? () => scouting.save() : (b) => saveData(b);
+  const brain = makeBrain({ llm, ...data, log, feedback: true, ask });
+  if (scouting) {
+    const seated = (await new TableClient(url, { game: 'poker' }).watch(table)).seats.filter(Boolean).map((s) => s.player.name);
+    for (const n of seated) { const st = brain.profiles.style(n); log(`scouted ${n}: ${st.style}${st.style === 'unknown' ? '' : ` (${st.confidence} confidence, ${st.hands} hands)`}`); }
+  }
   const c = new TableClient(url, { game: 'poker' });
   const j = await c.join(table, name);
   log(`${name} seated at poker table ${table}, seat ${j.seat}`);
@@ -234,7 +248,7 @@ async function playLive({ url, table, name, llm = DEFAULT_LLM, log = console.log
     if (v.phase === 'done' && v.lastHand && v.lastHand.handNo !== lastHand) {
       lastHand = v.lastHand.handNo;
       await brain.onHandEnd(v, v.seats.map((s) => (s ? s.player.name : undefined)));
-      saveData(brain);
+      save(brain);
       if (lastHand % 25 === 0) log(`stats ${JSON.stringify(brain.stats)}`);
       if (hands && brain.stats.hands >= hands) break;
     }
@@ -250,6 +264,7 @@ async function playLive({ url, table, name, llm = DEFAULT_LLM, log = console.log
 async function main(argv) {
   const flag = (n, d) => { const i = argv.indexOf(n); return i === -1 ? d : argv[i + 1]; };
   const opts = { url: flag('--url', 'http://192.168.4.43:8787'), table: flag('--table', 'p1'), name: flag('--name', 'Gemma (poker)'), llm: flag('--llm', DEFAULT_LLM), hands: Number(flag('--hands', 0)), log: (m) => console.log(`${new Date().toISOString()} ${m}`) };
+  if (argv.includes('--scouting')) { const { Store } = require('./poker-scout.js'); opts.scouting = new Store(path.resolve(flag('--scouting'))); }
   const stop = () => process.exit(0);
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
@@ -259,4 +274,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { makeBrain, menu, facts, kindOf, SYSTEM };
+module.exports = { makeBrain, menu, facts, kindOf, playLive, SYSTEM };

@@ -44,6 +44,12 @@ class TableClient {
   }
 
   list() { return this.call('GET', `${this.base}/tables`).then((d) => d.tables); }
+
+  /** A spectator (CLA-129): a table's public view without a seat, now or once it moves past `since`. */
+  watch(table, since, timeout = 25) {
+    const q = since === undefined ? '' : `?since=${since}&timeout=${timeout}`;
+    return this.call('GET', `${this.base}/tables/${encodeURIComponent(table)}/${since === undefined ? '' : 'wait'}${q}`);
+  }
   create(opts) { return this.call('POST', `${this.base}/tables`, opts); }
   leaderboard(kind) { return this.call('GET', `${this.base}/leaderboard${kind ? `?kind=${kind}` : ''}`); }
 
