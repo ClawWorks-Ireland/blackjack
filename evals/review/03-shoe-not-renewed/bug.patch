@@ -1,0 +1,13 @@
+diff --git a/engine/blackjack.js b/engine/blackjack.js
+index 9d1f190..afb0cdc 100644
+--- a/engine/blackjack.js
++++ b/engine/blackjack.js
+@@ -273,7 +273,7 @@
+ 
+     /** Replace the shoe at the cut card: the next seeded shoe, or a random one. */
+     freshShoe() {
+-      if (this.seed === null) this.shoe = shuffle(createShoe(this.decks), this.rng);
++      if (this.seed === null) this.shoe = shuffle(this.shoe, this.rng);
+       else this.shoe = seededShoe(this.decks, this.seed, ++this.shoeNo);
+       this.shuffles++;
+     }

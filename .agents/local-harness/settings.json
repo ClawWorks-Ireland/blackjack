@@ -1,0 +1,29 @@
+{
+  "$comment": "Claude Code settings for A3a (local Qwen via Ollama) on the local-llm runner. Spec REQ-CFG-4e. Loaded with --settings by scripts/agents/local-implement.sh; CLAUDE_CONFIG_DIR points at an empty per-job dir so no subscription credentials are visible.",
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:11434",
+    "ANTHROPIC_AUTH_TOKEN": "ollama",
+    "ANTHROPIC_MODEL": "qwen2.5-coder:14b",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "qwen2.5-coder:14b",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "qwen2.5-coder:14b",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen2.5-coder:14b",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "qwen2.5-coder:14b",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_TELEMETRY": "1"
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(npm test:*)", "Bash(node --test:*)", "Bash(node macos/scripts/embed-engine.js:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(ls:*)", "Bash(cat:*)"],
+    "deny": [
+      "Bash(git push:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "Bash(git config:*)", "Bash(git remote:*)",
+      "Edit(/CLAUDE.md)", "Edit(/REVIEW.md)", "Edit(/RISK.md)", "Edit(/CODEOWNERS)", "Edit(/.agents/**)", "Edit(/.claude/**)", "Edit(/.github/**)", "Edit(/scripts/gates/**)", "Edit(/scripts/rollback)", "Edit(/scripts/agents/**)", "Edit(/evals/**)",
+      "Write(/CLAUDE.md)", "Write(/REVIEW.md)", "Write(/RISK.md)", "Write(/CODEOWNERS)", "Write(/.agents/**)", "Write(/.claude/**)", "Write(/.github/**)", "Write(/scripts/gates/**)", "Write(/scripts/rollback)", "Write(/scripts/agents/**)", "Write(/evals/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash", "hooks": [{ "type": "command", "command": "node \"$POLICY_GUARD\"" }] }
+    ]
+  }
+}

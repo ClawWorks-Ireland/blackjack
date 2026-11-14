@@ -1,0 +1,12 @@
+diff --git a/engine/blackjack.js b/engine/blackjack.js
+index 9d1f190..dec9b8d 100644
+--- a/engine/blackjack.js
++++ b/engine/blackjack.js
+@@ -130,7 +130,6 @@
+   function canDoubleOn(cards, doubleOn = 'any') {
+     if (doubleOn === 'any') return true;
+     const { total, soft } = handValue(cards);
+-    if (soft) return false;
+     return doubleOn === '10-11' ? total === 10 || total === 11 : total >= 9 && total <= 11;
+   }
+ 

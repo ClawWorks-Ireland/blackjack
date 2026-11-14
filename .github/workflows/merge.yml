@@ -1,0 +1,86 @@
+# A9 single merge path (REQ-GATE-1, G10). Deterministic verification by
+# scripts/gates; the Claude step only executes the merge/update with the Claude
+# App token (D11) so the push triggers main-guard. One merge at a time.
+name: merge
+on:
+  workflow_run:
+    workflows: [ci, review, security, classify, tier-approval, tier2-cooling]
+    types: [completed]
+  schedule:
+    - cron: '41 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+  checks: read
+  id-token: write
+concurrency:
+  group: merge          # serial merges (REQ-GATE-1, T17)
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      action: ${{ steps.p.outputs.action }}
+      pr: ${{ steps.p.outputs.pr }}
+      sha: ${{ steps.p.outputs.sha }}
+    env: { GITHUB_TOKEN: "${{ github.token }}" }
+    steps:
+      - uses: actions/checkout@v4   # main: RISK.md, PROJECT.md, gate scripts
+        with: { persist-credentials: false }
+      - id: p
+        run: |
+          node scripts/gates/gate.js merge-plan > plan.json
+          node -e 'const p=require("./plan.json");for(const r of p.results)console.log(`#${r.number} tier ${r.tier}: ${r.ok?"READY":r.behind?"behind main":r.reasons.join("; ")}`)'
+          for k in action pr sha; do echo "$k=$(node -p "require('./plan.json').$k ?? ''")" >> "$GITHUB_OUTPUT"; done
+      - if: steps.p.outputs.action == 'merge'
+        run: node scripts/gates/gate.js merge-evidence --pr "${{ steps.p.outputs.pr }}" --sha "${{ steps.p.outputs.sha }}"
+      - uses: actions/upload-artifact@v4
+        with: { name: merge-plan, path: plan.json, retention-days: 30 }
+
+  act:
+    needs: plan
+    if: needs.plan.outputs.action == 'merge' || needs.plan.outputs.action == 'update'
+    runs-on: [self-hosted, claude-jobs]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false, clean: true }
+      - id: cmd
+        run: |
+          if [ "${{ needs.plan.outputs.action }}" = merge ]; then
+            echo "run=node scripts/gates/gate.js merge-execute --pr ${{ needs.plan.outputs.pr }} --sha ${{ needs.plan.outputs.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=node scripts/gates/gate.js update-branch --pr ${{ needs.plan.outputs.pr }}" >> "$GITHUB_OUTPUT"
+          fi
+      - id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Run exactly this one command and report its output. Do nothing else:
+            ${{ steps.cmd.outputs.run }}
+          claude_args: >-
+            --agent release-manager --model haiku --max-turns 4
+            --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
+      - if: failure()
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+
+  notes:
+    needs: [plan, act]
+    if: needs.plan.outputs.action == 'merge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: { GITHUB_TOKEN: "${{ github.token }}", PR: "${{ needs.plan.outputs.pr }}" }
+    steps:
+      - name: Owed manual checks (overlay manual_checks)
+        run: |
+          FILES=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json files -q '.files[].path')
+          MSG=""
+          echo "$FILES" | grep -qE '^(macos/|engine/|agent/)' && MSG="$MSG\n- macOS CI owed on the Mac: \`macos/scripts/ci.sh\`"
+          echo "$FILES" | grep -qE '^(web/|engine/|index\.html)' && MSG="$MSG\n- QA round owed: \`node qa/run-round.js <merge sha>\`"
+          [ -n "$MSG" ] && gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: A9 Release Manager   ITEM: #%s   RESULT: done\nMerged by merge.yml after verifying all gates (REQ-GATE-1).\nManual checks these hosts cannot run yet:%b' "$PR" "$MSG")" || true

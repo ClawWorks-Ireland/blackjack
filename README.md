@@ -92,9 +92,9 @@ unavailable, sitting down again when it's back. Output goes to `server/data/agen
 It also writes down what it notices to `server/data/agent-feedback.jsonl`:
 things the harness sees for certain (server errors, a stuck table, a bankroll
 that doesn't add up) and, every 25 rounds, the model's own notes on what was
-missing or unclear. Small models get things wrong, so nothing goes to Linear
+missing or unclear. Small models get things wrong, so nothing becomes an issue
 on its own: ask Claude to triage the agent feedback, and it checks each
-finding against the code, files the real ones in Linear (label "agent
+finding against the code, files the real ones as GitHub issues (label "agent
 feedback") and marks them (`node agent/feedback.js pending` lists what's
 waiting).
 
@@ -472,7 +472,7 @@ and history; it doesn't touch the bankroll.
 | `agent/` | `env.js` (reset/step/observe), `cli.js` (JSON lines), `mcp.js` (MCP server), `bench.js` + `policies.js` (benchmark, [leaderboard](agent/LEADERBOARD.md)), examples |
 | `web/` | The browser UI on top of the engine |
 | `macos/` | SwiftUI app; `BlackjackCore` runs `agent/env.js` and the engine it needs in JavaScriptCore |
-| `qa/` | QA harness: fuzzers, rule checks, Playwright UI checks, per-round reports and the backlog archive (open work is in Linear, project BlackJack) |
+| `qa/` | QA harness: fuzzers, rule checks, Playwright UI checks, per-round reports and the backlog archive (open work is in GitHub Issues) |
 
 | File | What it does |
 |---|---|

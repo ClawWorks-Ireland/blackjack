@@ -1,0 +1,52 @@
+{
+ "type": "object",
+ "properties": {
+  "lens": {
+   "type": "string"
+  },
+  "findings": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer"
+     },
+     "claim": {
+      "type": "string"
+     },
+     "failing_input": {
+      "type": "string"
+     },
+     "suggested_severity": {
+      "enum": [
+       "Important",
+       "Nit",
+       "Pre-existing"
+      ]
+     }
+    },
+    "required": [
+     "id",
+     "file",
+     "line",
+     "claim",
+     "failing_input",
+     "suggested_severity"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "required": [
+  "lens",
+  "findings"
+ ],
+ "additionalProperties": false
+}

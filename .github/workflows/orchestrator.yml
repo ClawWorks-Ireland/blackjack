@@ -1,0 +1,60 @@
+# A0 Orchestrator (REQ-CFG-6): hourly 07:00–23:00 Europe/Dublin plus events;
+# daily digest at 08:00 (REQ-COORD-4). Schedules approved by Delmar at setup.
+name: orchestrator
+on:
+  schedule:
+    - cron: '7 * * * *'      # hourly; the Dublin window is checked below (DST-safe)
+  issues:
+    types: [opened, labeled, closed]
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      digest: { description: 'Write the daily digest now', type: boolean, default: false }
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: write
+  statuses: read
+  id-token: write
+concurrency:
+  group: orchestrator
+  cancel-in-progress: false
+jobs:
+  sweep:
+    runs-on: [self-hosted, claude-jobs]
+    timeout-minutes: 30
+    env: { GITHUB_TOKEN: "${{ github.token }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false, clean: true }
+      - id: w
+        run: |
+          node -e '
+            const G=require("./scripts/gates/lib.js"); const h=G.dublinHour();
+            const sched=process.env.EV==="schedule";
+            console.log("run="+(!sched||G.inDublinWindow()));
+            console.log("digest="+(process.env.DIGEST==="true"||(sched&&h===8)));
+            console.log("monday="+(new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Dublin",weekday:"short"}).format(new Date())==="Mon"));
+          ' >> "$GITHUB_OUTPUT"
+          echo "level=$(node scripts/gates/gate.js level)" >> "$GITHUB_OUTPUT"
+          echo "throttled=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length)" >> "$GITHUB_OUTPUT"
+        env: { EV: "${{ github.event_name }}", DIGEST: "${{ inputs.digest }}" }
+      - id: claude
+        if: steps.w.outputs.run == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Run the A0 sweep for ${{ github.repository }} (trigger: ${{ github.event_name }}).
+            Effective autonomy level: ${{ steps.w.outputs.level }}. Open throttled issues: ${{ steps.w.outputs.throttled }}.
+            Write the daily digest this run: ${{ steps.w.outputs.digest }} (Monday metrics: ${{ steps.w.outputs.monday }}).
+            The digest is the open pinned issue labelled `digest`; replace its body. Board status is tracked with `status:*` labels.
+            If a throttled issue is open and a Claude run has succeeded since it was opened, close it with the throttled hours.
+          claude_args: >-
+            --agent orchestrator --model opus --max-turns 60
+            --allowedTools "Read,Grep,Glob,Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh issue close:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh label list:*),Bash(gh workflow run implement.yml:*),Bash(gh workflow run spec-plan.yml:*),Bash(gh api -X GET:*),Bash(node scripts/gates/gate.js level)"
+            --disallowedTools "Edit,Write,Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push:*)"
+      - if: failure()
+        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"

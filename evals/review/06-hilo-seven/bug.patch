@@ -1,0 +1,13 @@
+diff --git a/engine/counting.js b/engine/counting.js
+index 95c9716..30aed89 100644
+--- a/engine/counting.js
++++ b/engine/counting.js
+@@ -40,7 +40,7 @@
+   // Tags by card value 2-10 and 11 (ace).
+   const tagRow = (a) => ({ 2: a[0], 3: a[1], 4: a[2], 5: a[3], 6: a[4], 7: a[5], 8: a[6], 9: a[7], 10: a[8], 11: a[9] });
+   const SYSTEMS = Object.freeze({
+-    hilo: { id: 'hilo', name: 'Hi-Lo', level: 1, balanced: true, aceSide: false, tags: tagRow([1, 1, 1, 1, 1, 0, 0, 0, -1, -1]) },
++    hilo: { id: 'hilo', name: 'Hi-Lo', level: 1, balanced: true, aceSide: false, tags: tagRow([1, 1, 1, 1, 1, 1, 0, 0, -1, -1]) },
+     ko: { id: 'ko', name: 'KO', level: 1, balanced: false, aceSide: false, tags: tagRow([1, 1, 1, 1, 1, 1, 0, 0, -1, -1]) },
+     ho2: { id: 'ho2', name: 'Hi-Opt II', level: 2, balanced: true, aceSide: true, tags: tagRow([1, 1, 2, 2, 1, 1, 0, 0, -2, 0]) },
+     om2: { id: 'om2', name: 'Omega II', level: 2, balanced: true, aceSide: true, tags: tagRow([1, 1, 2, 2, 2, 1, 0, -1, -2, 0]) },

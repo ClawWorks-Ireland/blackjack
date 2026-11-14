@@ -1,0 +1,20 @@
+{
+ "type": "object",
+ "properties": {
+  "tier": {
+   "enum": [
+    0,
+    1,
+    2
+   ]
+  },
+  "rationale": {
+   "type": "string"
+  }
+ },
+ "required": [
+  "tier",
+  "rationale"
+ ],
+ "additionalProperties": false
+}

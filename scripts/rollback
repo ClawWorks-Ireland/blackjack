@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# One-step rollback (spec REQ-FLOW-4, T8). Reverts one commit on main with a
+# `Rollback-of: <sha>` trailer, which main-guard accepts only if the commit is
+# an exact revert (it replays it). Usable by Delmar locally and by A9
+# (release.yml → Run workflow, with the Claude App token).
+#
+#   scripts/rollback <sha>          prepare the revert on a local main and run npm test
+#   scripts/rollback <sha> --push   ...and push it to origin/main
+set -euo pipefail
+SHA="${1:?usage: scripts/rollback <sha> [--push]}"; PUSH="${2:-}"
+cd "$(git rev-parse --show-toplevel)"
+[ -z "$(git status --porcelain)" ] || { echo "working tree not clean" >&2; exit 1; }
+start=$(date +%s)
+git fetch -q origin main
+git checkout -q -B main origin/main
+FULL=$(git rev-parse --verify "$SHA^{commit}")
+git merge-base --is-ancestor "$FULL" origin/main || { echo "$SHA is not on main" >&2; exit 1; }
+PARENTS=$(git log -1 --format=%P "$FULL" | wc -w)
+M=(); [ "$PARENTS" -gt 1 ] && M=(-m 1)
+git revert --no-edit "${M[@]}" "$FULL"
+git commit -q --amend -m "$(git log -1 --format=%B)
+
+Rollback-of: $FULL"
+npm test >/tmp/rollback-test.log 2>&1 || { echo "npm test fails after the revert (log: /tmp/rollback-test.log); not pushing" >&2; [ "$PUSH" = --push ] && exit 1; }
+if [ "$PUSH" = --push ]; then
+  TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  if [ -n "$TOKEN" ]; then   # A9 in CI: push as the Claude App
+    AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push "https://github.com/${GITHUB_REPOSITORY:-delmarolivier/blackjack}.git" HEAD:main
+  else
+    git push origin HEAD:main  # Delmar locally (REQ-GATE-3: H's route to main)
+  fi
+fi
+echo "rolled back ${FULL:0:7} as $(git rev-parse --short HEAD) in $(( $(date +%s) - start ))s${PUSH:+ (pushed)}"
