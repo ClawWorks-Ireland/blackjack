@@ -7,6 +7,11 @@
 # Run from the trusted base checkout: settings and the policy guard come from
 # here, never from the worktree. Exit 0 = the model finished (tests are run
 # separately by the workflow; an attempt = implement + full suite).
+#
+# Slim harness (P1): the default Claude Code prompt + tool list is ~26k tokens,
+# which leaves almost nothing of Ollama's 32k. --system-prompt replaces it with
+# the short A3a prompt and --tools offers only six tools (~4.9k tokens total).
+# Not --bare: that would also skip the policy-guard hook.
 set -euo pipefail
 BASE="$(cd "$(dirname "$0")/../.." && pwd)"
 WT="$(cd "$1" && pwd)"; PROMPT_FILE="$2"; LOG="$3"
@@ -30,7 +35,8 @@ fi
 cd "$WT"
 timeout "${LOCAL_TIMEOUT_MIN}m" claude -p "$(cat "$PROMPT_FILE")" \
   --settings "$SETTINGS" \
-  --append-system-prompt "$(sed -n '/^## System prompt/,$p' "$BASE/.agents/local-implementer.md")" \
+  --system-prompt "$(sed -n '/^## System prompt/,$p' "$BASE/.agents/local-implementer.md")" \
+  --tools "Read,Edit,Write,Bash,Grep,Glob" --disable-slash-commands --strict-mcp-config \
   --model "$LOCAL_MODEL" \
   --max-turns "$LOCAL_MAX_TURNS" \
   --output-format stream-json --verbose > "$LOG" 2>&1

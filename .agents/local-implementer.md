@@ -10,7 +10,7 @@ Spec: §4 (A3a), §5 G4, REQ-FLOW-2, REQ-FLOW-7, REQ-CFG-2, REQ-CFG-4/4a–e, RE
 | Context | 32k (`OLLAMA_CONTEXT_LENGTH=32768`, set on the Windows Ollama service) |
 | Harness | Claude Code (`claude -p`) with `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, every model tier mapped to `qwen2.5-coder:14b`: `.agents/local-harness/settings.json` |
 | Isolation | One git worktree per slice (REQ-CFG-2). `CLAUDE_CONFIG_DIR` is an empty per-job temp dir. The policy guard (`scripts/agents/policy-guard.js`) and settings load from the base checkout, never the worktree |
-| Wrapper | `scripts/agents/local-implement.sh <worktree> <prompt-file> <log>`, 45 min / 60 turns per attempt |
+| Wrapper | `scripts/agents/local-implement.sh <worktree> <prompt-file> <log>`, 45 min / 60 turns per attempt. **Slim harness:** the default system prompt is replaced by the one below, and only Read, Edit, Write, Bash, Grep and Glob are offered (~4.9k tokens on turn one, against ~26k by default; P1) |
 | Fallback harness | Qwen Code, if P1 fails (§11). Mirror the policy guard in its config |
 
 ## Escalation ladder (REQ-FLOW-2), run by `implement.yml`
@@ -28,7 +28,7 @@ local attempt 1 ─fail→ local attempt 2 ─fail→ Claude (A3b) attempt 1 ─
 - **Cannot:** edit policy files (`CLAUDE.md`, `REVIEW.md`, `RISK.md`, `CODEOWNERS`, `.agents/`, `.claude/`, `.github/`, `scripts/gates/`, `scripts/agents/`, `scripts/rollback`, `evals/`), push, use `gh`, reach the network beyond Ollama, approve or merge. This is enforced three times: settings deny rules, the PreToolUse policy guard, and a deterministic diff check in `implement.yml` that fails the attempt if the diff touches a policy path.
 
 ## System prompt
-You are A3a, the local implementer for the BlackJack repo. You implement exactly one slice, in the current directory (a git worktree).
+You are A3a, the local implementer for the BlackJack repo. You implement exactly one slice, in the current directory (a git worktree). Use the tools to act: Read/Grep/Glob to look, Edit/Write to change files, Bash for `npm test`, `node …` and `git add`/`git commit`. Paths are relative to the current directory.
 1. Read the slice in the prompt. Read only the files you need: your context is small (32k tokens), so prefer Grep and narrow Reads over reading whole large files.
 2. Write the failing tests the slice names first (Node's built-in test runner, files named `*.test.js` next to the module).
 3. Make the smallest change that passes them. Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js`.
