@@ -4,13 +4,22 @@ Base spec: `.agents/SPEC.md` v0.10 (copied from `delmarolivier/agent-team-templa
 
 ## Status (2026-11-14)
 - **Steps 0–7 done; step 8 = this PR (Tier 2, not merged).** The team is built but not live. It goes live when this PR is merged and the checklist below is done (Claude GitHub App, OAuth secret, WSL restart).
-- **P1 FAILED for the pinned model.** `qwen2.5-coder:14b` doesn't emit native tool calls through Ollama, so it can't drive Claude Code or Qwen Code. **Decision needed: see "Decisions for Delmar" #1.**
+- **P1: FAIL for the pinned model, PASS for `qwen3.5:9b`.** `qwen2.5-coder:14b` (D12) never emits native tool calls through Ollama: 0/5. `qwen3.5:9b`, already on the PC, completed 2/5 on the slimmed Claude Code harness with no hangs and no context overflows, which meets P1. **Decision needed: "Decisions for Delmar" #1.**
+- **T3 PASS:** the review pipeline caught 9/10 planted bugs with 0 false Important findings.
 - Pre-merge tests: see "Acceptance tests". The live end-to-end tests (T1, T2, T7, T9–T11, T13, T14, T17 live) need the gates on `main` and run after merge.
 
 ## Decisions for Delmar (each changes the spec: Tier 2 in the template repo)
 1. **Local model (D12 / P1).** `qwen2.5-coder:14b` fails P1: Ollama returns its tool calls as plain text, never as `tool_calls` (checked directly against `/api/chat`). Both models already on the PC that do native tool calls were tried:
-   - P1_TRIAL_PLACEHOLDER
-   **Recommended:** RECOMMENDATION_PLACEHOLDER
+   | Run (5 slices each, as runner user `gh-llm`) | Completed without fallback | Hangs | Context overflows | Notes |
+   |---|---|---|---|---|
+   | `qwen2.5-coder:14b`, default Claude Code prompt | 0/5 | 0 | 0 | One turn each: tool call returned as text, never executed |
+   | `qwen2.5-coder:14b`, slim harness | 0/5 | 0 | 0 | Same: the model can't do native tool calls (`/api/chat` with `tools` → plain text) |
+   | `qwen3.5:9b`, default Claude Code prompt | 0/5 | 0 | **5/5** | Claude Code's own prompt + tools = **26,042 tokens** of the 32,768; overflow after 2 reads, compaction fails |
+   | **`qwen3.5:9b`, slim harness** | **2/5 ✅** | 0 | 0 | Slim prompt + 6 tools = **4,894 tokens**. Slices 1 (`percent()`) and 5 (`compactMoney()`): tests first, commit, 437/438 green. Slice 2 was invalid (`winRate()` already existed; the model correctly found nothing to do). Slices 3 and 4 (745-line `engine/blackjack.js` + embed) failed: it lost the task, and those would go to the Claude implementer |
+   | `gemma4:12b-it-q4_K_M`, slim harness | not measured | — | — | Stopped after 10 min on slice 1: Ollama loads this model with a 4,096-token context (its Modelfile overrides `OLLAMA_CONTEXT_LENGTH`) and mostly on CPU (0.9 GB VRAM), so the trial wasn't representative |
+
+   The slim harness (`--system-prompt` with the A3a prompt, `--tools Read,Edit,Write,Bash,Grep,Glob`, Claude Code told the real 32k window) is now the default in `scripts/agents/local-implement.sh`. **The policy-guard hook still runs** (`--bare` isn't used).
+   **Recommended:** change D12 to **`qwen3.5:9b`** (already pulled; native tool calls; fits easily in 16 GB VRAM at 32k) and keep Claude Code as the harness (D9 confirmed with the slim configuration). This is a Tier 2 spec change (D12, REQ-CFG-4e, the overlay's `implementer_local`) plus a one-line settings change here. Until you decide, the pinned model stays in place, and a local attempt will simply fail and hand off to Claude after 2 tries (REQ-FLOW-2).
 2. **Board status via labels.** GitHub Apps can't write to user-owned Projects (v2), and the Claude App is the agents' only identity (D11). So A0 records status as `status:*` labels, and the board views filter on labels; the Project's own Status field is maintained by its built-in workflows only. Alternative: move the repo to a free GitHub organisation, where the App could write Project fields. **Recommended:** keep labels for the pilot.
 3. **Merge identity.** The Claude App token can't be reused outside `claude-code-action` (the action revokes it), so A9's merges, branch updates, reverts and PR publishing run as a one-command Claude step (`release-manager`, Haiku, `--allowedTools` set to that exact command). All decisions are made first by the deterministic `scripts/gates/gate.js`, and the command re-verifies before acting. Alternative: your own small GitHub App plus `actions/create-github-app-token`, which takes the model out of the merge path entirely but adds a second bot identity (a D11 change). **Recommended:** keep the Claude App for the pilot; revisit if any A9 step misbehaves.
 
@@ -57,7 +66,28 @@ Base spec: `.agents/SPEC.md` v0.10 (copied from `delmarolivier/agent-team-templa
 3. The local harness runs with an empty per-job `CLAUDE_CONFIG_DIR` and unsets all tokens. Checkouts use `persist-credentials: false` everywhere a model runs.
 
 ## Acceptance tests (pre-merge)
-TESTS_PLACEHOLDER
+| Test | Result | Evidence | REQs |
+|---|---|---|---|
+| **P1** harness qualification | **FAIL** (pinned `qwen2.5-coder:14b`, 0/5) · **PASS** (`qwen3.5:9b`, slim harness, 2/5, no hangs/overflows) | Decisions #1 table; logs on the PC under `/home/gh-llm/p1-*` | D9, D12, CFG-4e |
+| T1 Tier 0 zero touches | Not run, by design at Level 0 | At Level 0 every PR needs Delmar (`requiredApprovals(0, 0) = 1`, unit test). Runs after promotion to Level 1 | FLOW, RISK-1 |
+| T2 Tier 1 feature | Not run: needs the live team (after merge + checklist) | — | FLOW-3, RISK |
+| **T3** seeded bugs | **PASS: 9/10 flagged Important, 0 false Important** | `evals/review/results-2026-11-14.json`; `scripts/evals/replay.js` runs the same agents/models/schemas as `review.yml`. Missed: 05 (soft doubling under `9-11`), found by no hunter on the last run and voted down by Haiku verifiers on an earlier one, so it's A10's first eval target. Two fixes came out of this: `--agent` disables `--json-schema` (all workflows now use `--append-system-prompt-file`), and REVIEW.md now says to report defects at the engine source, not again in the generated embed (precision went from 4 false to 0) | ROLE-2/3, IMP-2 |
+| **T4** seeded secret | **PASS** | A7 (Opus, exactly as `security.yml` runs it) on a diff that hard-codes a `ghp_…` token in `agent/table-client.js`: 1 high finding at the right line → `security` status failure (blocking) | CFG-7, G7 |
+| T5 policy tamper | **PASS (logic)**; live after merge | Unit test: a PR touching `REVIEW.md` labelled `tier:0` is Tier 2 (`RISK.md` floor, read from base); review/classify run on `pull_request_target` from `main` | RISK-1, CFG-3 |
+| T6 self-approval | **PASS (logic + settings)** | Unit tests: bot approvals, other users' approvals and approvals of an older head don't count; statuses created by `claude[bot]` don't satisfy gates. Repo setting: Actions can't approve PRs (checked) | ROLE-4 |
+| T7 round cap | Not run live; implemented | `review.yml` prep: round 4 → `ai-review` failure, `needs-human`, escalation comment | FLOW-1 |
+| **T8** rollback | **PASS** | Scratch clone with its own origin: `scripts/rollback <sha> --push` took **31 s** (incl. `npm test`), well under 5 min. Replaying the revert gives an identical tree, so main-guard accepts it (`exact revert of 921c1c8`). Revert-based, since `flags: none` | FLOW-4 |
+| T9 circuit breaker | **Partial (logic)** | Unit test: open `cb:level-N` issues lower the effective level; CB-6 caps at 2. A10's revert-spike detection runs live only | CB-1 |
+| T10 unattended day | Not run: needs the live team | — | CFG-6, COORD-4 |
+| T11 local fallback | **Partial (logic)** | Unit test of the ladder (local ×2 → Claude ×2 with handoff → re-slice); infra failures retry the same rung once | FLOW-2, FLOW-7 |
+| T12 Tier 2 cooling | **PASS (logic)** | Unit tests: pending at 23h59, success at 24h, a new push needs a new approval, `tier2-cancel` fails it | RISK-3 |
+| T13 throttling | **Partial** | The detector matched a **real** usage-limit message hit during this setup (`You've hit your 5-hour limit`, `usage_limit_reached`). Live pause/resume runs after merge | CB-4 |
+| T14 local host offline | Not run live; by construction | `local` jobs run only on `[self-hosted, local-llm]` with no fallback path; they queue | CFG-4 |
+| T15 direct push | **PASS (logic)** | Unit tests: a direct push is a violation; an A9 merge needs `claude[bot]` + trusted `merge-evidence`; exact reverts pass; bootstrap exempt | GATE-2, CB-5 |
+| T16 missing approval | **PASS (logic)** | Unit test: all checks green + only a bot approval → refused | GATE-1, ROLE-4 |
+| T17 serial merge | **PASS (logic)**; live after merge | Unit test: a ready PR behind `main` → `update`, not merge; `merge.yml` runs in one concurrency group | GATE-1 |
+
+Not done: the workflows weren't checked with `actionlint` (the npm/wasm build crashed, and downloading the release binary was blocked by this session's permission check). They parse as YAML and were reviewed by hand; one bash backtick bug was found and fixed. **Run `actionlint` on `.github/workflows/` before merging, or let the first live runs show any errors.**
 
 ## Checklist for Delmar (only you can do these)
 1. **Install the Claude GitHub App on BlackJack only:** https://github.com/apps/claude → Configure → `delmarolivier` → Repository access: *Only select repositories* → add `blackjack` → Save. (D11: every agent write goes through it.)
