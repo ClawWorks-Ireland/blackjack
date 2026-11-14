@@ -161,14 +161,13 @@ test('T15 main-guard: direct pushes are not allowed; A9 merges and exact reverts
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: null, exactRevertOf: null, message: 'Rollback-of: abc1234' }).allowed, false);
 });
 
-test('revert trailers and the Dublin schedule window', () => {
+test('revert trailers and the Dublin digest hour', () => {
   assert.equal(G.revertTrailer('Revert "x"\n\nRollback-of: abc1234'), 'abc1234');
   assert.equal(G.revertTrailer('Main-guard-revert: 0123456789abcdef0123456789abcdef01234567').length, 40);
   assert.equal(G.revertTrailer('just a commit'), null);
   assert.equal(G.dublinHour(new Date('2026-07-01T06:30:00Z')), 7); // IST, UTC+1
   assert.equal(G.dublinHour(new Date('2026-12-01T06:30:00Z')), 6); // GMT
-  assert.equal(G.inDublinWindow(new Date('2026-12-01T22:30:00Z')), true);
-  assert.equal(G.inDublinWindow(new Date('2026-12-01T23:30:00Z')), false);
+  assert.equal(G.dublinHour(new Date('2026-12-01T08:15:00Z')), 8); // digest hour in winter
 });
 
 test('A6 majority vote: a finding needs 2 of 3 real votes; severity by majority', () => {

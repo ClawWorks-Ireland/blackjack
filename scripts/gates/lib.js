@@ -275,11 +275,10 @@ function revertTrailer(message) {
   return m ? m[1] : null;
 }
 
-/** Hour in Europe/Dublin, for the 07:00–23:00 schedule window (REQ-CFG-6). */
+/** Hour in Europe/Dublin: the daily digest runs at 08:00 (REQ-COORD-4). */
 function dublinHour(now = new Date()) {
   return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Dublin', hour: '2-digit', hourCycle: 'h23' }).format(now));
 }
-const inDublinWindow = (now = new Date(), from = 7, to = 23) => { const h = dublinHour(now); return h >= from && h < to; };
 
 module.exports = {
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
@@ -287,5 +286,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardVerdict, revertTrailer,
-  dublinHour, inDublinWindow, decideFindings, isUsageLimited, nextRung,
+  dublinHour, decideFindings, isUsageLimited, nextRung,
 };

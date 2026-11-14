@@ -1,6 +1,6 @@
 # Claude Agent Delivery Team — Requirements & Design Spec
 
-**Version:** 0.10 · **Date:** 2026-11-13 · **Owner:** Delmar (sole human approver, "H")
+**Version:** 0.11 · **Date:** 2026-11-14 · **Owner:** Delmar (sole human approver, "H")
 **Status:** Ready for setup. Next step: on the Air, clone this repo and run `/bootstrap-control-plane` (§12).
 
 ---
@@ -192,11 +192,11 @@ Issue → Spec → Plan (slices) → [Local implement (≤2) → Claude implemen
 - `REQ-CFG-4` **Local implementer host:** a self-hosted GitHub Actions runner on the Windows PC, labelled `local-llm`. Implementation jobs target that label. If the host is offline, slices queue (they don't fall back to Claude just because the machine is asleep).
   - `REQ-CFG-4a` Runner runs inside WSL2 (Claude Code, worktrees and bash scripts behave predictably there); Ollama runs natively on Windows for GPU access and is reached from WSL2 via localhost (mirrored networking).
   - `REQ-CFG-4b` Runner is installed as a service started at boot, so it survives logouts and reboots (lesson from SecureClaw, whose unattended jobs depended on the Windows user staying logged in).
-  - `REQ-CFG-4c` Power settings: PC does not sleep 07:00–23:00 Europe/Dublin.
+  - `REQ-CFG-4c` Power settings: the PC runs 24x7, no operating-hours window. Sleep and hibernate are off on AC power (power plan timeouts set to 0/never); setup checks this took effect.
   - `REQ-CFG-4d` Gaming pause: a Windows scheduled task pauses the `local-llm` runner while a game is running (shared GPU); queued slices wait. The `claude-jobs` runner keeps running (it uses no GPU). If the PC is off, reviews queue too — gates are never skipped.
   - `REQ-CFG-4e` Local harness per D9. Claude Code env for local jobs: `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, all model tiers mapped to `qwen2.5-coder:14b`, context 32k (its Ollama maximum; `OLLAMA_CONTEXT_LENGTH=32768`). Fallback jobs unset these and use the subscription token.
 - `REQ-CFG-5` **Subscription auth:** Claude jobs authenticate with a Claude subscription OAuth token stored as a repo/org secret, not an API key. Verify at setup that every workflow uses it.
-- `REQ-CFG-6` Orchestrator runs on cron every 60 min, 07:00–23:00 Europe/Dublin, plus event triggers (issue labelled, PR merged, check failed).
+- `REQ-CFG-6` Orchestrator runs on cron every 60 min, 24x7, plus event triggers (issue labelled, PR merged, check failed).
 - `REQ-CFG-7` Secrets never in agent context; deploy credentials only in the release job.
 
 ### 8.3 Software gates (GitHub Free)
@@ -215,7 +215,7 @@ How H works *on* the team (setup, spec changes, troubleshooting), as opposed to 
 - `REQ-OPS-4` **SSH from the Air is break-glass only** — for when the console service is down. Key-based login only; password authentication disabled in `sshd_config`.
 - `REQ-OPS-5` The console session authenticates with H's Claude subscription and acts as H. It is an operator tool, not a team role: it never approves PRs, and changes it makes to team repos go through PRs like any other change (REQ-GATE-1).
 - `REQ-OPS-9` **Unattended start:** Ollama runs as `ollama serve` from a Windows startup task that runs whether or not anyone is logged on (tray-app autostart off, so only one instance holds port 11434), and the WSL distro is started at boot by a startup task and kept running (`vmIdleTimeout=-1` in `.wslconfig`). After a reboot with nobody logged in, the console, both runners and Ollama must all come back.
-- `REQ-OPS-6` Console availability follows the host: PC awake 07:00–23:00 (REQ-CFG-4c). If unreachable, H uses break-glass SSH or waits; the team's queued work is unaffected.
+- `REQ-OPS-6` The console is available 24x7 — the host never sleeps (REQ-CFG-4c). If unreachable, H uses break-glass SSH or waits; the team's queued work is unaffected.
 
 ---
 
@@ -249,7 +249,7 @@ GitHub is the only communication channel — between agents, and between agents 
 | Important finding open after voting | Implementer fix job (next round, up to the cap) |
 | All required checks green and tier approvals present | A9 merge queue |
 | Revert merged or `incident` label added | A10 |
-| Hourly cron 07:00–23:00 | A0 sweep: stuck items, failed jobs, retries, escalations |
+| Hourly cron, 24x7 | A0 sweep: stuck items, failed jobs, retries, escalations |
 | Daily cron 08:00 | A0 digest |
 
 - `REQ-COMMS-1` No chat channel. All agent-to-agent and agent-to-H communication is a GitHub artifact (issue, comment, label, PR, check). *(non-overridable)*
@@ -364,7 +364,7 @@ deploy: <confirm at setup>
 tracker: github-issues + github-project
 solo_owner: true
 tier2_cooling_hours: 24
-orchestrator_schedule: hourly 07:00-23:00 Europe/Dublin
+orchestrator_schedule: hourly 24x7
 sensitive_paths_extra: []
 ```
 
@@ -380,6 +380,7 @@ sensitive_paths_extra: []
 ---
 
 ## 14. Changelog
+- **0.11 (2026-11-14):** H decision: run 24x7. Removed the 07:00–23:00 operating-hours window (REQ-CFG-4c, REQ-CFG-6, §9.1 cron rows, REQ-OPS-6): PC never sleeps (sleep and hibernate off on AC power), Orchestrator hourly sweep runs around the clock, console is available 24x7. Daily digest unchanged at 08:00 Europe/Dublin. `orchestrator_schedule` set to `hourly 24x7` in the BlackJack overlay and the blank template.
 - **0.10 (2026-11-13):** After Phase 1 inventory: REQ-OPS-3 keeps Ollama LAN-reachable (H's decision; Mac `local-models` skill and Home Assistant depend on it). Added REQ-OPS-9 (Ollama and WSL must run without anyone logged in).
 - **0.9 (2026-11-13):** Spec now lives in `delmarolivier/agent-team-template`. §12 prompts moved into repo slash commands (`/bootstrap-control-plane`, `/setup-project`) so nothing is pasted (REQ-OPS-7–8). BlackJack repo name corrected to `delmarolivier/blackjack`.
 - **0.8 (2026-11-13):** Added §8.4 Operator access (REQ-OPS-1–6) and D13: state in the template repo, one Remote Control console service on the Windows PC, Ollama localhost-only, SSH as break-glass. Split §12 into 12.0 control-plane bootstrap (from the Air, inventory first) and 12.1 team setup.

@@ -1,6 +1,6 @@
 # BlackJack — agent team setup report
 
-Base spec: `.agents/SPEC.md` v0.10 (copied from `delmarolivier/agent-team-template`). Overlay: `.agents/PROJECT.md`. Set up from the PC console on 2026-11-14 with `/setup-project delmarolivier/blackjack`. Autonomy: **Level 0 (Shadow)**: Delmar approves every spec, plan and PR.
+Base spec: `.agents/SPEC.md` v0.11 (24x7; updated from v0.10 mid-setup) (copied from `delmarolivier/agent-team-template`). Overlay: `.agents/PROJECT.md`. Set up from the PC console on 2026-11-14 with `/setup-project delmarolivier/blackjack`. Autonomy: **Level 0 (Shadow)**: Delmar approves every spec, plan and PR.
 
 ## Status (2026-11-14)
 - **Steps 0–7 done; step 8 = this PR (Tier 2, not merged).** The team is built but not live. It goes live when this PR is merged and the checklist below is done (Claude GitHub App, OAuth secret, WSL restart).
@@ -30,6 +30,9 @@ Base spec: `.agents/SPEC.md` v0.10 (copied from `delmarolivier/agent-team-templa
 - **CI / protection:** no `.github/` before this PR. Private repo on GitHub Free: the branch protection and rulesets APIs return `403 Upgrade to GitHub Pro` (D10). History: 136 commits on `main`, almost all pushed directly; 4 PRs ever.
 - **Existing process:** Linear was the tracker (team ClawWorks, projects BlackJack and Poker), with "no schedulers without asking" in CLAUDE.md, nothing deployed (`server/` runs by hand on the Mac via launchd) and no feature flags.
 
+## Spec v0.11 (merged mid-setup, 2026-11-14)
+The template moved to v0.11 (24x7) while this setup ran. Applied here: `.agents/SPEC.md` updated, overlay `orchestrator_schedule: hourly 24x7`, `orchestrator.yml` sweeps every hour around the clock (the digest stays at 08:00 Europe/Dublin), and the unused window helper was removed from the gates. **REQ-CFG-4c checked on the PC:** `powercfg` AC timeouts are sleep 0 and hibernate 0 (never); the display turns off after 300 s, which doesn't affect the team.
+
 ## Delmar's answers (2026-11-14, console session)
 | Question | Answer |
 |---|---|
@@ -37,7 +40,7 @@ Base spec: `.agents/SPEC.md` v0.10 (copied from `delmarolivier/agent-team-templa
 | Required `ci` gate | **`npm test` only**, GitHub-hosted Ubuntu. macOS CI and the QA round stay manual; A9 lists them on merged PRs that touch the relevant paths |
 | Flags / deploy | **`flags: none`, `deploy: none`.** REQ-FLOW-3 → behaviour changes are at least Tier 1; release = merge + tag; rollback = revert |
 | Scope (§1.2) | **Personal, proceed** |
-| Schedulers (CLAUDE.md) | The agent team's own crons (orchestrator, cooling, merge sweep, main-guard sweep, weekly retro) were requested by `/setup-project` and are noted in CLAUDE.md as approved at setup |
+| Schedulers (CLAUDE.md) | The agent team's own crons (orchestrator hourly 24x7, cooling, merge sweep, main-guard sweep, weekly retro) were requested by `/setup-project` and are noted in CLAUDE.md as approved at setup |
 
 ## What was built (all in this PR unless noted)
 | Step | Files / actions |

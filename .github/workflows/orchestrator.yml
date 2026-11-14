@@ -1,9 +1,9 @@
-# A0 Orchestrator (REQ-CFG-6): hourly 07:00–23:00 Europe/Dublin plus events;
+# A0 Orchestrator (REQ-CFG-6, spec v0.11): hourly, 24x7, plus events;
 # daily digest at 08:00 (REQ-COORD-4). Schedules approved by Delmar at setup.
 name: orchestrator
 on:
   schedule:
-    - cron: '7 * * * *'      # hourly; the Dublin window is checked below (DST-safe)
+    - cron: '7 * * * *'      # hourly, 24x7; the 08:00 Dublin digest hour is checked below (DST-safe)
   issues:
     types: [opened, labeled, closed]
   pull_request_target:
@@ -34,7 +34,7 @@ jobs:
           node -e '
             const G=require("./scripts/gates/lib.js"); const h=G.dublinHour();
             const sched=process.env.EV==="schedule";
-            console.log("run="+(!sched||G.inDublinWindow()));
+            console.log("run=true");   // 24x7 (spec v0.11)
             console.log("digest="+(process.env.DIGEST==="true"||(sched&&h===8)));
             console.log("monday="+(new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Dublin",weekday:"short"}).format(new Date())==="Mon"));
           ' >> "$GITHUB_OUTPUT"

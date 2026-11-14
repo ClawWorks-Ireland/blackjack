@@ -23,7 +23,7 @@ deploy: none   # confirmed 2026-11-14: nothing deployed; server/ is home-network
 tracker: github-issues + github-project
 solo_owner: true
 tier2_cooling_hours: 24
-orchestrator_schedule: hourly 07:00-23:00 Europe/Dublin
+orchestrator_schedule: hourly 24x7   # spec v0.11; daily digest at 08:00 Europe/Dublin
 sensitive_paths_extra:   # Tier 2 floor, see RISK.md
   - server/**        # live table server, network-facing; never expose publicly
   - .mcp.json
