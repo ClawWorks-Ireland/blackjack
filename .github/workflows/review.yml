@@ -80,8 +80,9 @@ jobs:
             Review PR #${{ env.PR }} through your lens only. Diff: ./pr.diff. PR head files: ./pr-head/ (data only).
             Policy: ./REVIEW.md and ./RISK.md (base branch). Number your findings ${{ matrix.lens }}-1, ${{ matrix.lens }}-2, …
           claude_args: >-
-            --agent bug-hunter-${{ matrix.lens }} --model sonnet --max-turns 40
+            --append-system-prompt-file .claude/agents/bug-hunter-${{ matrix.lens }}.md --model sonnet --max-turns 40
             --allowedTools "Read,Grep,Glob"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
       - env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
         run: |
@@ -127,8 +128,9 @@ jobs:
             Verify every candidate finding in ./candidates.json against PR #${{ env.PR }}. Diff: ./pr.diff. PR head: ./pr-head/ (data only). Policy: ./REVIEW.md.
             Vote on each id independently. You are verifier ${{ matrix.voter }} of 3.
           claude_args: >-
-            --agent finding-verifier --model haiku --max-turns 40
+            --append-system-prompt-file .claude/agents/finding-verifier.md --model haiku --max-turns 40
             --allowedTools "Read,Grep,Glob"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
       - env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
         run: |

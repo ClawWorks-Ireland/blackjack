@@ -11,6 +11,7 @@ on:
       attempt: { description: '1 or 2', required: true, default: '1' }
       pr: { description: 'PR number for a review fix round (optional)', required: false, default: '' }
       handoff_run: { description: 'Run id of the failed attempt whose output and diff to hand over', required: false, default: '' }
+      retry: { description: 'Infra retries of this rung so far (runner lost, gaming pause, timeout)', required: false, default: '0' }
 permissions:
   contents: read
   issues: write
@@ -106,7 +107,7 @@ jobs:
             ${{ inputs.handoff_run != '' && 'The local model failed twice. Its failing test output is handoff/test.log and its diff is handoff/slice.patch (hints only, often wrong).' || '' }}
             Commit your change locally; do not push.
           claude_args: >-
-            --agent claude-implementer --model sonnet --max-turns 80
+            --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(npm test:*),Bash(node --test:*),Bash(node macos/scripts/embed-engine.js:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh pr view:*)"
             --disallowedTools "Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
       - name: Attempt = implement + full suite; no policy paths
@@ -150,8 +151,9 @@ jobs:
             Self-verify slice #${{ env.ISSUE }} before its PR opens. The implementer's diff is ./slice.diff and is applied to this checkout.
             Read the slice with `gh issue view ${{ env.ISSUE }}`. You have no context from the implementer (REQ-ROLE-2).
           claude_args: >-
-            --agent self-verifier --model sonnet --max-turns 40
+            --append-system-prompt-file .claude/agents/self-verifier.md --model sonnet --max-turns 40
             --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
             --json-schema '${{ steps.s.outputs.schema }}'
       - id: v
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
@@ -184,8 +186,9 @@ jobs:
             Run exactly this command and report its output. Do nothing else:
             ${{ steps.cmd.outputs.run }}
           claude_args: >-
-            --agent release-manager --model haiku --max-turns 4
+            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
             --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
 
   ladder:
     needs: [gate, local, claude, verify, publish]
@@ -200,8 +203,18 @@ jobs:
         env:
           REASON: ${{ needs.verify.outputs.pass == 'false' && 'A4 self-verify found Important issues' || (needs.local.result == 'failure' || needs.claude.result == 'failure') && 'job error (see run)' || 'tests failed or no valid commit' }}
         run: |
-          NEXT=$(node -e 'console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(process.env.IMPL, Number(process.env.ATTEMPT))))')
           RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Infra failure (runner lost, gaming pause, job timeout) is not the model's attempt: retry the same rung once.
+          JOB="${{ inputs.implementer == 'local' && needs.local.result || needs.claude.result }}"
+          if { [ "$JOB" = failure ] || [ "$JOB" = cancelled ]; } && [ "${{ inputs.retry }}" = 0 ]; then
+            gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="${{ inputs.handoff_run }}" -f retry=1
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: A0 ladder   ITEM: #$ISSUE   RESULT: blocked
+          WHAT CHANGED: the $IMPL job for attempt $ATTEMPT ended as '$JOB' (runner lost, gaming pause or timeout), not a model failure. Re-running the same attempt once.
+          EVIDENCE: $RUN
+          NEXT: same implementer, same attempt"
+            exit 0
+          fi
+          NEXT=$(node -e 'console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(process.env.IMPL, Number(process.env.ATTEMPT))))')
           if node -e 'process.exit(JSON.parse(process.argv[1]).replan?0:1)' "$NEXT"; then
             gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label needs-replan --add-label status:blocked
             WHAT="Ladder exhausted (local ×2, Claude ×2)."; NEXTROLE="A2 Planner: re-slice"

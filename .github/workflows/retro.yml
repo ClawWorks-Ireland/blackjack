@@ -55,7 +55,7 @@ jobs:
             Mode: ${{ needs.route.outputs.mode }}. Incident issue: ${{ inputs.incident || github.event.issue.number || 'find the newest open issue labelled incident' }}. Commit: ${{ github.sha }}.
             Follow your definition. Open proposals as ONE Tier 2 PR from a branch named agent/retro-<date>. Never merge.
           claude_args: >-
-            --agent incident-retro --model opus --max-turns 80
+            --append-system-prompt-file .claude/agents/incident-retro.md --model opus --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git checkout -b agent/retro-:*),Bash(git add:*),Bash(git commit:*),Bash(git push origin agent/retro-:*),Bash(git log:*),Bash(git diff:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh run list:*),Bash(gh api -X GET:*),Bash(npm test:*)"
             --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push origin main:*),Bash(git push origin HEAD:main:*)"
       - if: failure()

@@ -64,8 +64,9 @@ jobs:
             Run exactly this one command and report its output. Do nothing else:
             ${{ steps.cmd.outputs.run }}
           claude_args: >-
-            --agent release-manager --model haiku --max-turns 4
+            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
             --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
       - if: failure()
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"

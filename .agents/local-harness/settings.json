@@ -1,5 +1,5 @@
 {
-  "$comment": "Claude Code settings for A3a (local Qwen via Ollama) on the local-llm runner. Spec REQ-CFG-4e. Loaded with --settings by scripts/agents/local-implement.sh; CLAUDE_CONFIG_DIR points at an empty per-job dir so no subscription credentials are visible.",
+  "$comment": "Claude Code settings for A3a (local Qwen via Ollama) on the local-llm runner. Spec REQ-CFG-4e. Loaded with --settings by scripts/agents/local-implement.sh; CLAUDE_CONFIG_DIR points at an empty per-job dir so no subscription credentials are visible. Context: Ollama serves 32k, so Claude Code is told 32k (it otherwise assumes a far larger window and never compacts).",
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:11434",
     "ANTHROPIC_AUTH_TOKEN": "ollama",
@@ -10,20 +10,78 @@
     "CLAUDE_CODE_SUBAGENT_MODEL": "qwen2.5-coder:14b",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "DISABLE_AUTOUPDATER": "1",
-    "DISABLE_TELEMETRY": "1"
+    "DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "32768",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "32768",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
+    "ANTHROPIC_SMALL_FAST_MODEL": "qwen2.5-coder:14b",
+    "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS": "1",
+    "CLAUDE_CODE_DISABLE_WEB_FETCH": "1",
+    "CLAUDE_CODE_DISABLE_PROACTIVITY": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"
   },
   "permissions": {
     "defaultMode": "acceptEdits",
-    "allow": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(npm test:*)", "Bash(node --test:*)", "Bash(node macos/scripts/embed-engine.js:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(ls:*)", "Bash(cat:*)"],
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(npm test:*)",
+      "Bash(node --test:*)",
+      "Bash(node macos/scripts/embed-engine.js:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)"
+    ],
     "deny": [
-      "Bash(git push:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "Bash(git config:*)", "Bash(git remote:*)",
-      "Edit(/CLAUDE.md)", "Edit(/REVIEW.md)", "Edit(/RISK.md)", "Edit(/CODEOWNERS)", "Edit(/.agents/**)", "Edit(/.claude/**)", "Edit(/.github/**)", "Edit(/scripts/gates/**)", "Edit(/scripts/rollback)", "Edit(/scripts/agents/**)", "Edit(/evals/**)",
-      "Write(/CLAUDE.md)", "Write(/REVIEW.md)", "Write(/RISK.md)", "Write(/CODEOWNERS)", "Write(/.agents/**)", "Write(/.claude/**)", "Write(/.github/**)", "Write(/scripts/gates/**)", "Write(/scripts/rollback)", "Write(/scripts/agents/**)", "Write(/evals/**)"
+      "Bash(git push:*)",
+      "Bash(gh:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(sudo:*)",
+      "Bash(git config:*)",
+      "Bash(git remote:*)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/REVIEW.md)",
+      "Edit(/RISK.md)",
+      "Edit(/CODEOWNERS)",
+      "Edit(/.agents/**)",
+      "Edit(/.claude/**)",
+      "Edit(/.github/**)",
+      "Edit(/scripts/gates/**)",
+      "Edit(/scripts/rollback)",
+      "Edit(/scripts/agents/**)",
+      "Edit(/evals/**)",
+      "Write(/CLAUDE.md)",
+      "Write(/REVIEW.md)",
+      "Write(/RISK.md)",
+      "Write(/CODEOWNERS)",
+      "Write(/.agents/**)",
+      "Write(/.claude/**)",
+      "Write(/.github/**)",
+      "Write(/scripts/gates/**)",
+      "Write(/scripts/rollback)",
+      "Write(/scripts/agents/**)",
+      "Write(/evals/**)"
     ]
   },
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash", "hooks": [{ "type": "command", "command": "node \"$POLICY_GUARD\"" }] }
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$POLICY_GUARD\""
+          }
+        ]
+      }
     ]
   }
 }

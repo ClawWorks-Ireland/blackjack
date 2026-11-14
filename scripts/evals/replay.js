@@ -21,14 +21,17 @@ const schema = (n) => fs.readFileSync(path.join(ROOT, '.agents/schemas', n), 'ut
 
 function claude(cwd, agent, model, prompt, schemaJson) {
   return new Promise((resolve) => {
-    const p = spawn('claude', ['-p', prompt, '--agent', agent, '--model', model, '--max-turns', '40',
-      '--allowedTools', 'Read,Grep,Glob', '--json-schema', schemaJson, '--output-format', 'json'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Same as review.yml: the role is an appended system prompt (`--agent` disables --json-schema).
+    const p = spawn('claude', ['-p', prompt, '--append-system-prompt-file', `.claude/agents/${agent}.md`, '--model', model, '--max-turns', '40',
+      '--allowedTools', 'Read,Grep,Glob', '--disallowedTools', 'Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task',
+      '--json-schema', schemaJson, '--output-format', 'json'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; });
     p.on('close', (code) => {
       try {
         const j = JSON.parse(out);
-        resolve({ ok: true, data: j.structured_output || JSON.parse(j.result), cost: j.total_cost_usd, turns: j.num_turns });
+        if (!j.structured_output) throw new Error(`no structured_output (is_error ${j.is_error})`);
+        resolve({ ok: true, data: j.structured_output, cost: j.total_cost_usd, turns: j.num_turns });
       } catch (e) { resolve({ ok: false, error: `exit ${code}: ${(err || out).slice(-400)}` }); }
     });
   });
@@ -61,6 +64,7 @@ function claude(cwd, agent, model, prompt, schemaJson) {
     const r = { case: c, hit, falseImportant: falseImp, candidates: candidates.length, kept: d.kept.length, important: d.important.length,
       errors: [...hunts, ...votes].filter((x) => !x.ok).map((x) => x.error), seconds: Math.round((Date.now() - t0) / 1000), kept_findings: d.kept };
     results.push(r);
+    if (r.errors.length) console.log('  first error:', r.errors[0]);
     console.log(`${c}: ${hit ? 'HIT' : 'MISS'} · candidates ${r.candidates} · kept ${r.kept} · Important ${r.important} · false Important ${falseImp} · ${r.seconds}s${r.errors.length ? ` · ${r.errors.length} errors` : ''}`);
     execFileSync('git', ['-C', ROOT, 'worktree', 'remove', '--force', path.join(base, 'pr-head')], { stdio: 'ignore' });
     execFileSync('git', ['-C', ROOT, 'worktree', 'remove', '--force', base], { stdio: 'ignore' });
