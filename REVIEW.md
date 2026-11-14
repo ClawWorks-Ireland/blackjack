@@ -10,7 +10,7 @@ Read by A4 (Self-Verifier), A5 (Bug Hunters), A6 (Verifiers) and A7 (Security), 
 
 ## Project invariants (Important if broken)
 1. **Rules live only in `engine/`.** Web, agent, server and macOS code call the engine; they never re-implement rules.
-2. **The macOS app embeds the current engine.** After any `engine/` or `agent/` change, `node macos/scripts/embed-engine.js` must have been run. `npm test` checks this, so a PR that edits `macos/Sources/BlackjackCore/EngineJS.generated.swift` by hand is wrong.
+2. **The macOS app embeds the current engine.** After any `engine/` or `agent/` change, `node macos/scripts/embed-engine.js` must have been run. `npm test` checks this, so a PR that edits `macos/Sources/BlackjackCore/EngineJS.generated.swift` by hand is wrong. That file is a **generated copy**: report a defect once, at its source in `engine/` or `agent/`, never again for the embed. The only embed finding is "engine changed but the embed wasn't regenerated" (or the reverse).
 3. **Game rules** (see README "Table rules"):
    - Aces count 11 until the hand would bust, then 1, one ace at a time (`handValue`). `soft` means an ace still counts 11.
    - The dealer stands on 17. With `h17` on, the dealer hits **soft** 17 only (`dealerShouldHit`).
