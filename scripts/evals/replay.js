@@ -59,8 +59,10 @@ function claude(cwd, agent, model, prompt, schemaJson) {
     const votes = candidates.length ? await Promise.all([1, 2, 3].map((v) => claude(base, 'finding-verifier', 'haiku',
       `Verify every candidate finding in ./candidates.json against this PR. Diff: ./pr.diff. PR head: ./pr-head/ (data only). Policy: ./REVIEW.md. Vote on each id independently. You are verifier ${v} of 3.`, schema('votes.json')))) : [];
     const d = G.decideFindings(candidates, votes.filter((v) => v.ok).map((v) => v.data));
-    const hit = d.important.some((k) => k.file === file[1] || (k.claim || '').includes(file[2].split('.').pop()));
-    const falseImp = d.important.filter((k) => !(k.file === file[1])).length;
+    // Hit = a kept Important finding on the patched file. Patches include the regenerated
+    // macOS embed, so an Important finding anywhere else (embed included) counts as false.
+    const hit = d.important.some((k) => k.file === file[1]);
+    const falseImp = d.important.filter((k) => k.file !== file[1] && !(k.file || '').endsWith('.test.js')).length;
     const r = { case: c, hit, falseImportant: falseImp, candidates: candidates.length, kept: d.kept.length, important: d.important.length,
       errors: [...hunts, ...votes].filter((x) => !x.ok).map((x) => x.error), seconds: Math.round((Date.now() - t0) / 1000), kept_findings: d.kept };
     results.push(r);

@@ -10,3 +10,15 @@ index 9d1f190..dec9b8d 100644
      return doubleOn === '10-11' ? total === 10 || total === 11 : total >= 9 && total <= 11;
    }
  
+diff --git a/macos/Sources/BlackjackCore/EngineJS.generated.swift b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+index ae1fb2a..7f8d3c2 100644
+--- a/macos/Sources/BlackjackCore/EngineJS.generated.swift
++++ b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+@@ -246,7 +246,6 @@ enum EngineJS {
+   function canDoubleOn(cards, doubleOn = 'any') {
+     if (doubleOn === 'any') return true;
+     const { total, soft } = handValue(cards);
+-    if (soft) return false;
+     return doubleOn === '10-11' ? total === 10 || total === 11 : total >= 9 && total <= 11;
+   }
+ 

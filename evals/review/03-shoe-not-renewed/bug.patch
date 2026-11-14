@@ -11,3 +11,16 @@ index 9d1f190..afb0cdc 100644
        else this.shoe = seededShoe(this.decks, this.seed, ++this.shoeNo);
        this.shuffles++;
      }
+diff --git a/macos/Sources/BlackjackCore/EngineJS.generated.swift b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+index ae1fb2a..1160676 100644
+--- a/macos/Sources/BlackjackCore/EngineJS.generated.swift
++++ b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+@@ -389,7 +389,7 @@ enum EngineJS {
+ 
+     /** Replace the shoe at the cut card: the next seeded shoe, or a random one. */
+     freshShoe() {
+-      if (this.seed === null) this.shoe = shuffle(createShoe(this.decks), this.rng);
++      if (this.seed === null) this.shoe = shuffle(this.shoe, this.rng);
+       else this.shoe = seededShoe(this.decks, this.seed, ++this.shoeNo);
+       this.shuffles++;
+     }

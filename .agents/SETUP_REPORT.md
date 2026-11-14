@@ -1,48 +1,83 @@
 # BlackJack — agent team setup report
 
-Base spec: `.agents/SPEC.md` v0.10 (copied from `delmarolivier/agent-team-template`). Overlay: `.agents/PROJECT.md` (from `projects/blackjack/PROJECT.md`). Setup run from the PC console (`/setup-project delmarolivier/blackjack`).
+Base spec: `.agents/SPEC.md` v0.10 (copied from `delmarolivier/agent-team-template`). Overlay: `.agents/PROJECT.md`. Set up from the PC console on 2026-11-14 with `/setup-project delmarolivier/blackjack`. Autonomy: **Level 0 (Shadow)**: Delmar approves every spec, plan and PR.
 
 ## Status (2026-11-14)
-- Step 0 (spec + overlay copied) and step 1 (inspection) are done, on local branch `agent-team/setup`. Nothing has been pushed.
-- **Paused before step 2.** The repo conflicts with the spec in four places (below), so I've stopped to ask H, as `/setup-project` requires.
+- **Steps 0–7 done; step 8 = this PR (Tier 2, not merged).** The team is built but not live. It goes live when this PR is merged and the checklist below is done (Claude GitHub App, OAuth secret, WSL restart).
+- **P1 FAILED for the pinned model.** `qwen2.5-coder:14b` doesn't emit native tool calls through Ollama, so it can't drive Claude Code or Qwen Code. **Decision needed: see "Decisions for Delmar" #1.**
+- Pre-merge tests: see "Acceptance tests". The live end-to-end tests (T1, T2, T7, T9–T11, T13, T14, T17 live) need the gates on `main` and run after merge.
 
-## Step 1 — inspection (2026-11-14, read-only)
+## Decisions for Delmar (each changes the spec: Tier 2 in the template repo)
+1. **Local model (D12 / P1).** `qwen2.5-coder:14b` fails P1: Ollama returns its tool calls as plain text, never as `tool_calls` (checked directly against `/api/chat`). Both models already on the PC that do native tool calls were tried:
+   - P1_TRIAL_PLACEHOLDER
+   **Recommended:** RECOMMENDATION_PLACEHOLDER
+2. **Board status via labels.** GitHub Apps can't write to user-owned Projects (v2), and the Claude App is the agents' only identity (D11). So A0 records status as `status:*` labels, and the board views filter on labels; the Project's own Status field is maintained by its built-in workflows only. Alternative: move the repo to a free GitHub organisation, where the App could write Project fields. **Recommended:** keep labels for the pilot.
+3. **Merge identity.** The Claude App token can't be reused outside `claude-code-action` (the action revokes it), so A9's merges, branch updates, reverts and PR publishing run as a one-command Claude step (`release-manager`, Haiku, `--allowedTools` set to that exact command). All decisions are made first by the deterministic `scripts/gates/gate.js`, and the command re-verifies before acting. Alternative: your own small GitHub App plus `actions/create-github-app-token`, which takes the model out of the merge path entirely but adds a second bot identity (a D11 change). **Recommended:** keep the Claude App for the pilot; revisit if any A9 step misbehaves.
 
-### Stack
-- **One JavaScript engine** in `engine/`, shared by the agent CLI and MCP server (`agent/`), the browser game (`web/`, a static PWA), the live table server (`server/`, Node HTTP + SSE) and a macOS app (`macos/`, SwiftPM, with the engine embedded via JavaScriptCore, `EngineJS.generated.swift`).
-- Node 18+, with no runtime dependencies (`package.json` has no deps). The `qa/` harness has its own `package.json` (`playwright-core`, which drives an installed Chrome).
-- Also in the repo: poker (`engine/poker*.js`, `server/poker-hub.js`, `web/poker.*`, `agent/poker-*.js`) and local-model players that call Ollama (`agent/local-player.js`, `agent/examples/local-model-policy.js`).
+## Step 1 — inspection (read-only)
+- **Stack:** one JavaScript engine (`engine/`) shared by the agent CLI and MCP server (`agent/`), a static PWA (`web/`), the live table server (`server/`, Node HTTP + SSE, home network only) and a macOS app (`macos/`, SwiftPM with the engine embedded via JavaScriptCore). Node 18+, no runtime dependencies; `qa/` uses `playwright-core`. Includes poker (`*poker*`) and local-model players.
+- **Commands:** `npm test` (= `node --test`): **411 tests, all green, ~30 s** before setup, **434** after (23 new gate/guard tests). `node macos/scripts/embed-engine.js [--check]` after engine/agent changes. `node qa/run-round.js [sha]` (Chrome, port 8765). `macos/scripts/ci.sh` (macOS only). **No linter, formatter or type checker.**
+- **Tests:** extensive (every module has a `*.test.js`; fuzzers and feature checks in `qa/`; Swift tests). P0's "baseline test suite" isn't needed: 9 of the 10 planted bugs below are already caught by `npm test`.
+- **CI / protection:** no `.github/` before this PR. Private repo on GitHub Free: the branch protection and rulesets APIs return `403 Upgrade to GitHub Pro` (D10). History: 136 commits on `main`, almost all pushed directly; 4 PRs ever.
+- **Existing process:** Linear was the tracker (team ClawWorks, projects BlackJack and Poker), with "no schedulers without asking" in CLAUDE.md, nothing deployed (`server/` runs by hand on the Mac via launchd) and no feature flags.
 
-### Commands
-| Purpose | Command | Notes |
-|---|---|---|
-| Unit tests | `npm test` (= `node --test`) | **411 tests, all pass, ~30 s** on this PC (Node 22.22.1). Includes the macOS embed check. |
-| Engine embed | `node macos/scripts/embed-engine.js` (`--check` to verify) | Must be re-run after engine/agent changes. `npm test` fails if it's stale. |
-| QA round | `node qa/run-round.js [sha]` | Runs on a `git archive` snapshot. Needs Chrome + `cd qa && npm ci`. Port 8765 must be free. Writes `qa/reports/<sha7>.md`, updates `qa/state.json`. Currently on round 27, `last_tested` 34b01d2. |
-| macOS CI | `macos/scripts/ci.sh` | Swift build + tests + Swift/Node self-play cross-check. **macOS only.** |
-| Lint / types | none | No linter, formatter or type checker is configured. |
-| Run | `npm start` (static site on :8080), `npm run tables` (live server) | |
+## Delmar's answers (2026-11-14, console session)
+| Question | Answer |
+|---|---|
+| Tracker: Linear vs GitHub Issues (D3, REQ-COMMS-1) | **Move to GitHub.** Open Linear issues copied, then closed in Linear as Canceled with a link (CLA-100→#6, CLA-101→#7, CLA-103→#8, CLA-127→#9, CLA-132→#10). CLAUDE.md, README and qa/PLAYBOOK updated |
+| Required `ci` gate | **`npm test` only**, GitHub-hosted Ubuntu. macOS CI and the QA round stay manual; A9 lists them on merged PRs that touch the relevant paths |
+| Flags / deploy | **`flags: none`, `deploy: none`.** REQ-FLOW-3 → behaviour changes are at least Tier 1; release = merge + tag; rollback = revert |
+| Scope (§1.2) | **Personal, proceed** |
+| Schedulers (CLAUDE.md) | The agent team's own crons (orchestrator, cooling, merge sweep, main-guard sweep, weekly retro) were requested by `/setup-project` and are noted in CLAUDE.md as approved at setup |
 
-### Tests
-- Extensive: every engine/web/agent/server module has a `*.test.js`. There are also fuzzers and per-feature checks in `qa/`, and Swift tests in `macos/Tests/`.
-- **The spec's P0 assumption ("existing code may lack tests") doesn't hold.** P0 shrinks to writing `REVIEW.md`/`RISK.md`/`CODEOWNERS` and adapting `CLAUDE.md`. No baseline suite needs adding.
+## What was built (all in this PR unless noted)
+| Step | Files / actions |
+|---|---|
+| 0 | `.agents/SPEC.md` (v0.10 copy), `.agents/PROJECT.md` (overlay: flags/deploy none, `server/**` and `.mcp.json` Tier 2, `ci_command`, `manual_checks`) |
+| 2 (P0) | `CLAUDE.md` (adapted, not replaced: GitHub tracker, agent-team rules), `REVIEW.md` (severity rules + 10 project invariants), `RISK.md` (machine-readable tier rules, parsed by the gates), `CODEOWNERS` (documentation only) |
+| 3 | `.claude/agents/`: orchestrator (A0), spec-writer (A1), planner (A2), claude-implementer (A3b), self-verifier (A4), bug-hunter-{logic,state,contract} + {performance,rules} for Tier 2 (A5, ROLE-6), finding-verifier (A6), security-reviewer (A7), risk-classifier (A8), release-manager (A9), incident-retro (A10). Each has its mission, Can/Cannot, §5 exit criteria and the §9 handoff template |
+| 4 | `.agents/local-implementer.md` (A3a + ladder), `.agents/local-harness/settings.json` (Ollama env, 32k context, deny rules, hook), `scripts/agents/local-implement.sh`, `scripts/agents/policy-guard.js` (+ tests) |
+| 5 | `.github/workflows/`: ci, review, security, classify, tier-approval, tier2-cooling, merge, main-guard, release, orchestrator, retro (§8.1), plus spec-plan (A1/A2), implement (ladder + A4 + publish) and review-submitted (a shim so approvals are evaluated by base-branch code). `.agents/schemas/` for structured agent output. `scripts/gates/lib.js` (pure gate logic, 20 tests) + `gate.js` (GitHub API CLI) |
+| 6 | `scripts/rollback`; `evals/review/` (10 planted-bug cases + README) and `scripts/evals/replay.js` (REQ-IMP-2 replay) |
+| 7 (on GitHub/PC, not in the diff) | Runners `gamingpc-local-llm` (labels self-hosted, Linux, X64, `local-llm`) and `gamingpc-claude-jobs` (`claude-jobs`), each a systemd service run as its own unprivileged user (`gh-llm`, `gh-claude`, no sudo). 34 labels. Pinned digest issue #5. Project "BlackJack delivery" (#13, linked to the repo; Status options per §9; Tier, Implementer and Review round fields). Linear move (#6–#10). Repo Actions settings checked: default token read-only, Actions can't approve PRs (no change needed) |
+| PC (not in the diff) | `/etc/wsl.conf` `[automount] options = "metadata,uid=1000,gid=1000,umask=077,fmask=077,dmask=077"` (backup `/etc/wsl.conf.bak-20261114`), applied at the next WSL restart. See "Security findings" |
 
-### CI, protection, GitHub state
-- No `.github/` directory: **no CI at all.** QA rounds are run by hand.
-- Private repo on GitHub Free. Branch protection and rulesets API → `403 Upgrade to GitHub Pro` (as expected, D10).
-- 136 commits on `main`, nearly all pushed directly. Only 4 PRs ever (#1–#4, merged 2026-10-21/22). Last push 2026-10-24.
-- GitHub Issues: none. Labels: GitHub defaults only. Self-hosted runners: 0. Actions secrets: none listed.
+## Design notes (how the spec maps onto GitHub Free)
+- **Policy from the base branch (REQ-CFG-3).** Review, security and classify run on `pull_request_target`: the workflow, `REVIEW.md`, `RISK.md` and the agent definitions come from `main`, and the PR head is checked out only as data in `pr-head/` (never executed, never at the workspace root). `ci` runs PR code on `pull_request`, on a GitHub-hosted runner, with no secrets.
+- **Who counts.** Only statuses created by `github-actions[bot]` (deterministic workflow steps) count as gate results, and only reviews by `delmarolivier` on the current head SHA count as approvals. Agents write as `claude[bot]`, so nothing an agent posts can satisfy a gate (REQ-ROLE-4). `merge.yml` recomputes approvals and cooling itself rather than trusting their statuses, because review events run the PR's own workflow files.
+- **Single merge path (GATE-1).** `merge.yml` (serial concurrency group) plans with `gate.js merge-plan`, posts `merge-evidence`, then squash-merges the exact verified SHA. A PR behind `main` is updated first and its gates re-run (T17).
+- **main-guard (GATE-2, CB-5).** Every commit on `main` must be a squash merge by `claude[bot]` whose PR head carries trusted `merge-evidence`, or an exact revert carrying a `Rollback-of:` / `Main-guard-revert:` trailer (verified by replaying the revert and comparing trees). Anything else is reverted; main-guard opens an `incident` + `circuit-breaker` + `cb:level-0` issue that @-mentions Delmar and dispatches A10. A push by `GITHUB_TOKEN` fires no workflow, so a sweep runs hourly too. Bootstrap: commits whose parent has no `main-guard.yml` (i.e. merging this PR) are exempt.
+- **Circuit breakers** are open issues labelled `circuit-breaker` + `cb:level-N`. `gate.js level` = min(overlay level, 2 without platform protection (CB-6), open breakers). CB-4 throttling is an open `throttled` issue: implement.yml won't start new slices while it's open, and reviews are never skipped. A review lens with no output fails closed (`ai-review` stays pending).
+- **Ladder (FLOW-2/7).** `implement.yml`: local ×2 → Claude ×2 (with the failing `test.log` + `slice.patch` handed over as an artifact) → `needs-replan`. An attempt = implement + full `npm test`; a diff touching a policy path fails the attempt. A runner loss or timeout (e.g. gaming pause) re-runs the same rung once instead of advancing. The local runner holds no secrets; its patch crosses to `claude-jobs` for A4 and publishing.
+- **`--agent` + `--json-schema` don't combine.** With `--agent`, Claude Code returns no `structured_output` (found during T3). All workflows load the role with `--append-system-prompt-file .claude/agents/<role>.md` and enforce tools with explicit `--allowedTools` / `--disallowedTools`.
 
-### Existing process (conflicts with the spec — see questions)
-- **Tracker is Linear, not GitHub.** The repo's `CLAUDE.md` says "Linear is the source of truth": team ClawWorks, projects **BlackJack** and **Poker**, keys `CLA-…`. Commits name the issue, and an issue is Done when its commit is on `main` and a QA round passed. Open now: CLA-100, CLA-101, CLA-103 (BlackJack, backlog), CLA-127 (Poker, in progress), CLA-132 (Poker, unstarted). All other issues are done.
-- **No schedulers without asking.** `CLAUDE.md`: "Don't recreate [the KiroCrew crons], or any scheduler, without asking." The spec's `orchestrator.yml` is a scheduler.
-- **Deploy.** Nothing is deployed. `server/` is home-network only: "never deploy it or expose it publicly without asking". `server/service.sh` runs it as a launchd agent on the Mac (default host 192.168.4.43), restarted by hand after a pull.
-- **Flags.** No feature-flag system. The only env knobs are tooling (`BLACKJACK_SERVER`, `POKER_SCOUTING`, `LOCAL_LLM_CMD`, QA browser vars). Overlay says `flags: env-config # confirm at setup`.
-- **History.** `HANDOVER.md` describes an earlier creator/player agent loop on a different host ("KiroCrew"). Its crons are historical and weren't recreated. About 40% of commits use a different author email from the rest.
+## Security findings during setup
+1. **Fixed (pending WSL restart): Windows drive readable by every Linux user.** `/mnt/c` was mounted world-readable, so the runner users could read `C:\Users\zikan\.claude\.credentials.json` (Windows Claude login). Through interop they could also run Windows binaries, elevated, because the distro is started by an elevated task. `/etc/wsl.conf` now restricts the Windows drives to uid 1000 (delmar). **Takes effect after `wsl --shutdown`** (checklist item 4). Runner services stay stopped until then.
+2. **Avoided:** running the runners as `delmar` would have exposed Delmar's `gh` token and Claude subscription login to every agent job (REQ-GATE-3, CFG-7). They run as `gh-llm` / `gh-claude` instead; `/home/delmar` is mode 750.
+3. The local harness runs with an empty per-job `CLAUDE_CONFIG_DIR` and unsets all tokens. Checkouts use `persist-credentials: false` everywhere a model runs.
 
-## Questions for H (step 1 → step 2)
-Asked in the console session on 2026-11-14. Answers are recorded here when given.
-1. Tracker: Linear vs GitHub Issues (D3, REQ-COMMS-1 non-overridable).
-2. What the required `ci` gate runs (no CI today; macOS CI needs a macOS runner; QA round needs Chrome).
-3. Flags/deploy: confirm `flags: none` (REQ-FLOW-3 → Tier floor 1) and `deploy: none`.
-4. Scope: confirm BlackJack is a personal project (spec §1.2 excludes work-related repos).
+## Acceptance tests (pre-merge)
+TESTS_PLACEHOLDER
+
+## Checklist for Delmar (only you can do these)
+1. **Install the Claude GitHub App on BlackJack only:** https://github.com/apps/claude → Configure → `delmarolivier` → Repository access: *Only select repositories* → add `blackjack` → Save. (D11: every agent write goes through it.)
+2. **Add the OAuth secret (REQ-CFG-5).** In a terminal where you're logged in to Claude (the Mac, or this PC as `delmar`), run `claude setup-token` and copy the token. Then run `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R delmarolivier/blackjack` and paste it at the prompt. Never paste it into a chat, file or commit. Check: `gh secret list -R delmarolivier/blackjack` shows `CLAUDE_CODE_OAUTH_TOKEN`.
+3. **Decide the local model** (Decisions #1) before any slice is dispatched. Until then, A0 won't find slices in Planned, so nothing runs locally.
+4. **Restart WSL to apply the drive lock-down (Security finding 1),** at a moment when nothing's running: from Windows, `wsl --shutdown`. The `WSLStartupKeepAlive` task brings Ubuntu back within a minute, and the console and both runner services start with it. Check from WSL: `sudo -u gh-llm ls /mnt/c/Users` → *Permission denied*, and `systemctl is-active actions.runner.delmarolivier-blackjack.gamingpc-{local-llm,claude-jobs}` → `active` ×2. In GitHub → Settings → Actions → Runners, both should show Idle.
+5. **The three board views** (Project "BlackJack delivery": https://github.com/users/delmarolivier/projects/13). Click **+ New view** for each:
+   - **Needs me:** Table layout. Filter: `is:open label:needs-human,status:awaiting-human,status:cooling,tier:2`. Sort: Updated. Target state: empty.
+   - **Flow:** Board layout, columns by **Status**. The Project's built-in workflows (below) move cards to Done; the agents' own status is in the `status:*` labels, shown on each card.
+   - **Local vs Claude:** Table layout. Filter: `label:slice`. Group by: **Implementer**.
+   Then **Workflows** (⋯ menu → Workflows): turn on *Auto-add to project* (repo `delmarolivier/blackjack`, filter `is:issue,pr is:open`), *Item closed* → Done, *Pull request merged* → Done.
+6. **Gaming pause (REQ-CFG-4d).** Edit the `$Games` list at the top of `scripts/runner/gaming-pause.ps1` to the process names of the games you play (without `.exe`). Then, in an **elevated** PowerShell on the PC:
+   ```powershell
+   Copy-Item \\wsl$\Ubuntu\home\delmar\console\blackjack\scripts\runner\gaming-pause.ps1 C:\ProgramData\gaming-pause.ps1
+   $a = New-ScheduledTaskAction -Execute powershell.exe -Argument '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\ProgramData\gaming-pause.ps1'
+   $t = New-ScheduledTaskTrigger -AtLogOn -User delmar
+   $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartInterval (New-TimeSpan -Minutes 1) -RestartCount 999
+   Register-ScheduledTask -TaskName GamingPauseLocalLLM -Action $a -Trigger $t -Settings $s -RunLevel Highest -User delmar
+   ```
+   It only matters when you're logged in, which you always are when gaming. It logs to `C:\Windows\Temp\gaming-pause.log`.
+7. **Merge this PR yourself (one-time bootstrap exception).** `merge.yml` and `main-guard` aren't on `main` yet, so they can't merge it, and main-guard exempts this merge. Follow the Tier 2 rule by hand: approve, wait 24 h, then squash-merge. After that, never merge by hand: your routes to `main` are approving PRs and `scripts/rollback` (REQ-GATE-3).
+8. **After merge:** Actions → *orchestrator* → Run workflow (tick *digest*) to check A0 end to end. Then open a small Tier 1 issue (e.g. "Add `percent()` to engine/format.js", the P1-1 slice) and label it `needs-spec` to watch the whole flow: spec → your `spec-approved` → plan → implement → review → your approval → A9 merge.
+9. **Template repo follow-up (Tier 2 spec PR):** §8.1 workflow list (+ implement, spec-plan, review-submitted); D11 merge-identity note; the user-owned Project limitation; P1 outcome / D12; the WSL `/mnt/c` + interop hardening in the bootstrap command.

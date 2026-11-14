@@ -11,3 +11,16 @@ index 9d1f190..7983d33 100644
    }
    const PAYOUTS = [1.5, 1.2]; // 3:2 and 6:5
    const DOUBLE_ON = ['any', '9-11', '10-11']; // any two cards, or hard 9-11 / 10-11 only
+diff --git a/macos/Sources/BlackjackCore/EngineJS.generated.swift b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+index ae1fb2a..57a611b 100644
+--- a/macos/Sources/BlackjackCore/EngineJS.generated.swift
++++ b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+@@ -237,7 +237,7 @@ enum EngineJS {
+   /** Dealer draws below 17, and on soft 17 when the table uses H17. */
+   function dealerShouldHit(hand, h17 = false) {
+     const { total, soft } = handValue(hand);
+-    return total < DEALER_STAND || (h17 && total === DEALER_STAND && soft);
++    return total < DEALER_STAND || (h17 && total === DEALER_STAND);
+   }
+   const PAYOUTS = [1.5, 1.2]; // 3:2 and 6:5
+   const DOUBLE_ON = ['any', '9-11', '10-11']; // any two cards, or hard 9-11 / 10-11 only
