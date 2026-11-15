@@ -72,14 +72,13 @@ jobs:
           gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/hunter.json"))')" >> "$GITHUB_OUTPUT"
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
           app-id: ${{ secrets.A5_APP_ID }}
           private-key: ${{ secrets.A5_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          # read-only role: ask for read-only, whatever the App was granted (A7 sec-2 on #23)
-          permission-contents: read
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
           permission-pull-requests: read
       - id: claude
         uses: anthropics/claude-code-action@v1
@@ -131,14 +130,13 @@ jobs:
           echo "n=$(node -p 'require("./candidates.json").length')" >> "$GITHUB_OUTPUT"
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/votes.json"))')" >> "$GITHUB_OUTPUT"
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
           app-id: ${{ secrets.A6_APP_ID }}
           private-key: ${{ secrets.A6_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          # read-only role: ask for read-only, whatever the App was granted (A7 sec-2 on #23)
-          permission-contents: read
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
           permission-pull-requests: read
       - id: claude
         if: steps.s.outputs.n != '0'

@@ -48,12 +48,16 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0, clean: true, persist-credentials: false }
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
           app-id: ${{ secrets.A10_APP_ID }}
           private-key: ${{ secrets.A10_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:

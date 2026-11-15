@@ -130,13 +130,13 @@ jobs:
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
           app-id: ${{ secrets.A3B_APP_ID }}
           private-key: ${{ secrets.A3B_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          # this job runs code but never writes to GitHub (publish does): read-only (A7 on #23)
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
           permission-contents: read
           permission-issues: read
           permission-pull-requests: read
@@ -197,14 +197,13 @@ jobs:
           git diff "origin/${{ needs.gate.outputs.base }}" HEAD > slice.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json"))')" >> "$GITHUB_OUTPUT"
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
           app-id: ${{ secrets.A4_APP_ID }}
           private-key: ${{ secrets.A4_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          # read-only role: ask for read-only, whatever the App was granted (A7 sec-2 on #23)
-          permission-contents: read
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
           permission-pull-requests: read
       - id: claude
         uses: anthropics/claude-code-action@v1
@@ -251,12 +250,16 @@ jobs:
       - id: cmd
         run: echo "run=node scripts/gates/gate.js publish --patch attempt/commits.mbox --issue $ISSUE --implementer $IMPL${FIX_PR:+ --pr $FIX_PR}" >> "$GITHUB_OUTPUT"
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
           app-id: ${{ inputs.implementer == 'local' && secrets.A3A_APP_ID || secrets.A3B_APP_ID }}
           private-key: ${{ inputs.implementer == 'local' && secrets.A3A_APP_KEY || secrets.A3B_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
       - uses: anthropics/claude-code-action@v1
         env: { GATE_READ_TOKEN: "${{ github.token }}" }
         with:
