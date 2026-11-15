@@ -1,0 +1,43 @@
+{
+ "type": "object",
+ "properties": {
+  "votes": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "vote": {
+      "enum": [
+       "real",
+       "false"
+      ]
+     },
+     "severity": {
+      "enum": [
+       "Important",
+       "Nit",
+       "Pre-existing"
+      ]
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "vote",
+     "severity",
+     "reason"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "required": [
+  "votes"
+ ],
+ "additionalProperties": false
+}

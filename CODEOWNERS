@@ -1,0 +1,11 @@
+# Documentation only: GitHub Free does not enforce CODEOWNERS on private repos (REQ-RISK-1).
+# The enforced tier rules are in RISK.md; the enforced approvals are in tier-approval.yml.
+*                 @delmarolivier
+/.github/         @delmarolivier
+/.claude/         @delmarolivier
+/.agents/         @delmarolivier
+/scripts/         @delmarolivier
+/server/          @delmarolivier
+/CLAUDE.md        @delmarolivier
+/REVIEW.md        @delmarolivier
+/RISK.md          @delmarolivier

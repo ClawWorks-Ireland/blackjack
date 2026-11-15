@@ -1,0 +1,32 @@
+# G9 human approval by tier (spec §6, REQ-GATE-1 input). Informational: merge.yml
+# recomputes approvals itself. Deterministic, no Claude.
+name: tier-approval
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+  workflow_run:
+    workflows: [review-submitted]
+    types: [completed]
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+jobs:
+  tier-approval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4   # base branch: RISK.md and PROJECT.md (REQ-CFG-3)
+        with: { persist-credentials: false }
+      - name: PR number
+        id: pr
+        env:
+          PR_EVENT: ${{ github.event.pull_request.number }}
+          PR_RUN: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: echo "n=${PR_EVENT:-$PR_RUN}" >> "$GITHUB_OUTPUT"
+      - if: steps.pr.outputs.n != ''
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: |
+          node scripts/gates/gate.js tier-approval --pr ${{ steps.pr.outputs.n }}
+          node scripts/gates/gate.js cooling --pr ${{ steps.pr.outputs.n }}

@@ -1,0 +1,24 @@
+# Reviewer eval set (spec §10.2, REQ-IMP-1/2, T3)
+
+Ten planted bugs specific to BlackJack, each a real patch against `main` (2026-11-14, e284836). A10 adds a case after every revert or incident (REQ-IMP-1). Any change to a reviewer prompt (`.claude/agents/bug-hunter-*.md`, `finding-verifier.md`) or to `REVIEW.md` must replay this set and show recall didn't drop (REQ-IMP-2). This directory is Tier 2 (RISK.md).
+
+| Case | Bug | Caught by `npm test` today |
+|---|---|---|
+| 01-ace-demotion | only one ace demoted 11→1 (spec T3 "ace valued wrong") | yes |
+| 02-dealer-hard-17 | H17 dealer also hits hard 17 (spec T3 "dealer hits soft 17 incorrectly") | yes |
+| 03-shoe-not-renewed | cut card reshuffles the remainder, not a new shoe (spec T3 "deck not reshuffled") | yes |
+| 04-split-21-blackjack | split 21 paid as a blackjack | yes |
+| 05-double-soft | restricted doubling allows soft totals | yes |
+| 06-hilo-seven | Hi-Lo counts 7 as +1 (unbalanced) | yes |
+| 07-money-floor | money formatting truncates cents | **no** |
+| 08-colored-mixed-swap | Perfect Pairs colored/mixed swapped | yes |
+| 09-folded-wins-pot | poker: folded seat eligible for pots | yes, by hanging `agent/poker-scout.test.js` |
+| 10-qka-straight | 21+3 misses Q-K-A straight | yes |
+
+The tests are strong, so CI already catches 9 of 10. The set still measures **reviewer** recall: reviewers see only the diff (REQ-COMMS-2), and future bugs won't all be covered by tests. The next cases A10 adds should be ones the tests miss, like 07.
+
+## Replay
+```
+scripts/evals/replay.js [--cases 01,07] [--out evals-results.json]
+```
+For each case it builds `pr-head/` (main + `bug.patch`) next to a base checkout, then runs the same agents, models, tools and schemas as `review.yml`: three blind hunters (logic, state, contract), then three verifiers voting, then `decideFindings` (≥ 2/3). It scores against `case.md`. **Hit** = a kept Important finding at the patched file/function. **Pass (T3)** = ≥ 8/10 hits and ≤ 2 false Important findings in total. It uses the Claude subscription of whoever runs it (about 60 Claude runs for the full set).

@@ -1,0 +1,77 @@
+# REQ-GATE-2 / REQ-CB-5 (non-overridable): every commit on main must be an A9
+# merge with gate evidence or an exact revert (scripts/rollback, main-guard).
+# Anything else is reverted, labelled `incident`, H is @-mentioned, and the
+# autonomy level drops to 0 until the retro closes.
+name: main-guard
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '53 * * * *'   # sweep: catches pushes that triggered no workflow (e.g. GITHUB_TOKEN pushes)
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+  issues: write
+  actions: write
+  id-token: write
+concurrency:
+  group: main-guard
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      violations: ${{ steps.g.outputs.violations }}
+    env: { GITHUB_TOKEN: "${{ github.token }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, fetch-depth: 0, persist-credentials: false }
+      - id: g
+        run: |
+          if [ "${{ github.event_name }}" = push ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            V=$(node scripts/gates/gate.js guard --before "${{ github.event.before }}" --after "${{ github.event.after }}")
+          else
+            V=$(node scripts/gates/gate.js guard --sweep)
+          fi
+          echo "violations=$V" >> "$GITHUB_OUTPUT"
+          echo "$V"
+
+  revert:
+    needs: check
+    if: needs.check.outputs.violations != '[]' && needs.check.outputs.violations != ''
+    runs-on: [self-hosted, claude-jobs]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, fetch-depth: 0, persist-credentials: false, clean: true }
+      - id: cmd
+        env: { V: "${{ needs.check.outputs.violations }}" }
+        run: |
+          # newest first, so each revert applies cleanly
+          CMD=$(node -e 'const v=JSON.parse(process.env.V).reverse();console.log(v.map(x=>"node scripts/gates/gate.js guard-revert --sha "+x.sha).join(" && "))')
+          echo "run=$CMD" >> "$GITHUB_OUTPUT"
+      - id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            main-guard found commits on main that did not come through A9's merge path. Run exactly this command and report its output. Do nothing else:
+            ${{ steps.cmd.outputs.run }}
+          claude_args: >-
+            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
+            --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
+      - name: Incident + circuit breaker (REQ-CB-5)
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          V: ${{ needs.check.outputs.violations }}
+          REVERTED: ${{ steps.claude.outcome }}
+        run: |
+          LIST=$(node -e 'console.log(JSON.parse(process.env.V).map(x=>"- "+x.sha.slice(0,7)+": "+x.why).join("\n"))')
+          gh issue create -R "$GITHUB_REPOSITORY" --title "Incident: unauthorised change to main" --label incident --label circuit-breaker --label "cb:level-0" --body "$(printf '@delmarolivier main-guard found commits on main outside A9'"'"'s merge path (REQ-GATE-2):\n\n%s\n\nRevert: %s (run %s).\nREQ-CB-5: autonomy drops to **Level 0** while this issue is open. A10 writes the retro; close this issue when the retro is done.\n' "$LIST" "$REVERTED" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")" > issue.txt
+          N=$(grep -oE '[0-9]+$' issue.txt); cat issue.txt
+          gh workflow run retro.yml -R "$GITHUB_REPOSITORY" -f incident="$N"   # GITHUB_TOKEN-created issues trigger no workflows

@@ -1,0 +1,26 @@
+diff --git a/engine/sidebets.js b/engine/sidebets.js
+index d857eba..5de39b3 100644
+--- a/engine/sidebets.js
++++ b/engine/sidebets.js
+@@ -29,7 +29,7 @@
+   function pairsHand([a, b]) {
+     if (a.rank !== b.rank) return null;
+     if (a.suit === b.suit) return 'perfect pair';
+-    if (RED.has(a.suit) === RED.has(b.suit)) return 'colored pair';
++    if (RED.has(a.suit) !== RED.has(b.suit)) return 'colored pair';
+     return 'mixed pair';
+   }
+ 
+diff --git a/macos/Sources/BlackjackCore/EngineJS.generated.swift b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+index ae1fb2a..1925aef 100644
+--- a/macos/Sources/BlackjackCore/EngineJS.generated.swift
++++ b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+@@ -36,7 +36,7 @@ enum EngineJS {
+   function pairsHand([a, b]) {
+     if (a.rank !== b.rank) return null;
+     if (a.suit === b.suit) return 'perfect pair';
+-    if (RED.has(a.suit) === RED.has(b.suit)) return 'colored pair';
++    if (RED.has(a.suit) !== RED.has(b.suit)) return 'colored pair';
+     return 'mixed pair';
+   }
+ 

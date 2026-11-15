@@ -1,0 +1,48 @@
+{
+ "type": "object",
+ "properties": {
+  "pass": {
+   "type": "boolean"
+  },
+  "findings": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "severity": {
+      "enum": [
+       "Important",
+       "Nit",
+       "Pre-existing"
+      ]
+     },
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer"
+     },
+     "claim": {
+      "type": "string"
+     },
+     "failing_input": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "severity",
+     "file",
+     "line",
+     "claim",
+     "failing_input"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "required": [
+  "pass",
+  "findings"
+ ],
+ "additionalProperties": false
+}

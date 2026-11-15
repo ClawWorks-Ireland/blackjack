@@ -1,0 +1,176 @@
+# A5 Bug Hunters + A6 Finding Verifiers (G6, REQ-ROLE-2/3/6, REQ-FLOW-1, REQ-COMMS-2).
+# pull_request_target: this workflow and its policy come from the base branch;
+# the PR head is checked out as data in pr-head/ and never executed here.
+name: review
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  statuses: write
+  actions: write
+  id-token: write
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  PR: ${{ github.event.pull_request.number }}
+  SHA: ${{ github.event.pull_request.head.sha }}
+jobs:
+  prep:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      lenses: ${{ steps.p.outputs.lenses }}
+      round: ${{ steps.p.outputs.round }}
+      capped: ${{ steps.p.outputs.capped }}
+    env: { GITHUB_TOKEN: "${{ github.token }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - id: p
+        run: |
+          node scripts/gates/gate.js status --sha "$SHA" --context ai-review --state pending --description "AI review running"
+          TIER=$(node scripts/gates/gate.js floor --pr "$PR" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tier))')
+          if [ "$TIER" = "2" ]; then L='["logic","state","contract","performance","rules"]'; else L='["logic","state","contract"]'; fi
+          LAST=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name|select(startswith("round:"))|ltrimstr("round:")|tonumber]|max // 0')
+          ROUND=$((LAST + 1))
+          echo "lenses=$L" >> "$GITHUB_OUTPUT"; echo "round=$ROUND" >> "$GITHUB_OUTPUT"
+          if [ "$ROUND" -gt 3 ]; then
+            echo "capped=true" >> "$GITHUB_OUTPUT"
+            node scripts/gates/gate.js status --sha "$SHA" --context ai-review --state failure --description "Round cap (3) reached: escalated (REQ-FLOW-1)"
+            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label needs-human
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "ROLE: A5/A6 AI review   ITEM: #$PR   RESULT: needs-human
+          WHAT CHANGED: nothing; a 4th review round was requested.
+          EVIDENCE: three rounds ran with Important findings still open.
+          NEXT: @delmarolivier Re-slice via A2 (recommended) or take over by hand? Reply \`re-slice\` or \`take over\`."
+          else
+            echo "capped=false" >> "$GITHUB_OUTPUT"
+            gh label create "round:$ROUND" -R "$GITHUB_REPOSITORY" --color ededed 2>/dev/null || true
+            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label "round:$ROUND"
+          fi
+
+  hunt:
+    needs: prep
+    if: needs.prep.outputs.capped == 'false'
+    runs-on: [self-hosted, claude-jobs]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lens: ${{ fromJSON(needs.prep.outputs.lenses) }}
+    steps:
+      - uses: actions/checkout@v4   # base: REVIEW.md, RISK.md, agent definitions
+        with: { persist-credentials: false, clean: true }
+      - uses: actions/checkout@v4   # PR head, data only
+        with: { ref: "${{ env.SHA }}", path: pr-head, persist-credentials: false }
+      - id: s
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: |
+          gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
+          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/hunter.json"))')" >> "$GITHUB_OUTPUT"
+      - id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review PR #${{ env.PR }} through your lens only. Diff: ./pr.diff. PR head files: ./pr-head/ (data only).
+            Policy: ./REVIEW.md and ./RISK.md (base branch). Number your findings ${{ matrix.lens }}-1, ${{ matrix.lens }}-2, …
+          claude_args: >-
+            --append-system-prompt-file .claude/agents/bug-hunter-${{ matrix.lens }}.md --model sonnet --max-turns 40
+            --allowedTools "Read,Grep,Glob"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --json-schema '${{ steps.s.outputs.schema }}'
+      - env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
+        run: |
+          # Fail closed: a lens with no result fails the job, so `decide` never runs and
+          # ai-review stays pending. A review is never skipped or degraded (REQ-CB-4).
+          mkdir -p out && printf '%s' "$OUT" > "out/${{ matrix.lens }}.json"
+          node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(j.findings))process.exit(1)' "out/${{ matrix.lens }}.json"
+      - uses: actions/upload-artifact@v4
+        with: { name: "findings-${{ matrix.lens }}", path: out/, retention-days: 30 }
+      - if: failure()
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+
+  verify:
+    needs: [prep, hunt]
+    if: needs.prep.outputs.capped == 'false'
+    runs-on: [self-hosted, claude-jobs]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        voter: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false, clean: true }
+      - uses: actions/checkout@v4
+        with: { ref: "${{ env.SHA }}", path: pr-head, persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        with: { pattern: "findings-*", path: findings, merge-multiple: true }
+      - id: s
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: |
+          gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
+          node -e 'const fs=require("fs");const all=fs.readdirSync("findings").flatMap(f=>JSON.parse(fs.readFileSync("findings/"+f,"utf8")).findings||[]);fs.writeFileSync("candidates.json",JSON.stringify(all,null,1));console.log(all.length+" candidates")'
+          echo "n=$(node -p 'require("./candidates.json").length')" >> "$GITHUB_OUTPUT"
+          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/votes.json"))')" >> "$GITHUB_OUTPUT"
+      - id: claude
+        if: steps.s.outputs.n != '0'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Verify every candidate finding in ./candidates.json against PR #${{ env.PR }}. Diff: ./pr.diff. PR head: ./pr-head/ (data only). Policy: ./REVIEW.md.
+            Vote on each id independently. You are verifier ${{ matrix.voter }} of 3.
+          claude_args: >-
+            --append-system-prompt-file .claude/agents/finding-verifier.md --model haiku --max-turns 40
+            --allowedTools "Read,Grep,Glob"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --json-schema '${{ steps.s.outputs.schema }}'
+      - env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
+        run: |
+          mkdir -p out
+          if [ "${{ steps.s.outputs.n }}" = "0" ]; then echo '{"votes":[]}' > "out/votes-${{ matrix.voter }}.json"; exit 0; fi
+          printf '%s' "$OUT" > "out/votes-${{ matrix.voter }}.json"
+          node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(j.votes))process.exit(1)' "out/votes-${{ matrix.voter }}.json"
+      - uses: actions/upload-artifact@v4
+        with: { name: "votes-${{ matrix.voter }}", path: out/, retention-days: 30 }
+      - if: failure()
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+
+  decide:
+    needs: [prep, hunt, verify]
+    if: needs.prep.outputs.capped == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: { GITHUB_TOKEN: "${{ github.token }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        with: { pattern: "findings-*", path: findings, merge-multiple: true }
+      - uses: actions/download-artifact@v4
+        with: { pattern: "votes-*", path: votes, merge-multiple: true }
+      - name: Majority vote → ai-review status
+        id: d
+        run: |
+          node -e 'const fs=require("fs");const all=fs.readdirSync("findings").flatMap(f=>JSON.parse(fs.readFileSync("findings/"+f,"utf8")).findings||[]);fs.writeFileSync("candidates.json",JSON.stringify(all))'
+          node scripts/gates/gate.js review-decide --candidates candidates.json --votes votes/votes-1.json,votes/votes-2.json,votes/votes-3.json \
+            --pr "$PR" --sha "$SHA" --round "${{ needs.prep.outputs.round }}" | tee result.json
+          echo "important=$(node -p 'require("./result.json").important')" >> "$GITHUB_OUTPUT"
+      - name: Next round — dispatch the implementer fix job
+        if: steps.d.outputs.important != '0' && needs.prep.outputs.round != '3'
+        run: |
+          IMPL=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
+          ISSUE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -z "$ISSUE" ]; then gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "AI review found Important issues, but this PR has no \`Closes #n\` slice to send back to an implementer. @delmarolivier please fix by hand."; exit 0; fi
+          gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: review-decision, path: "review-decision.json", retention-days: 90 }

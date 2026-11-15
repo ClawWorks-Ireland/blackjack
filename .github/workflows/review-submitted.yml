@@ -1,0 +1,14 @@
+# Shim: pull_request_review runs use the PR's own workflow files, so this does
+# nothing but exist. tier-approval.yml listens for its completion via
+# workflow_run, which always runs the base-branch version.
+name: review-submitted
+on:
+  pull_request_review:
+    types: [submitted, dismissed, edited]
+permissions: {}
+jobs:
+  note:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "review on PR ${{ github.event.pull_request.number }}"

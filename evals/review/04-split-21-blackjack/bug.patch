@@ -1,0 +1,26 @@
+diff --git a/engine/blackjack.js b/engine/blackjack.js
+index 9d1f190..54474f8 100644
+--- a/engine/blackjack.js
++++ b/engine/blackjack.js
+@@ -141,7 +141,7 @@
+    */
+   function settle(playerHand, dealerHand, bet, { fromSplit = false, surrendered = false, payout = 1.5 } = {}) {
+     if (surrendered) return { outcome: 'surrender', net: -bet / 2 };
+-    const pBJ = !fromSplit && isBlackjack(playerHand);
++    const pBJ = isBlackjack(playerHand);
+     const dBJ = isBlackjack(dealerHand);
+     if (pBJ && dBJ) return { outcome: 'push', net: 0 };
+     if (pBJ) return { outcome: 'blackjack', net: bet * payout };
+diff --git a/macos/Sources/BlackjackCore/EngineJS.generated.swift b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+index ae1fb2a..d9e9ae3 100644
+--- a/macos/Sources/BlackjackCore/EngineJS.generated.swift
++++ b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+@@ -257,7 +257,7 @@ enum EngineJS {
+    */
+   function settle(playerHand, dealerHand, bet, { fromSplit = false, surrendered = false, payout = 1.5 } = {}) {
+     if (surrendered) return { outcome: 'surrender', net: -bet / 2 };
+-    const pBJ = !fromSplit && isBlackjack(playerHand);
++    const pBJ = isBlackjack(playerHand);
+     const dBJ = isBlackjack(dealerHand);
+     if (pBJ && dBJ) return { outcome: 'push', net: 0 };
+     if (pBJ) return { outcome: 'blackjack', net: bet * payout };

@@ -1,0 +1,26 @@
+diff --git a/engine/blackjack.js b/engine/blackjack.js
+index 9d1f190..9fd5916 100644
+--- a/engine/blackjack.js
++++ b/engine/blackjack.js
+@@ -107,7 +107,7 @@
+       total += cardValue(card);
+       if (card.rank === 'A') aces++;
+     }
+-    while (total > 21 && aces > 0) {
++    if (total > 21 && aces > 0) {
+       total -= 10;
+       aces--;
+     }
+diff --git a/macos/Sources/BlackjackCore/EngineJS.generated.swift b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+index ae1fb2a..ea3bedd 100644
+--- a/macos/Sources/BlackjackCore/EngineJS.generated.swift
++++ b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+@@ -223,7 +223,7 @@ enum EngineJS {
+       total += cardValue(card);
+       if (card.rank === 'A') aces++;
+     }
+-    while (total > 21 && aces > 0) {
++    if (total > 21 && aces > 0) {
+       total -= 10;
+       aces--;
+     }

@@ -41,10 +41,11 @@ startup (T2).
    built-in browser or Claude in Chrome), including chips, Rebet, insurance and
    the hint, with a screenshot per hand. `live_play.sh`/`live_drills.sh` are the
    old playwright-cli versions of this and are kept for reference only.
-4. Update Linear (project BlackJack, team ClawWorks), the source of truth for
-   open work: a new finding is a new issue (label Bug, or Improvement for a
-   harness fix) with repro + expected/actual; an issue verified by this round
-   moves to Done with the SHA; a regression reopens its issue. `qa/backlog.md`
+4. Update GitHub Issues on this repo, the source of truth for open work
+   (Linear is history since 2026-11-14): a new finding is a new issue (label
+   `bug`, or `enhancement` for a harness fix) with repro + expected/actual; an
+   issue verified by this round is closed with the SHA; a regression reopens
+   its issue. `qa/backlog.md`
    is the closed archive up to round 14: don't add to it.
 5. Write `qa/reports/<sha7>.md` (the per-round summary that is committed;
    screenshots and raw output stay local, see `qa/.gitignore`).
@@ -53,4 +54,4 @@ startup (T2).
 ## Guards
 
 - A bug still open after 3 fix attempts goes to Delmar rather than another try.
-- If fixes land but no Linear issue changes across two rounds, flag it.
+- If fixes land but no issue changes across two rounds, flag it.

@@ -1,0 +1,13 @@
+diff --git a/engine/poker.js b/engine/poker.js
+index 4f9da6c..5e3bda6 100644
+--- a/engine/poker.js
++++ b/engine/poker.js
+@@ -361,7 +361,7 @@
+       let prev = 0;
+       for (const level of levels) {
+         const amount = contrib.reduce((sum, c) => sum + Math.max(0, Math.min(c, level) - prev), 0);
+-        const eligible = this.seats.map((s, i) => (s && s.inHand && !s.folded && contrib[i] >= level ? i : -1)).filter((i) => i >= 0);
++        const eligible = this.seats.map((s, i) => (s && s.inHand && contrib[i] >= level ? i : -1)).filter((i) => i >= 0);
+         if (!eligible.length && out.length) out[out.length - 1].amount += amount; // only folded money at this level
+         else out.push({ amount, eligible });
+         prev = level;

@@ -1,0 +1,13 @@
+diff --git a/engine/format.js b/engine/format.js
+index afb0332..59897ad 100644
+--- a/engine/format.js
++++ b/engine/format.js
+@@ -11,7 +11,7 @@
+ 
+   /** Absolute amount as digits, rounded to the cent. */
+   function digits(n) {
+-    const cents = Math.round(Math.abs(n) * 100);
++    const cents = Math.floor(Math.abs(n) * 100);
+     return cents % 100 === 0 ? WHOLE.format(cents / 100) : CENTS.format(cents / 100);
+   }
+ 

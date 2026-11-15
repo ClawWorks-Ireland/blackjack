@@ -1,0 +1,26 @@
+diff --git a/engine/sidebets.js b/engine/sidebets.js
+index d857eba..5aad11a 100644
+--- a/engine/sidebets.js
++++ b/engine/sidebets.js
+@@ -38,7 +38,7 @@
+     const idx = cards.map((c) => RANKS.indexOf(c.rank)).sort((x, y) => x - y);
+     if (new Set(idx).size !== 3) return false;
+     if (idx[2] - idx[0] === 2) return true;
+-    return idx[0] === 0 && idx[1] === 11 && idx[2] === 12; // Q-K-A
++    return false;
+   }
+ 
+   /** Winning 21+3 hand for your two cards and the dealer's up card, or null. */
+diff --git a/macos/Sources/BlackjackCore/EngineJS.generated.swift b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+index ae1fb2a..4ad8c4d 100644
+--- a/macos/Sources/BlackjackCore/EngineJS.generated.swift
++++ b/macos/Sources/BlackjackCore/EngineJS.generated.swift
+@@ -45,7 +45,7 @@ enum EngineJS {
+     const idx = cards.map((c) => RANKS.indexOf(c.rank)).sort((x, y) => x - y);
+     if (new Set(idx).size !== 3) return false;
+     if (idx[2] - idx[0] === 2) return true;
+-    return idx[0] === 0 && idx[1] === 11 && idx[2] === 12; // Q-K-A
++    return false;
+   }
+ 
+   /** Winning 21+3 hand for your two cards and the dealer's up card, or null. */

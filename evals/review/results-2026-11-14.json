@@ -1,0 +1,518 @@
+{
+  "date": "2026-11-14T21:36:16.646Z",
+  "hits": 9,
+  "cases": 10,
+  "falseImportant": 0,
+  "t3_pass": true,
+  "results": [
+    {
+      "case": "01-ace-demotion",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 3,
+      "kept": 3,
+      "important": 3,
+      "errors": [],
+      "seconds": 31,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/blackjack.js",
+          "line": 110,
+          "claim": "The ace-demotion `while` loop in `handValue` was changed to `if`, so at most one ace is demoted from 11 to 1. Hands with two or more aces that still exceed 21 after one demotion are reported as bust or with the wrong total. This breaks the 'one ace at a time until not bust' rule in REVIEW.md invariant 3.",
+          "failing_input": "Hand [A, A, K]: raw total 32. The new code demotes once to 22, so handValue returns {total: 22, soft: true} and isBust is true. The correct result is 12 (hard), not a bust. Hand [A, A, A, 9] returns 32 (bust) instead of 12. A player or dealer holding A,A,K on a hit or split is wrongly busted, and payouts and the dealer's draw decision are wrong.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "The diff changes the ace loop in handValue (engine/blackjack.js:110) from while to if, so only one ace is demoted. Hand [A,A,K] gives 11+11+10=32, demotes once to 22, and is reported as a bust. The correct value is 12. REVIEW.md invariant 3 requires one ace at a time until the hand is not bust.",
+            "The diff changes the ace-demotion `while` to `if` (engine/blackjack.js:110). For A,A,K the raw total is 32, one demotion gives 22, which is still over 21, so handValue returns total 22 and isBust is true. The correct result is 12 (hard). Breaks REVIEW.md invariant 3.",
+            "Traced: handValue([A,A,K]) gives total 32, the single `if` demotes once to 22, and the function returns {total:22, soft:true}, so the hand is scored as a bust. The correct value is 12 (the second demotion is needed). The changed line is in the diff, so it is not pre-existing."
+          ]
+        },
+        {
+          "id": "state-1",
+          "file": "engine/blackjack.js",
+          "line": 110,
+          "claim": "handValue's `while (total > 21 && aces > 0)` was changed to `if`, so at most one ace is demoted from 11 to 1. Hands that need two or more demotions to avoid busting are scored as busts. This breaks the invariant that aces count 11 until the hand would bust, one ace at a time. It affects every caller of handValue: player bust detection, dealer play, payouts, hints and the embedded macOS engine.",
+          "failing_input": "Player hand A, A, 5, K: the raw total is 11+11+5+10 = 37 with 2 aces. The correct value is 17 (hard). With `if`, only one ace is demoted, giving 27, so the hand is reported as bust and the round is lost. A, A, A, 9 also fails: it should be 12 but scores 32 (bust). Even A, A, 9 works only because a single demotion is enough. The dealer is hit the same way: A, A, 5, 10 is scored as a bust, so the dealer wrongly busts and the player is paid. Fix: restore `while`. The generated EngineJS.generated.swift only needs regenerating, so don't report it separately.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same one-demotion change at engine/blackjack.js:110. Hand [A,A,5,K] gives 37, demotes once to 27, and is a bust, but the correct value is 17. Hand [A,A,5,10] is likewise wrongly busted, so the dealer loses a hand it should play. The embed copy is generated, so it is not a separate defect.",
+            "Traced in engine/blackjack.js:103-115 on the PR head: A,A,5,K gives 37, one demotion gives 27, so it busts instead of 17. The same `if` change applies to dealer and player hands via the shared handValue, so the dealer and payouts are affected. The generated Swift copy carries the same change, but it is a copy of the engine defect and not counted separately.",
+            "Traced: [A,A,5,K] sums to 37 with 2 aces; one demotion gives 27 (bust), but the correct value is 17. The same path applies to the dealer's [A,A,5,10]. pr-head/engine/blackjack.js:110 shows the `if`, and the only multi-ace test (line 36, A,A,9) needs one demotion, so it does not catch this. The embed copy is noted only as a regeneration issue, as REVIEW.md requires."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/blackjack.js",
+          "line": 110,
+          "claim": "The PR changes `while` to `if` in handValue, so only one ace is demoted. It adds no test for hands that need two or more demotions. The existing assertions in engine/blackjack.test.js:34-37 only need one demotion (A,A,9 → 21), so the suite still passes. This breaks the 'Aces count 11 until the hand would bust, then 1, one ace at a time' invariant, and the `handValue` contract that the web, agent, server and macOS code all rely on. REVIEW.md also requires new behaviour to come with tests that fail without the change.",
+          "failing_input": "handValue([A,A,A,9]) now returns total 32 (bust). The correct result is 12, soft:false. handValue([A,A,K,5]) returns 27 (bust). The correct result is 17. A player or dealer with these hands is wrongly busted, which gives wrong payouts and wrong legal moves in the observation. Reverting `if` to `while` makes it correct, and no existing test catches the difference.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "The change breaks handValue for hands needing two demotions: [A,A,K,5] returns 27 (bust) instead of 17. The existing assertions at engine/blackjack.test.js:34-37 only exercise a single demotion, and the PR diff adds no test, so the suite still passes. This is a broken contract that web, agent, server and macOS all use.",
+            "Confirmed that engine/blackjack.test.js:33-37 only covers hands needing at most one demotion (A,A,9 → 21), so npm test would still pass with the `if`. The failing case A,A,A,9 should be 12 but returns 32. The missing test is a consequence of the same defect, and the rule break is what makes it Important.",
+            "Confirmed in pr-head/engine/blackjack.js:110: `if` replaces `while`. handValue([A,A,K,5]) returns 27 where 17 is correct, and [A,A,A,9] returns 32 where 12 is correct. Assertions at blackjack.test.test.js:34-37 need at most one demotion, so no test catches the regression. This breaks REVIEW.md invariant 3 and the handValue contract."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "02-dealer-hard-17",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 3,
+      "kept": 3,
+      "important": 3,
+      "errors": [],
+      "seconds": 29,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/blackjack.js",
+          "line": 124,
+          "claim": "The `&& soft` condition was removed from dealerShouldHit, so with h17 on the dealer hits every 17, hard 17 included. REVIEW.md invariant 3 says the dealer hits soft 17 only. The `soft` value destructured on the line above is now unused.",
+          "failing_input": "h17=true, dealer hand [10, 7] (hard 17): handValue gives total=17, soft=false. dealerShouldHit returns true, so the dealer draws on hard 17. It should return false. A dealer hand like [10, 7] can then draw a 4 and reach 21, so the dealer wins or pushes rounds that pay the player under correct rules. With h17=false nothing changes, because the h17 term is short-circuited.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "The diff drops `&& soft` at engine/blackjack.js:124, so with h17 on, dealerShouldHit([10,7], true) now returns true. The dealer draws on hard 17, which breaks REVIEW.md invariant 3 (H17 hits soft 17 only). Verified by reading pr-head/engine/blackjack.js; I did not execute the code.",
+            "Traced in pr-head/engine/blackjack.js:122-124: with h17=true and hand [10,7], handValue gives total 17, soft false, so `h17 && total === 17` is true and the dealer draws. REVIEW.md invariant 3 says H17 hits soft 17 only, so the wrong result is a hard-17 draw. The diff confirms the `&& soft` term was removed from the source line.",
+            "Traced: with h17 true, [10,7] gives total 17, soft false. The new line `h17 && total === DEALER_STAND` returns true, so the dealer draws on hard 17. REVIEW.md invariant 3 says H17 hits soft 17 only. The removed `&& soft` is the cause, and the `soft` destructured on line 123 is now unused."
+          ]
+        },
+        {
+          "id": "state-1",
+          "file": "engine/blackjack.js",
+          "line": 124,
+          "claim": "dealerShouldHit no longer checks `soft`, so with h17 on the dealer also hits hard 17. REVIEW.md invariant 3 says the dealer stands on 17 and hits soft 17 only. This changes dealer-turn state transitions (when the dealer round ends) and every payout. Outside my lens, but the failing input is concrete.",
+          "failing_input": "h17 = true and the dealer holds 10+7 (hard 17). handValue gives {total:17, soft:false}. Before the change, dealerShouldHit returns false and the dealer stands. After it, `h17 && total === 17` is true, so the dealer draws. Any player hand of 18-20 that should win can now lose or push, and the dealer can bust or reach 21. With h17 = false nothing changes. The generated embed has the same edit, which is consistent with the source, so no separate embed finding applies.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same defect as logic-1 seen from the dealer-turn side. table.js:314 and blackjack.js:321/598 loop on dealerShouldHit(dealer, h17), so the dealer keeps drawing from hard 17 and can bust or reach 21 against a player hand that should win. It duplicates logic-1 rather than adding a new defect.",
+            "Same trace as logic-1: dealerShouldHit (blackjack.js:122-124) returns true for h17=true on hard 17, and table.js:314 and blackjack.js:598 loop on that result, so the dealer keeps drawing and the round outcome and payouts change. The embed edit in EngineJS.generated.swift matches the source, so this is a source defect, not an embed one.",
+            "Same root cause as logic-1, confirmed by the same trace. With h17 on, a hard 17 now draws instead of ending the dealer turn, which changes round end states and payouts. The claim is accurate. It duplicates logic-1 and should be merged with it."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/blackjack.js",
+          "line": 124,
+          "claim": "Dropping `&& soft` makes the H17 dealer hit hard 17 too. This breaks the documented rule (REVIEW.md invariant 3: with h17 the dealer hits soft 17 only) and the doc comment right above the line. The existing test at engine/blackjack.test.js:517 asserts the opposite and the PR doesn't touch it, so `npm test` (the required `ci` gate) should fail. If the PR meant to change the rule, it would need to update the test, README \"Table rules\" and the coach/chart code. It does none of these, and the PR adds no test for the new behaviour.",
+          "failing_input": "dealerShouldHit([c('10'), c('7')], true) returns true. The expected result is false, and engine/blackjack.test.js:517 `assert.ok(!BJ.dealerShouldHit([c('10'), c('7')], true)); // hard 17 always stands` now fails. In play, an H17 table dealer with 10+7 draws a card and can bust from a standing hard 17.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "pr-head/engine/blackjack.test.js:517 asserts !dealerShouldHit([10,7], true). With the PR's change that call returns true, so the assertion fails and the required `ci` gate (npm test) goes red. The PR doesn't touch the test or explain it in the body, and REVIEW.md treats that as Important. Verified by reading; I did not run npm test.",
+            "Confirmed in pr-head/engine/blackjack.test.js:517, which asserts `!BJ.dealerShouldHit([c('10'), c('7')], true)` with the comment 'hard 17 always stands'. With the patched source that call returns true, so the existing assertion fails. The PR does not touch the test or add a rule-change note, which REVIEW.md treats as Important.",
+            "Confirmed: engine/blackjack.test.js:517 in pr-head asserts `!BJ.dealerShouldHit([c('10'), c('7')], true)`. The PR diff touches only engine/blackjack.js and the generated embed, not the test. The new code returns true there, so that assertion fails and the required `npm test` gate fails. The PR also adds no test and gives no reason for dropping the assertion, which REVIEW.md Tests requires."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "03-shoe-not-renewed",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 3,
+      "kept": 3,
+      "important": 3,
+      "errors": [],
+      "seconds": 40,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/blackjack.js",
+          "line": 276,
+          "claim": "freshShoe() for unseeded games now shuffles this.shoe, which at the cut card holds only the undealt remainder. It no longer builds a full new shoe with createShoe(this.decks). The shoe shrinks at every reshuffle and is not renewed. The seeded branch still builds a full shoe, so the two branches now behave differently.",
+          "failing_input": "Unseeded 6-deck game (312 cards, penetration 0.75). Cut-card threshold is round(312*0.25)=78. The first reshuffle happens with about 78 cards left, and shoe = shuffle(those 78 cards). cutCardReached is `shoe.length <= 78`, so it is true again immediately. The next round triggers freshShoe() again, so it reshuffles every round. The shoe keeps shrinking as cards are drawn. Once it is nearly empty, draw() calls refillFromDiscards(), which rebuilds the full shoe and bumps emergencyShuffles mid-round. The right result is a fresh 312-card shuffled shoe at each cut card. Card counting, true count and penetration statistics are all wrong because the shuffled shoe is not a complete shoe.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "The diff changes the unseeded branch of freshShoe() (pr-head/engine/blackjack.js:276) from shuffle(createShoe(this.decks)) to shuffle(this.shoe). At the cut card this.shoe holds only the remainder (cutCardReached is shoe.length <= 78 for 6 decks at 75%), so the shoe is never renewed: after the first reshuffle it still has 78 cards, cutCardReached stays true, and every round reshuffles the shrinking remainder until draw() falls back to refillFromDiscards(). Traced through deal() at lines 389-390 and draw() at 262-267. The failing input produces the wrong result as claimed.",
+            "pr-head/engine/blackjack.js:276 now runs shuffle(this.shoe) for unseeded games. At the cut card this.shoe holds only the ~78 undealt cards (draw() pops them), so the shoe never returns to 312 cards, cutCardReached stays true, and every deal reshuffles the shrinking remainder until refillFromDiscards() fires mid-round (emergencyShuffles++). Changed line, so not pre-existing.",
+            "pr-head/engine/blackjack.js:276 now does shuffle(this.shoe), and draw() pops dealt cards off this.shoe, so at the cut card the shoe holds only about 78 cards. cutCardReached (line 259) stays true, so every round reshuffles a shrinking remainder until draw() calls refillFromDiscards() (line 263). The unseeded path no longer builds a full shoe, which breaks REVIEW.md invariant 3."
+          ]
+        },
+        {
+          "id": "state-1",
+          "file": "engine/blackjack.js",
+          "line": 276,
+          "claim": "freshShoe() for unseeded games now shuffles this.shoe, which at the cut card holds only the undealt cards (draw() pops dealt cards off it). It no longer builds a full createShoe(this.decks), so the shoe is never renewed. The seeded branch still builds a full shoe, so seeded and unseeded games now behave differently. The shoe shrinks, cutCardReached stays true, and the game reshuffles every round until it falls back to refillFromDiscards().",
+          "failing_input": "Unseeded game, decks=6, penetration=0.75. The cut card is reached when shoe.length <= 78. deal() calls freshShoe(), which reshuffles just those 78 cards (before: 312 fresh cards). cutCardReached stays true, so every following round reshuffles again and the shoe keeps draining, e.g. 78 -> ~72 -> ~66. When it empties mid-round, draw() calls refillFromDiscards() and emergencyShuffles increments. Expected: a full 312-card shoe after the shuffle, shuffles+1 and no emergency shuffles. Cards the counting code has already seen are also not reset to a fresh deck's composition. Penetration and the shoe.seen count are wrong too. The rule in REVIEW.md invariant 3 (reshuffle between rounds at the cut card) is broken. The PR has no test for this.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same defect, confirmed at pr-head/engine/blackjack.js:276 with deal() calling freshShoe() at lines 389-390. The shoe shrinks from 78 to lower counts each round, shuffles increments every round instead of once per shoe, and emergencyShuffles increments once the remainder empties. The seeded branch still builds a full shoe, so the two modes diverge as stated.",
+            "Same root cause at blackjack.js:276. Trace: 6-deck unseeded game reaches shoe.length <= 78, deal() calls freshShoe() and shuffles ~78 cards, the next round still has cutCardReached true, and the shoe drains to empty within about 16 rounds. The 3000-round test at blackjack.test.js:149-165 asserts emergencyShuffles === 0 and would fail. The seeded/unseeded divergence is also real, since the seeded branch at line 277 builds a full shoe.",
+            "Same root cause, confirmed at pr-head/engine/blackjack.js:276. shuffle() (line 48-55) copies the input, so the depleted remainder is reshuffled and never replaced with createShoe(this.decks). The shoe drains round over round, shuffles increments every round, and the seeded and unseeded branches diverge."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/blackjack.js",
+          "line": 276,
+          "claim": "The unseeded freshShoe() now shuffles the existing, depleted shoe instead of building a new full shoe. The shoe shrinks permanently, and the observation's shoe size and penetration contract breaks. The README/REVIEW promise that the shoe is replaced at the cut card, and the doc comment says the same. The existing tests don't catch it, because none assert that the shoe is full-size after a reshuffle (blackjack.test.js:140-163 and auto.test.js:42-45 only count shuffles or check lengths decrease).",
+          "failing_input": "Unseeded 6-deck game. Play until cutCardReached (shoe.length <= 78 of 312). The next deal calls freshShoe(), so shoe = shuffle(~78 cards) and shoe.length is about 78 instead of 312. cutCardReached() is true again immediately, so every following round reshuffles, shuffles increments each round, and the cut-card penetration and obs.shoe.seen counts are wrong. Cards played in the round just before the reshuffle are also missing, which skews counting. Expected: a fresh 312-card shoe with the cut card at 75%.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same root cause: after the change, shoe.length after a cut-card reshuffle is the remainder (about 78), not 312, so obs.shoe and penetration are wrong. The cited tests exist (blackjack.test.js:140-163 counts shuffles and checks decreasing lengths; auto.test.js:42-45 asserts shuffles >= 1 and >= 5), and none assert a full-size shoe after reshuffle, so the claim that the tests miss it holds.",
+            "Defect confirmed: the unseeded reshuffle no longer produces a full 312-card shoe, so obs.shoe and penetration are wrong after every cut. The claim that existing tests don't catch it is incorrect: blackjack.test.js:146 (assert shoe.length == 312-4 after the cut-card deal) and :164 (emergencyShuffles == 0) would fail on this PR head. The finding's test-gap claim is inaccurate, but the wrong-result claim stands. Not pre-existing, because line 276 is in the diff.",
+            "Confirmed at pr-head/engine/blackjack.js:276: the unseeded freshShoe() no longer produces a full 312-card shoe, so obs.shoe.cardsLeft and penetration after a reshuffle are wrong (table.js:417 reports this.shoe.length). The claim that the existing tests miss it is plausible but I did not re-check those test lines."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "04-split-21-blackjack",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 3,
+      "kept": 3,
+      "important": 3,
+      "errors": [],
+      "seconds": 53,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/blackjack.js",
+          "line": 144,
+          "claim": "The change removes the `!fromSplit` guard from `pBJ` in `settle`. A two-card 21 on a hand made by splitting is now settled as a natural blackjack. REVIEW.md invariant 3 says a two-card 21 after a split is not a blackjack. `isNatural` at line 119 and the `fromSplit` option in the `settle` signature still assume the guard exists.",
+          "failing_input": "Split A-A (or T-T) and draw a T (or A) on a split hand, giving a two-card 21 with `fromSplit: true`, against a dealer 20. Before the change: outcome 'win', net +bet. After: outcome 'blackjack', net +1.5*bet. Against a dealer natural, it now returns a push where the correct result is a loss. Settle at lines 604 and 610 passes `{...h}`, so `fromSplit` is true for these hands.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "The diff removes `!fromSplit` from `pBJ` in settle (engine/blackjack.js:144). finish() at line 604 and the others loop at line 610 pass `{...h}`, so split hands reach the blackjack branch. `isBlackjack([A,K])` is true, so a split hand with A+K against dealer 10+7 returns outcome 'blackjack', net 15 instead of 'win', net 10. REVIEW.md invariant 3 says a two-card 21 after a split is not a blackjack, so this is a wrong payout.",
+            "The diff removes the `!fromSplit &&` guard, so in engine/blackjack.js settle() a split hand that is two-card 21 gets pBJ=true. Split A-A then drawing a T returns blackjack at 1.5x instead of win at 1x (base engine/blackjack.js:144 and pr-head:144 confirm this). Against a dealer natural it pushes instead of losing. REVIEW.md invariant 3 says a two-card 21 after a split is not a blackjack, so this is Important.",
+            "pr-head/engine/blackjack.js:144 now reads `const pBJ = isBlackjack(playerHand);` with no fromSplit guard. settle([A,K],[10,7],10,{fromSplit:true}) returns blackjack net 15 instead of win net 10. finish() (line 604) passes {...h}, so a split 21 is overpaid at 3:2 and pushes against a dealer natural instead of losing. This contradicts REVIEW.md invariant 3 and README line 275."
+          ]
+        },
+        {
+          "id": "state-1",
+          "file": "engine/blackjack.js",
+          "line": 144,
+          "claim": "settle() no longer honours the fromSplit option. A two-card 21 on a split hand is now scored as a natural blackjack. REVIEW.md invariant 3 says a two-card 21 after a split is not a blackjack, and the doc comment at line 140 still says so. finish() (line 604) and the `others` loop (line 610) pass `{...h}`, which includes fromSplit:true for split hands, so the flag is now ignored. Other code still treats split hands as non-naturals (isNatural at line 119 uses !h.fromSplit), so the engine is now inconsistent with itself.",
+          "failing_input": "The player splits 8s or Aces and a split hand draws A+K (or 10+A). The hand is a two-card 21 with fromSplit:true. The dealer has 20. Before the change, outcome is 'win' and net is +bet (1:1). After the change, outcome is 'blackjack' and net is +1.5*bet (3:2), which overpays. If the dealer has a blackjack, the hand now pushes instead of losing. This also applies to split aces, which receive one card each and often make A+10. Seats in `others` are affected the same way. Bankroll, stats and the shoe-seeded replays all change.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Confirmed. settle() now ignores fromSplit, so a split two-card 21 is paid 3:2 and a split 21 against a dealer blackjack pushes instead of losing. isNatural (line 119) still excludes split hands, so the engine is internally inconsistent. The `others` loop at line 610 has the same effect.",
+            "Confirmed in pr-head/engine/blackjack.js:144, where pBJ is now just isBlackjack(playerHand). The fromSplit option is destructured at :142 but never read. finish() (:604) and the others loop (:610) spread {...h} with fromSplit:true, so split-hand 21s are paid as naturals. isNatural at :119 still excludes split hands, so the engine is now internally inconsistent, as the claim says.",
+            "Same line 144 change. The fromSplit option is no longer honoured, so split two-card 21s settle as blackjack in both the main hand (line 604) and the others loop (line 610). isNatural at line 119 still excludes split hands, so the engine is internally inconsistent. Wrong payouts and pushes result, and this is an Important money defect."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/blackjack.js",
+          "line": 144,
+          "claim": "settle() ignores its fromSplit option, so a two-card 21 on a split hand is settled as a blackjack. The PR drops the `!fromSplit &&` guard but leaves the fromSplit parameter in the signature, where it is now unused. This breaks the documented rule that a two-card 21 after a split is not a blackjack, and it breaks the settle() contract that the existing test `two-card 21 on a split hand pays 1:1, not 3:2` (engine/blackjack.test.js:63-66) checks. The PR doesn't update or remove that test, so `npm test` should fail. If the PR body doesn't explain why, that is a removed or loosened assertion. The PR also adds no test for the new behaviour.",
+          "failing_input": "BJ.settle([A,K],[10,7],10,{fromSplit:true}) now returns {outcome:'blackjack', net:15}. The test and the rules expect {outcome:'win', net:10}. A split ace that draws a king, played at $10, is overpaid by $5.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Confirmed. The existing test 'two-card 21 on a split hand pays 1:1, not 3:2' (engine/blackjack.test.js:63-66) expects {outcome:'win', net:10} for settle([A,K],[10,7],10,{fromSplit:true}). The PR now returns 'blackjack', net 15, so `npm test` fails. The PR diff touches neither the test nor any new test, so the assertion is effectively broken and no new test covers the change. REVIEW.md requires a PR that breaks a test assertion to explain why in the body, and this one has none.",
+            "BJ.settle([A,K],[10,7],10,{fromSplit:true}) now returns blackjack/net 15, but engine/blackjack.test.js:63-66 (unchanged in the PR) asserts win/net 10. The PR therefore breaks npm test, and it removes no assertion or explanation in the PR body, which REVIEW.md treats as Important. The unused fromSplit parameter is also confirmed.",
+            "The test at pr-head/engine/blackjack.test.js:63-66 asserts settle([A,K],[10,7],10,{fromSplit:true}) equals {outcome:'win',net:10}. The PR gives blackjack/15, so `npm test` fails. The diff touches neither the test nor the PR body's justification, so this is a broken assertion without an explanation (REVIEW.md Tests). The fromSplit parameter is also now unused."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "05-double-soft",
+      "hit": false,
+      "falseImportant": 0,
+      "candidates": 0,
+      "kept": 0,
+      "important": 0,
+      "errors": [],
+      "seconds": 24,
+      "kept_findings": []
+    },
+    {
+      "case": "06-hilo-seven",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 5,
+      "kept": 3,
+      "important": 3,
+      "errors": [],
+      "seconds": 61,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/counting.js",
+          "line": 43,
+          "claim": "Hi-Lo tag for 7 changed from 0 to +1. REVIEW.md invariant 4 says Hi-Lo is 2–6 = +1, 7–9 = 0, T/A = −1. The row is now identical to KO's, so Hi-Lo is no longer a balanced system, though it is still flagged `balanced: true`.",
+          "failing_input": "One deck: the +1 cards are 2–7 (6 ranks × 4 = 24) and the −1 cards are T/J/Q/K/A (5 ranks × 4 = 20), so the running count after a full deck is +4. It should be 0. For example, after seeing a single 7, the Hi-Lo running count is +1 where it should be 0. The true count (RC / decks remaining) is then biased upward by about 4/decks_remaining over a shoe. Any hint, bet-spread or counting-trainer output that uses hilo is wrong, and any test that checks a full deck sums to 0 fails.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "The diff changes the Hi-Lo 7 tag from 0 to +1 (engine/counting.js:43). One deck has 24 cards tagged +1 (2-7) and 20 tagged -1 (T/J/Q/K/A), so the full-deck sum is +4, not 0, as REVIEW.md invariant 4 requires for a balanced system.",
+            "Line 43 now gives 7 a +1 tag, matching KO. A full deck of Hi-Lo tags sums to +4, not 0 (2-7 = 24 cards at +1, T/J/Q/K/A = 20 cards at -1), so after one 7 the running count is +1 where REVIEW.md invariant 4 requires 0.",
+            "Line 43 now sets Hi-Lo's 7 tag to +1 (diff line 10). One deck has 24 cards at +1 (2-7) and 20 at -1 (T/J/Q/K/A), so the running count is +4, not 0, breaking REVIEW.md invariant 4. Verified in pr-head/engine/counting.js:43."
+          ]
+        },
+        {
+          "id": "state-1",
+          "file": "engine/counting.js",
+          "line": 11,
+          "claim": "The PR changes the Hi-Lo tag for a 7 from 0 to +1. Hi-Lo is then no longer balanced, which breaks REVIEW.md invariant 4 (Hi-Lo 7–9 = 0, balanced systems sum to 0 per deck). The `balanced: true` flag on the same line is now false. The running count is shoe state that carries across rounds, so it drifts upward every time a 7 is seen. Hi-Lo is now the same as the KO tag row.",
+          "failing_input": "One full deck has 4 sevens. Hi-Lo tags now sum to +4, where they should sum to 0. After a complete deck is dealt the running count reads +4, not 0. After 6 decks it reads +24. The true count is the running count divided by decks remaining, so it is inflated. Bet-spread and hint advice that read the count will overbet and mis-deviate. A balanced Hi-Lo and KO now give identical counts.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same defect: Hi-Lo tags now sum to +4 per deck, so the running count drifts upward with each 7 and the true count is inflated. One detail is wrong: the balanced: true flag on that line is unchanged, so it is not false.",
+            "Same defect as logic-1, traced at the same line: the 7 tag change breaks the Hi-Lo balance (sum +4 per deck), and the balanced:true flag is now wrong. Running and true counts drift upward for every 7 seen.",
+            "The 7 tag change makes Hi-Lo sum to +4 per deck, so it is no longer balanced and the running count drifts with every 7. The claim that the balanced:true flag is now false is wrong: line 43 still reads balanced: true. The core defect still stands."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/counting.js",
+          "line": 43,
+          "claim": "The PR changes the Hi-Lo tag for 7 from 0 to +1. REVIEW.md invariant 4 defines Hi-Lo as 2–6 = +1, 7–9 = 0, T/A = −1. The change makes Hi-Lo identical to KO, which is unbalanced, so Hi-Lo no longer sums to 0 over a deck.",
+          "failing_input": "The test 'F20: a full deck sums to 0 for the balanced systems and +4 for KO' in engine/counting.test.js:205-208 expects total() for ['hilo','ho2','om2','ko'] to equal [0,0,0,4]. With the new tags, hilo sums to +4 (four extra 7s), so the result is [4,0,0,4]. npm test fails. Running count and true count are also inflated by 1 for every 7 seen, so count hints, Wong bet spread and the 'hilo' policy in agent/ give wrong output.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "engine/counting.test.js:208 (F20) asserts that ['hilo','ho2','om2','ko'] total [0,0,0,4] for a full deck. With hilo 7=+1 the hilo total is +4, so the assertion gets [4,0,0,4] and npm test fails. The PR does not update the test, and the diff does not touch it.",
+            "engine/counting.test.js:205-208 asserts a full deck sums to [0,0,0,4] for hilo, ho2, om2, ko. With the new tag, hilo sums to +4, so the assertion fails and npm test goes red. The test was not updated.",
+            "counting.test.js:205-208 expects [hilo, ho2, om2, ko] totals of [0,0,0,4]. With the new tag, hilo totals +4 (four 7s), so the result is [4,0,0,4] and that test fails under npm test. The test is unchanged in the diff, so the failure is introduced by this PR."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "07-money-floor",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 4,
+      "kept": 4,
+      "important": 3,
+      "errors": [],
+      "seconds": 43,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/format.js",
+          "line": 14,
+          "claim": "digits() now truncates with Math.floor instead of rounding to the cent. Binary floating-point products such as x*100 often land just below the true integer, so the amount is displayed one cent too low. The doc comment still says \"rounded to the cent\", and REVIEW.md invariant 5 says format.js rounds via cents.",
+          "failing_input": "money(1.15): 1.15*100 = 114.99999999999999, floor gives 114, so it shows $1.14 (should be $1.15). money(0.29): 0.29*100 = 28.999999999999996, floor gives 28, so it shows $0.28. money(4.35): 4.35*100 = 434.99999999999994, so it shows $4.34. Also, a whole-dollar value that falls just below the integer, e.g. 8.2*100 = 819.9999999999999 (floor gives 819), shows $8.19 instead of $8.20. Another case is 2.3*100 = 229.99999999999997, which floors to 229 and shows $2.29 instead of $2.30. Under the old Math.round, all of these showed the correct value. Bankroll, stats and payout displays (e.g. a 6:5 payout on a $5 bet, or a net of $1.15) will not match the actual amounts.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Traced money(1.15): digits() computes Math.floor(1.15*100) = Math.floor(114.99999999999999) = 114, so the output is $1.14 instead of $1.15. The changed line is in the diff, so the regression is introduced by this PR, and money totals are an Important class per REVIEW.md.",
+            "The diff changes Math.round to Math.floor on Math.abs(n)*100. In IEEE doubles 1.15*100 = 114.99999999999999, so money(1.15) floors to 114 and prints $1.14 instead of $1.15. REVIEW.md invariant 5 (money rounds via cents, totals must add up) is broken. Traced through pr-head/engine/format.js lines 13-16.",
+            "The diff changes digits() from Math.round to Math.floor on Math.abs(n)*100 (engine/format.js:14), and REVIEW.md invariant 5 says format.js rounds via cents. Floats like 1.15*100 = 114.99999999999999 now floor to 114, so money(1.15) prints $1.14 where the old code printed $1.15. The 4.35 and 0.29 cases behave the same way. The 8.2 and 2.3 cases also check out, because the nearest doubles sit below the integer."
+          ]
+        },
+        {
+          "id": "logic-2",
+          "file": "engine/format.js",
+          "line": 14,
+          "claim": "A sub-cent or float-noise amount that previously rounded to zero or up now behaves differently. Truncation also changes how the signed variants treat values in (0, 0.01). The PR comment and doc still claim rounding. No test is included that covers this.",
+          "failing_input": "signedMoney(0.009): old round gives 1 cent, so it showed +$0.01. New floor gives 0, so it shows $0. Likewise signedMoney(-0.009) goes from -$0.01 to $0. The change also drops the test that would have caught logic-1 (no new tests in the diff).",
+          "suggested_severity": "Nit",
+          "severity": "Nit",
+          "votes": "3/3",
+          "reasons": [
+            "Traced signedMoney(0.009): Math.round(0.9)=1 gave +$0.01 before, while Math.floor(0.9)=0 now gives $0. The behaviour change is real, but sub-cent amounts don't occur in normal play, so it is a Nit. The claim that the PR 'drops' a test is wrong: the diff touches no test file, it only adds none.",
+            "signedMoney(0.009) gives Math.floor(0.9)=0, so it returns \"$0\" where the old code returned \"+$0.01\". The sub-cent behaviour does change. The claim that the diff drops a test is inaccurate: the diff only touches format.js, and format.test.js is unchanged. Sub-cent inputs are unrealistic, so Nit.",
+            "Sub-cent values do change output: signedMoney(0.009) gave +$0.01 under round(0.9)=1 and now gives $0 under floor(0.9)=0. The claim that the PR drops a test is unsupported, since the diff touches only engine/format.js and removes no test. Sub-cent amounts are not real chip amounts, so this is a behaviour change rather than a clear money defect, and Nit fits."
+          ]
+        },
+        {
+          "id": "state-1",
+          "file": "engine/format.js",
+          "line": 14,
+          "claim": "digits() now uses Math.floor instead of Math.round on n*100. Floating-point products that fall just below an integer are truncated one cent low, so displayed money is wrong and no longer matches the actual amount. REVIEW.md invariant 5 says format.js rounds via cents. This is outside my state lens, but it is a concrete wrong-money defect.",
+          "failing_input": "digits(4.35): 4.35*100 = 434.99999999999994, so floor gives 434 and the output is '4.34' (round gave '4.35'). Likewise 1.15*100 = 114.99999999999999 gives '1.14', and 0.29*100 = 28.999999999999996 gives '0.28'. Any bankroll, payout or net amount with such a cent value is shown one cent low.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same defect as logic-1, traced through digits(4.35) and money(): Math.floor(434.99999999999994)=434 gives '4.34'. The cited line is changed by the diff, so this is introduced by the PR and blocks merge under REVIEW.md invariant 5.",
+            "Same defect as logic-1, traced independently: digits(4.35) gives 4.35*100 = 434.99999999999994, floor gives 434, output '4.34'. Line 14 is changed in the diff, so it is not pre-existing, and invariant 5 is broken.",
+            "Same defect as logic-1, seen from the state lens. digits() floors n*100 at engine/format.js:14, so 4.35 (434.99999999999994), 1.15 and 0.29 each display one cent low. That breaks the REVIEW.md invariant 5 rounding contract, and the totals shown to users no longer match the real amounts."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/format.js",
+          "line": 14,
+          "claim": "digits() now floors to cents instead of rounding. This breaks the documented money contract (REVIEW.md invariant 5: format.js rounds via cents). Binary float error makes floor drop a cent on ordinary amounts. The PR adds no test for it and changes no assertion.",
+          "failing_input": "money(0.29): 0.29*100 = 28.999999999999996, so floor gives 28 and the output is $0.28. Round gives 29 and $0.29. Likewise 1.15*100 = 114.99999999999999 shows $1.14, and 7.505 (a fractional payout) shows $7.50 instead of $7.51. Every caller of money() and signedMoney() (bankroll, stats, round net) can display a total one cent lower than the real value, so displayed totals no longer add up.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Traced money(0.29): 0.29*100 = 28.999999999999996, floor gives 28, output $0.28 instead of $0.29. This breaks the documented rounding in format.js and REVIEW.md invariant 5. The diff adds no test, and the existing test at format.test.js:17 only covers 0.1+0.2, so it does not catch this.",
+            "Floor truncation breaks the documented cents rounding (invariant 5). money(0.29) gives 28.999999999999996 -> $0.28. I also checked 7.505: its double is 7.505 with error under half an ulp of the product, so 7.505*100 = 750.5 exactly, floor gives 750 and prints $7.50 where round gives $7.51. Line 14 changed in the diff.",
+            "The floor change at engine/format.js:14 breaks the REVIEW.md invariant 5 contract ('rounds via cents'). The 0.29 and 1.15 examples hold: money(0.29) gives $0.28 and money(1.15) gives $1.14, and no test in the diff covers this. The 7.505 example is wrong, because the old Math.round also gave 750 and showed $7.50, so that case is not a regression. The main claim still stands."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "08-colored-mixed-swap",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 2,
+      "kept": 2,
+      "important": 2,
+      "errors": [],
+      "seconds": 24,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/sidebets.js",
+          "line": 32,
+          "claim": "The Perfect Pairs colour test is inverted: `RED.has(a.suit) !== RED.has(b.suit)` returns 'colored pair' when the two cards are different colours. A colored pair is a same-colour, different-suit pair, and a mixed pair is a different-colour pair. The two payouts are now swapped (colored 12:1, mixed 6:1).",
+          "failing_input": "Player cards 8♥ and 8♦ (same colour, different suit) should be 'colored pair' and pay 12:1. They now return 'mixed pair' and pay 6:1, so the player is underpaid. Player cards 8♥ and 8♠ (different colours) should be 'mixed pair' and pay 6:1. They now return 'colored pair' and pay 12:1, so the player is overpaid. Perfect pairs (same suit) are unaffected.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Traced in pr-head/engine/sidebets.js:32: RED.has(a.suit) !== RED.has(b.suit) is true for 8♥ 8♠ (red vs black), so it returns 'colored pair' (12:1). For 8♥ 8♦ (both red) it returns 'mixed pair' (6:1). Both payouts are wrong, and the header and README table (lines 7, 24) say the opposite.",
+            "pr-head/engine/sidebets.js:32 now uses `!==`, so same-colour different-suit pairs (8♥ 8♦) fall through to 'mixed pair' at 6:1 and different-colour pairs (8♠ 8♥) return 'colored pair' at 12:1. The file header (line 7), README.md:313 and web/index.html:91 all say colored is 12:1, so the payouts are swapped and players are misPaid.",
+            "Traced in pr-head/engine/sidebets.js:32: RED.has(♥) and RED.has(♦) are both true, so `!==` is false for 8♥ 8♦ and it falls through to 'mixed pair' (6:1), which is underpaid. For 8♠ 8♥, true !== false is true, so it returns 'colored pair' (12:1), which is overpaid. The changed line is in the diff, so this is not pre-existing."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/sidebets.js",
+          "line": 32,
+          "claim": "The PR flips the colour comparison in pairsHand from === to !=. Same-colour pairs, which are 'colored pair' at 12:1, now fall through to 'mixed pair' at 6:1. Different-colour pairs, which should be 'mixed pair' at 6:1, now pay as 'colored pair' at 12:1. This contradicts the file header and the README table. The existing tests engine/sidebets.test.js:9-11 and engine/blackjack.test.js:581 assert the old behaviour and will fail. The PR doesn't update them and gives no reason. The macOS embed has the same change because it was regenerated, so it isn't reported separately.",
+          "failing_input": "pairsHand([8♥, 8♦]) returns 'mixed pair' (pays 6:1) instead of 'colored pair' (12:1). pairsHand([8♠, 8♥]) returns 'colored pair' (pays 12:1) instead of 'mixed pair' (6:1). A $5 bet on 8♥ 8♦ nets $30 instead of $60, so it is underpaid. A $5 bet on 8♠ 8♥ is overpaid.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same root cause as logic-1 (sidebets.js:32, flipped ===/!==), confirmed by trace: pairsHand([8♥,8♦]) gives 'mixed pair' and pairsHand([8♠,8♥]) gives 'colored pair'. The existing assertions fail as claimed: sidebets.test.js:9-10 expect 'colored pair' for same-colour pairs, and sidebets.test.js:11 expects 'mixed pair' for 8♠8♥. blackjack.test.js:581 expects a 60 net for 8♥8♦. The embed mention is consistent with REVIEW.md invariant 2 and is not reported separately. Overlaps logic-1, so the orchestrator should merge them into one finding.",
+            "Same root cause as logic-1 at the same line, and the claim is accurate. pr-head/engine/sidebets.test.js:9-11 and blackjack.test.js:581 still expect 8♥ 8♦ to be 'colored pair' (12:1, net 60), so those assertions will fail under this change. The macOS embed hunk is only a regenerated copy and is not reported separately, per REVIEW.md invariant 2.",
+            "Same flipped comparison at sidebets.js:32, confirmed in the diff. The unchanged assertions at pr-head/engine/sidebets.test.js:9-10 and :28 expect 8♥8♦ and 8♠8♣ to be 'colored pair' with a $60 net, so they now fail. pr.diff touches no test file, so the PR gives no reason for changing them. The embed copy is a regenerated mirror of the same defect, which REVIEW.md says not to report separately."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "09-folded-wins-pot",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 3,
+      "kept": 3,
+      "important": 3,
+      "errors": [],
+      "seconds": 47,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/poker.js",
+          "line": 364,
+          "claim": "Dropping `!s.folded` from the `eligible` filter in `pots()` makes folded seats eligible for pots. `finish()` builds `hands` only for `live()` seats, so `hands.get(foldedSeat)` is undefined. When a pot has more than one eligible seat, `finish()` reads `.score` on it and throws a TypeError. Otherwise a folded seat can be awarded chips. This breaks the REVIEW.md invariant 'A folded seat never wins a pot'. The comment on line 365 ('only folded money at this level') is now dead code, because a level can never have an empty eligible list while a folded seat has contributed to it.",
+          "failing_input": "Heads-up, SB posts 1 and folds preflop; BB has posted 2. contrib=[1,2], levels=[1,2]. Level 1 now has eligible=[SB,BB], and finish(false) computes Math.max(...winners.map(i => hands.get(i).score)) where hands has only BB, so it throws TypeError (before: eligible=[BB], BB wins 2). Three-way variant: all put in 50, A bets 50 on the flop, B calls, C folds. The level-50 pot includes C, so it crashes at showdown. If only the folded seat were eligible for a level, it would win that pot via a stale `hands` lookup or the live.slice fallback.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Traced in pr-head/engine/poker.js: fold() sets folded=true but leaves inHand=true, so the PR's eligible filter now includes folded seats with contrib>=level. Heads-up SB folds with 1 in, BB has 2: level 1 gets eligible=[SB,BB], and finish() line 380 reads hands.get(SB).score, where hands only holds live seats, which throws a TypeError. This breaks REVIEW.md invariant 7.",
+            "Traced in pr-head/engine/poker.js: fold() sets folded=true but keeps inHand and committed, so a folded SB with contrib 1 at level 1 is in eligible=[SB,BB]. finish() builds hands only for live() seats, so winners.length>1 reaches hands.get(SB).score (line 380) and throws. Crash on a common preflop fold; violates REVIEW.md invariant 7.",
+            "Traced in pr-head/engine/poker.js: fold() (line 288) sets folded=true but leaves inHand true, so a folded seat passes the new eligible filter at line 364 whenever its committed >= level. Heads-up with SB folding after posting 1 and BB at 2 gives level 1 eligible=[SB,BB]. finish() then hits hands.get(SB).score (line 380), where hands only holds live() seats, so it throws a TypeError."
+          ]
+        },
+        {
+          "id": "state-1",
+          "file": "engine/poker.js",
+          "line": 364,
+          "claim": "The PR drops the `!s.folded` filter from pots() eligibility. Folded seats that put chips in now count as eligible for every pot level they reached. finish() only builds `hands` for live() seats, so a folded seat in `winners` either throws or wins a pot. This breaks REVIEW.md invariant 7 (a folded seat never wins a pot).",
+          "failing_input": "3 players, all in for 100 preflop. A folds on the flop after committing 100, and B and C each commit 100. pots() returns {amount:300, eligible:[A,B,C]}. At showdown finish() runs `winners.map(i => hands.get(i).score)` and `hands.get(A)` is undefined, so it throws TypeError and the hand never finishes (right result: eligible [B,C], the best of B and C wins). Fold-out case: B bets, A and C fold after putting chips in, and everyone else folds. The level has more than one eligible seat, so the same crash happens. If a folded seat is the only eligible one at a top level, it takes that pot and its stack goes up (right result: the live seat wins). `this.seats[i].stack += get` runs for the folded seat.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Same root cause, confirmed in code: folded seats keep inHand=true (only live() excludes them), so pots() puts them in eligible. With 3 seats committing 100 each and A folding, the 300 pot has eligible [A,B,C] and finish() throws at hands.get(A).score. The single-eligible top-level case also awards a folded seat chips via this.seats[i].stack += get (line 393).",
+            "Confirmed: folded seats keep inHand and committed (pr-head/engine/poker.js:164, 244, 319), and line 364 no longer excludes them. Any level with a folded seat plus a live seat reaches hands.get(folded).score in finish() and throws. The example's 'A folds after going all-in' is inconsistent (all-in seats can't act), but the crash path holds for a fold after a bet that a live seat later matches, or a fold-out with several eligible seats.",
+            "Same mechanism: a folded seat with committed 100 stays inHand, so pots() at line 364 returns eligible [A,B,C] for the 300 pot. finish() line 380 then reads hands.get(A).score, which is undefined, so the showdown throws. It also breaks the REVIEW.md invariant that a folded seat never wins a pot."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/poker.js",
+          "line": 364,
+          "claim": "The PR removes the `!s.folded` check from side-pot eligibility. A folded seat that put in at least a level's contribution is now eligible for that pot, which breaks the REVIEW.md poker invariant that a folded seat never wins a pot. The PR adds no test and no justification. The existing poker tests don't cover a folded seat with a deep contribution, so `npm test` would stay green.",
+          "failing_input": "Three seats. A bets 100 then folds. B and C each put in 100 and go to showdown. A's hand is best. A has contrib 100 at level 100, so it is now in `eligible` and can win the 300 pot. Before the change only B and C were eligible. Correct behaviour: the best hand of B and C wins the pot.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Verified: a folded seat whose committed amount reaches a level is added to that level's eligible list, so the folded seat A (contrib 100, best hand) can win the 300 pot when B and C are live. The claim that A is eligible is correct; the outcome is a crash or a payout to a folded seat, which breaks invariant 7. The no-test point is secondary and doesn't change the vote.",
+            "Trace holds: A's committed 100 keeps A in eligible at level 100 with B and C, so winners=[A,B,C] and finish() calls hands.get(A).score (line 380), which is undefined, so it throws rather than paying B/C. The stated outcome (A's hand wins) is wrong, but the wrong result is a crash on the same input, and the diff adds no test. Still a real Important defect.",
+            "Confirmed: the removed !s.folded check lets a folded seat with contrib >= level into eligible. Where a folded seat is the only eligible seat at a top level, it is awarded that pot via winners=[folded] (line 378) and its stack is credited at line 393, breaking REVIEW.md invariant 7. The PR adds no test covering this, so npm test would not catch it."
+          ]
+        }
+      ]
+    },
+    {
+      "case": "10-qka-straight",
+      "hit": true,
+      "falseImportant": 0,
+      "candidates": 2,
+      "kept": 2,
+      "important": 2,
+      "errors": [],
+      "seconds": 34,
+      "kept_findings": [
+        {
+          "id": "logic-1",
+          "file": "engine/sidebets.js",
+          "line": 41,
+          "claim": "The PR removes the ace-high wrap case from isStraight, so Q-K-A is no longer a 21+3 straight. The doc comment on line 36 (\"an ace can be low (A-2-3) or high (Q-K-A)\") still says it should count. After the change the function also returns false for every non-consecutive set, and RANKS puts A at index 0 and K at 12. Q-K-A (indices 0, 11, 12) has idx[2]-idx[0] = 12, so it never matches the `=== 2` check.",
+          "failing_input": "Player holds Q♠ K♥ and the dealer up card is A♦ (or any rank/suit mix of Q, K, A that is not a flush). The old code returns true, so 21+3 pays 'straight' 10:1. The new code returns false, so the bet loses. Q♠ K♠ A♠ should be 'straight flush' (40:1) and now becomes 'flush' (5:1). Q♠ K♥ A♦ is a straight and now loses outright. A-2-3 still works, so the ace is now low-only.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "The diff replaces the Q-K-A branch with `return false`. Q-K-A indices are [0, 11, 12], so `idx[2]-idx[0]` is 12, not 2, and the old `idx[0]===0 && idx[1]===11 && idx[2]===12` case is gone. Q♠ K♥ A♦ now returns null instead of 'straight' (10:1), and Q♠ K♠ A♠ falls through to 'flush' (5:1) instead of 'straight flush' (40:1). This is a wrong-payout defect under REVIEW.md invariant 6.",
+            "The diff replaces the Q-K-A special case with `return false`. For Q(11), K(12), A(0), the sorted indices are [0,11,12], so idx[2]-idx[0]=12 and the `=== 2` check fails. Q♥ K♠ A♦ now returns no straight and 21+3 pays nothing instead of 10:1. Q♠ K♠ A♠ falls through to 'flush' (5:1) instead of 'straight flush' (40:1). The 'ace can be high' comment on line 36 is now wrong. A-2-3 still works.",
+            "Traced in engine/sidebets.js:37-42: for Q♠ K♥ A♦, RANKS indices are [0,11,12], so idx[2]-idx[0]=12 misses the `=== 2` check, and the PR's new `return false` replaces the Q-K-A branch. The old code returned true, so a Q-K-A 21+3 hand that paid 10:1 now pays nothing; a suited Q-K-A also drops from straight flush to flush. A-2-3 still works, as the claim says."
+          ]
+        },
+        {
+          "id": "contract-1",
+          "file": "engine/sidebets.js",
+          "line": 41,
+          "claim": "isStraight now returns false for Q-K-A. This contradicts the doc comment on line 36 (\"an ace can be low (A-2-3) or high (Q-K-A)\"). It also contradicts the existing assertion in engine/sidebets.test.js:20, which expects Q♥ K♠ A♦ to be 'straight', and the README and web side-bet text, which promise a 10:1 straight. The PR leaves that test unchanged and gives no reason for dropping the rule, so `npm test` (the required `ci` gate) fails. The unreachable `idx[0] === 0` check was replaced by `return false`, so the only straight with an ace high is gone.",
+          "failing_input": "Player Q♠ K♥ with dealer up card A♦. t213Hand([Q,K,A]) returns null, so 21+3 pays nothing. It should return 'straight' and pay 10:1, and a suited Q-K-A should be a 'straight flush'. sidebets.test.js:20 asserts 'straight' and now fails.",
+          "suggested_severity": "Important",
+          "severity": "Important",
+          "votes": "3/3",
+          "reasons": [
+            "Confirmed. sidebets.js:36 still documents Q-K-A as a high straight, and engine/sidebets.test.js:20 still asserts `t213Hand([Q♥,K♠,A♦]) === 'straight'`. The diff does not touch the test file, so that assertion now fails and `npm test` (the required ci gate) breaks. The PR gives no reason for dropping the assertion, which REVIEW.md treats as Important.",
+            "The PR leaves engine/sidebets.test.js:20 unchanged, and it still asserts that Q, K, A returns 'straight'. With this change t213Hand([Q♥,K♠,A♦]) returns null, so `npm test` (the required ci gate) fails. The PR body gives no reason for deleting the rule, and the README and web side-bet text still promise a 10:1 straight. The embed was regenerated, so this is not an embed finding.",
+            "Confirmed in pr-head/engine/sidebets.test.js:20, which still asserts t213Hand([Q♥,K♠,A♦]) === 'straight' and is unchanged by the PR. With line 41 now `return false`, that assertion fails, so the required `ci` gate (npm test) goes red and the 21+3 table text in README and the file header (10:1 straight) is contradicted. The PR body gives no reason for removing the rule, which REVIEW.md treats as Important. One wording slip: the claim calls the idx[0]===0 check 'unreachable', but it is the Q-K-A branch that the PR removes."
+          ]
+        }
+      ]
+    }
+  ]
+}

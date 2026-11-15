@@ -1,0 +1,26 @@
+# REQ-RISK-3: `tier2-cooling` stays pending until 24h after H's approval of the
+# current head. Re-evaluated hourly and after every review. Deterministic.
+name: tier2-cooling
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_run:
+    workflows: [review-submitted]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+concurrency:
+  group: tier2-cooling
+  cancel-in-progress: false
+jobs:
+  cooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: node scripts/gates/gate.js cooling
