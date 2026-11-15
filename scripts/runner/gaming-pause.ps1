@@ -5,10 +5,18 @@
   (they never fall back to Claude). The claude-jobs runner is never touched.
 
   Install (Delmar, elevated PowerShell): see .agents/SETUP_REPORT.md, "Checklist for Delmar".
-  Edit $Games to match the games you play (process names without .exe).
+  $Games lists the installed games' process names (without .exe); add any new game there.
 #>
 param(
-  [string[]]$Games = @('steam_game_placeholder'),   # e.g. 'eldenring','cs2','FortniteClient-Win64-Shipping','RocketLeague'
+  # Process names (no .exe) of the games installed on the PC, found 2026-11-15. Add new games here.
+  [string[]]$Games = @(
+    'AC2-Win64-Shipping',          # Assetto Corsa Competizione (Steam)
+    'AssettoCorsaEVO',             # Assetto Corsa EVO (Steam)
+    'acr',                         # Assetto Corsa Rally (Steam)
+    'AMS2', 'AMS2AVX',             # Automobilista 2 (Steam)
+    'F1_25', 'F1_25_Trial',        # F1 25 (EA)
+    'forzahorizon6'                # Forza Horizon 6 (Xbox app)
+  ),
   [int]$PollSeconds = 30,
   [string]$Service = 'actions.runner.ClawWorks-Ireland-blackjack.gamingpc-local-llm.service',
   [string]$Log = 'C:\Windows\Temp\gaming-pause.log'
