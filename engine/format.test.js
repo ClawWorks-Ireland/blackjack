@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { money, signedMoney } = require('./format.js');
+const { money, signedMoney, percent } = require('./format.js');
 
 test('whole dollars have no cents and a thousands separator', () => {
   assert.equal(money(0), '$0');
@@ -28,4 +28,16 @@ test('signedMoney marks gains and losses', () => {
   assert.equal(signedMoney(-7.5), '-$7.50');
   assert.equal(signedMoney(2500), '+$2,500');
   assert.equal(signedMoney(0), '$0');
+});
+
+test('percent formats fractions as percentages', () => {
+  assert.equal(percent(0.125), '12.5%');
+  assert.equal(percent(0.5, 0), '50%');
+  assert.equal(percent(0), '0%');
+  assert.equal(percent(1 / 3), '33.3%');
+});
+
+test('percent handles null and NaN', () => {
+  assert.equal(percent(null), '—');
+  assert.equal(percent(NaN), '—');
 });

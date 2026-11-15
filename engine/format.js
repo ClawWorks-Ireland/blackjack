@@ -28,7 +28,21 @@
     return n > 0 ? `+$${d}` : `-$${d}`;
   }
 
-  const api = { money, signedMoney };
+  /** percent(x, digits = 1) formats a fraction as a percentage string. */
+  function percent(n, digits = 1) {
+    if (n === null || n === undefined || Number.isNaN(n)) return '—';
+    const fmt = new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    const result = fmt.format(n * 100);
+    // Always add % sign
+    let out = result + '%';
+    // Drop trailing ".0%" when there are no decimals (digits === 1 and value is whole)
+    if (digits === 1 && result.endsWith('.0')) {
+      out = result.slice(0, -2) + '%';
+    }
+    return out;
+  }
+
+  const api = { money, signedMoney, percent };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BlackjackFormat = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
