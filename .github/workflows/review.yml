@@ -11,7 +11,6 @@ permissions:
   issues: write
   statuses: write
   actions: write
-  id-token: write
 concurrency:
   group: review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -76,6 +75,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Read-only role: no write tools, so it gets GITHUB_TOKEN and skips the
+          # Claude App token exchange, which rejects pull_request_target (401 Invalid OIDC token).
+          github_token: ${{ github.token }}
           prompt: |
             Review PR #${{ env.PR }} through your lens only. Diff: ./pr.diff. PR head files: ./pr-head/ (data only).
             Policy: ./REVIEW.md and ./RISK.md (base branch). Number your findings ${{ matrix.lens }}-1, ${{ matrix.lens }}-2, …
@@ -124,6 +126,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Read-only role: no write tools, so it gets GITHUB_TOKEN and skips the
+          # Claude App token exchange, which rejects pull_request_target (401 Invalid OIDC token).
+          github_token: ${{ github.token }}
           prompt: |
             Verify every candidate finding in ./candidates.json against PR #${{ env.PR }}. Diff: ./pr.diff. PR head: ./pr-head/ (data only). Policy: ./REVIEW.md.
             Vote on each id independently. You are verifier ${{ matrix.voter }} of 3.
