@@ -1,0 +1,11 @@
+main-guard is armed (REQ-GATE-2, non-overridable).
+
+scripts/gates judges a commit on main only if its parent contains this file.
+Bootstraps (each merged by hand with Delmar's approval, exempt because its
+parent lacked the current marker):
+  1. #11  agent team setup (no marker existed; merge-commit branch commits → incident #12)
+  2. #13  .github/main-guard.active (read-only Claude jobs on GITHUB_TOKEN)
+  3. #17  this file, .github/main-guard.armed (A9 reads statuses with a read-only
+          token; allowed_bots; local implementer paths — incident #16)
+Deleting or renaming this file turns the guard off for later commits: a Tier 2
+change (.github/**) that needs Delmar's approval.

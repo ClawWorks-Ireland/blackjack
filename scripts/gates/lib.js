@@ -211,7 +211,7 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
  * marker. The PR that adds it (bootstrap) is therefore exempt, and every commit
  * after it is judged. Removing the marker is a Tier 2 change (.github/**).
  */
-const GUARD_MARKER = '.github/main-guard.active';
+const GUARD_MARKER = '.github/main-guard.armed';
 /** `hasFile(rev, path)` → true if the file exists at that revision. */
 const guardActiveFor = (hasFile, sha) => hasFile(`${sha}^`, GUARD_MARKER);
 

@@ -46,6 +46,13 @@ jobs:
     if: needs.plan.outputs.action == 'merge' || needs.plan.outputs.action == 'update'
     runs-on: [self-hosted, claude-jobs]
     timeout-minutes: 15
+    permissions:   # read-only GITHUB_TOKEN for gate.js reads; writes use the App token
+      contents: read
+      pull-requests: read
+      statuses: read
+      checks: read
+      issues: write   # throttle-check only
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false, clean: true }
@@ -58,6 +65,7 @@ jobs:
           fi
       - id: claude
         uses: anthropics/claude-code-action@v1
+        env: { GATE_READ_TOKEN: "${{ github.token }}" }
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
