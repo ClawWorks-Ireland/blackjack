@@ -150,10 +150,13 @@ test('ci check must be the github-actions "ci" run on the current head', () => {
 });
 
 test('T15 main-guard: direct pushes are not allowed; A9 merges and exact reverts are', () => {
+  assert.equal(G.MERGE_BOT, 'clawworks-release-manager[bot]');
+  // the old shared Claude App no longer counts as A9
+  assert.equal(G.guardVerdict({ sha: 'f'.repeat(40), guardActive: true, pr: { number: 1, merged_at: 'x', merged_by: { login: 'claude[bot]' }, merge_commit_sha: 'f'.repeat(40) }, headStatuses: [status('merge-evidence', 'success')] }).allowed, false);
   const sha = 'f'.repeat(40);
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: null }).allowed, false);
   assert.equal(G.guardVerdict({ sha, guardActive: false, pr: null }).allowed, true);
-  const pr = { number: 7, merged_at: '2026-11-14T10:00:00Z', merged_by: { login: 'claude[bot]' }, merge_commit_sha: sha };
+  const pr = { number: 7, merged_at: '2026-11-14T10:00:00Z', merged_by: { login: G.MERGE_BOT }, merge_commit_sha: sha };
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr, headStatuses: [status('merge-evidence', 'success')] }).allowed, true);
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr, headStatuses: [status('merge-evidence', 'success', BOT)] }).allowed, false);
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: { ...pr, merged_by: { login: 'delmarolivier' } }, headStatuses: [status('merge-evidence', 'success')] }).allowed, false);

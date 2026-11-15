@@ -17,7 +17,6 @@ permissions:
   issues: write
   pull-requests: write
   actions: write
-  id-token: write
 concurrency:
   group: implement-${{ inputs.issue }}
   cancel-in-progress: false
@@ -120,11 +119,19 @@ jobs:
         if: inputs.handoff_run != ''
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: gh run download "${{ inputs.handoff_run }}" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.A3B_APP_ID }}
+          private-key: ${{ secrets.A3B_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Implement slice #${{ env.ISSUE }} (attempt ${{ env.ATTEMPT }} of 2, Claude fallback). Read it with `gh issue view ${{ env.ISSUE }}`.
             ${{ inputs.pr != '' && format('This is a review fix round for PR #{0}: fix the open Important findings in its latest AI review comment (`gh pr view {0} --comments`).', inputs.pr) || '' }}
@@ -175,11 +182,19 @@ jobs:
           git -c user.name=a4 -c user.email=a4@local am --3way attempt/commits.mbox
           git diff "origin/${{ needs.gate.outputs.base }}" HEAD > slice.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json"))')" >> "$GITHUB_OUTPUT"
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.A4_APP_ID }}
+          private-key: ${{ secrets.A4_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Self-verify slice #${{ env.ISSUE }} before its PR opens. The implementer's diff is ./slice.diff and is applied to this checkout.
             Read the slice with `gh issue view ${{ env.ISSUE }}`. You have no context from the implementer (REQ-ROLE-2).
@@ -211,7 +226,6 @@ jobs:
       statuses: read
       checks: read
       issues: write   # throttle-check only
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with: { ref: main, fetch-depth: 0, persist-credentials: false, clean: true }
@@ -219,11 +233,19 @@ jobs:
         with: { name: attempt, path: attempt }
       - id: cmd
         run: echo "run=node scripts/gates/gate.js publish --patch attempt/commits.mbox --issue $ISSUE --implementer $IMPL${FIX_PR:+ --pr $FIX_PR}" >> "$GITHUB_OUTPUT"
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.implementer == 'local' && secrets.A3A_APP_ID || secrets.A3B_APP_ID }}
+          private-key: ${{ inputs.implementer == 'local' && secrets.A3A_APP_KEY || secrets.A3B_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - uses: anthropics/claude-code-action@v1
         env: { GATE_READ_TOKEN: "${{ github.token }}" }
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Run exactly this command and report its output. Do nothing else:
             ${{ steps.cmd.outputs.run }}
@@ -254,7 +276,7 @@ jobs:
           field() { node -p "String(JSON.parse(process.argv[1]).$1 ?? '')" "$NEXT"; }
           if [ "$(field infra)" = true ]; then
             gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="$(field handoffRun)" -f retry=1
-            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: A0 ladder   ITEM: #$ISSUE   RESULT: blocked
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: Ladder (A0)   ITEM: #$ISSUE   RESULT: blocked
           WHAT CHANGED: the $IMPL job for attempt $ATTEMPT ended as '$JOB' (runner lost, gaming pause or timeout), not a model failure. Re-running the same attempt once.
           EVIDENCE: $RUN
           NEXT: same implementer, same attempt"
@@ -266,7 +288,7 @@ jobs:
           else
             NI=$(field implementer); NA=$(field attempt); H=$(field handoffRun)
             gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$NI" -f attempt="$NA" -f pr="$FIX_PR" -f handoff_run="$H"
-            WHAT="Dispatched $NI attempt $NA with this attempt's work in progress as hints."; NEXTROLE="$([ "$NI" = claude ] && echo 'A3b Claude Implementer' || echo 'A3a Local Implementer')"
+            WHAT="Dispatched $NI attempt $NA with this attempt's work in progress as hints."; NEXTROLE="$([ "$NI" = claude ] && echo 'Claude Coder (A3b)' || echo 'Local Coder (A3a)')"
           fi
-          ROLE=$([ "$IMPL" = local ] && echo "A3a Local Implementer" || echo "A3b Claude Implementer")
+          ROLE=$([ "$IMPL" = local ] && echo "Local Coder (A3a)" || echo "Claude Coder (A3b)")
           gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: %s   ITEM: #%s   RESULT: blocked\nWHAT CHANGED: attempt %s failed: %s. %s\nEVIDENCE: %s (artifact `attempt`: test.log, slice.patch)\nRISKS / ASSUMPTIONS: handoff reason logged for local-model metrics (REQ-FLOW-7)\nNEXT: %s' "$ROLE" "$ISSUE" "$ATTEMPT" "$REASON" "$WHAT" "$RUN" "$NEXTROLE")"

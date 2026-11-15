@@ -11,7 +11,6 @@ on:
         required: true
 permissions:
   contents: read
-  id-token: write
 concurrency:
   group: release
   cancel-in-progress: false
@@ -45,10 +44,18 @@ jobs:
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || { echo "not a sha: $SHA"; exit 1; }
           echo "run=scripts/rollback $SHA --push" >> "$GITHUB_OUTPUT"
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.A9_APP_ID }}
+          private-key: ${{ secrets.A9_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Run exactly this command and report its output. Do nothing else:
             ${{ steps.cmd.outputs.run }}

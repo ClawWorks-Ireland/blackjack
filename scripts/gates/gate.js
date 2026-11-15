@@ -200,8 +200,8 @@ const commands = {
     console.log(JSON.stringify(violations));
   },
   async 'guard-revert'() {
-    git('config', 'user.name', 'A9 main-guard');
-    git('config', 'user.email', 'main-guard@users.noreply.github.com');
+    git('config', 'user.name', 'clawworks-release-manager[bot]');
+    git('config', 'user.email', 'clawworks-release-manager[bot]@users.noreply.github.com');
     git('fetch', 'origin', 'main');
     git('checkout', '-B', 'main', 'origin/main');
     const parents = git('log', '-1', '--format=%P', args.sha).split(' ').filter(Boolean);
@@ -256,8 +256,9 @@ commands.publish = async () => {
   const issue = await gh('GET', repo(`/issues/${args.issue}`));
   const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
   const push = (ref) => git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', `https://github.com/${REPO}.git`, ref);
-  git('config', 'user.name', args.implementer === 'local' ? 'A3a local implementer' : 'A3b Claude implementer');
-  git('config', 'user.email', 'agent-team@users.noreply.github.com');
+  const author = args.implementer === 'local' ? 'clawworks-local-coder[bot]' : 'clawworks-claude-coder[bot]';   // spec §8.5
+  git('config', 'user.name', author);
+  git('config', 'user.email', `${author}@users.noreply.github.com`);
   if (args.pr) {
     const pr = await gh('GET', repo(`/pulls/${args.pr}`));
     git('fetch', 'origin', pr.head.ref); git('checkout', '-B', pr.head.ref, `origin/${pr.head.ref}`);
@@ -270,7 +271,7 @@ commands.publish = async () => {
   git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
   git('am', '--3way', args.patch);
   push(`+HEAD:refs/heads/${branch}`);
-  const body = `Closes #${args.issue}\n\n${issue.title}\n\n\`\`\`\nROLE: ${args.implementer === 'local' ? 'A3a Local Implementer' : 'A3b Claude Implementer'}   ITEM: #${args.issue}   RESULT: done\nWHAT CHANGED: see diff\nEVIDENCE: npm test green; A4 self-verify passed (${RUN_URL || 'run'})\nRISKS / ASSUMPTIONS: see A4 notes\nNEXT: A5/A7/A8 review\n\`\`\``;
+  const body = `Closes #${args.issue}\n\n${issue.title}\n\n\`\`\`\nROLE: ${args.implementer === 'local' ? 'Local Coder (A3a)' : 'Claude Coder (A3b)'}   ITEM: #${args.issue}   RESULT: done\nWHAT CHANGED: see diff\nEVIDENCE: npm test green; A4 self-verify passed (${RUN_URL || 'run'})\nRISKS / ASSUMPTIONS: see A4 notes\nNEXT: A5/A7/A8 review\n\`\`\``;
   const pr = await gh('POST', repo('/pulls'), { title: `${issue.title} (#${args.issue})`, head: branch, base: 'main', body });
   await gh('POST', repo(`/issues/${pr.number}/labels`), { labels: [`impl:${args.implementer}`] });
   await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: [`impl:${args.implementer}`, 'status:in-review'] });

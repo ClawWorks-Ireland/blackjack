@@ -12,7 +12,7 @@
 
 const OWNER = 'delmarolivier';
 const GATE_BOT = 'github-actions[bot]';
-const MERGE_BOT = 'claude[bot]';
+const MERGE_BOT = 'clawworks-release-manager[bot]';   // spec §8.5: A9's own App
 const REQUIRED_STATUSES = ['ai-review', 'security', 'tier-approval'];
 const REQUIRED_CHECK = 'ci';
 
@@ -211,7 +211,7 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
  * marker. The PR that adds it (bootstrap) is therefore exempt, and every commit
  * after it is judged. Removing the marker is a Tier 2 change (.github/**).
  */
-const GUARD_MARKER = '.github/main-guard.armed';
+const GUARD_MARKER = '.github/main-guard.lock';
 /** `hasFile(rev, path)` → true if the file exists at that revision. */
 const guardActiveFor = (hasFile, sha) => hasFile(`${sha}^`, GUARD_MARKER);
 

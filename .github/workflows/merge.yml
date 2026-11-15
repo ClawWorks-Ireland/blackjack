@@ -15,7 +15,6 @@ permissions:
   issues: read
   statuses: write
   checks: read
-  id-token: write
 concurrency:
   group: merge          # serial merges (REQ-GATE-1, T17)
   cancel-in-progress: false
@@ -52,7 +51,6 @@ jobs:
       statuses: read
       checks: read
       issues: write   # throttle-check only
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false, clean: true }
@@ -63,12 +61,20 @@ jobs:
           else
             echo "run=node scripts/gates/gate.js update-branch --pr ${{ needs.plan.outputs.pr }}" >> "$GITHUB_OUTPUT"
           fi
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.A9_APP_ID }}
+          private-key: ${{ secrets.A9_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - id: claude
         uses: anthropics/claude-code-action@v1
         env: { GATE_READ_TOKEN: "${{ github.token }}" }
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Run exactly this one command and report its output. Do nothing else:
             ${{ steps.cmd.outputs.run }}
@@ -93,4 +99,4 @@ jobs:
           MSG=""
           echo "$FILES" | grep -qE '^(macos/|engine/|agent/)' && MSG="$MSG\n- macOS CI owed on the Mac: \`macos/scripts/ci.sh\`"
           echo "$FILES" | grep -qE '^(web/|engine/|index\.html)' && MSG="$MSG\n- QA round owed: \`node qa/run-round.js <merge sha>\`"
-          [ -n "$MSG" ] && gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: A9 Release Manager   ITEM: #%s   RESULT: done\nMerged by merge.yml after verifying all gates (REQ-GATE-1).\nManual checks these hosts cannot run yet:%b' "$PR" "$MSG")" || true
+          [ -n "$MSG" ] && gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: Release Manager (A9)   ITEM: #%s   RESULT: done\nMerged by merge.yml after verifying all gates (REQ-GATE-1).\nManual checks these hosts cannot run yet:%b' "$PR" "$MSG")" || true

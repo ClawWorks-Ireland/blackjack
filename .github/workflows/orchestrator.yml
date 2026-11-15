@@ -17,7 +17,6 @@ permissions:
   pull-requests: read
   actions: write
   statuses: read
-  id-token: write
 concurrency:
   group: orchestrator
   cancel-in-progress: false
@@ -41,12 +40,20 @@ jobs:
           echo "level=$(node scripts/gates/gate.js level)" >> "$GITHUB_OUTPUT"
           echo "throttled=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length)" >> "$GITHUB_OUTPUT"
         env: { EV: "${{ github.event_name }}", DIGEST: "${{ inputs.digest }}" }
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.A0_APP_ID }}
+          private-key: ${{ secrets.A0_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - id: claude
         if: steps.w.outputs.run == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Run the A0 sweep for ${{ github.repository }} (trigger: ${{ github.event_name }}).
             Effective autonomy level: ${{ steps.w.outputs.level }}. Open throttled issues: ${{ steps.w.outputs.throttled }}.

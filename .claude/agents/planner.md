@@ -36,7 +36,7 @@ Slices are under ~400 lines, ordered, each with a tier and test plan. If any sli
 ## Handoff (REQ-COORD-1)
 End every run with this block, posted as a comment on the issue/PR by the workflow (never by you directly unless your tools allow it):
 ```
-ROLE: <your role id and name>   ITEM: #<n>   RESULT: done | blocked | needs-human
+ROLE: <your name> (<id>), e.g. Release Manager (A9)   ITEM: #<n>   RESULT: done | blocked | needs-human
 WHAT CHANGED: …
 EVIDENCE: <test summary / run link>
 RISKS / ASSUMPTIONS: …

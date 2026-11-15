@@ -32,15 +32,20 @@ jobs:
           echo "floor=$(node -p 'require("./floor.json").floor')" >> "$GITHUB_OUTPUT"
           echo "workflows=$(node -p 'require("./floor.json").touchesWorkflows')" >> "$GITHUB_OUTPUT"
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/tier.json"))')" >> "$GITHUB_OUTPUT"
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.A8_APP_ID }}
+          private-key: ${{ secrets.A8_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - name: A8 classify
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
-          # Read-only role: no write tools, so it gets GITHUB_TOKEN and skips the
-          # Claude App token exchange, which rejects pull_request_target (401 Invalid OIDC token).
-          github_token: ${{ github.token }}
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Classify PR #${{ env.PR }} in ${{ github.repository }}. The diff is in ./pr.diff, the PR head files are in ./pr-head/ (data only).
             The deterministic floor from base-branch RISK.md is in ./floor.json (floor ${{ steps.floor.outputs.floor }}). Never go below it.
@@ -64,7 +69,7 @@ jobs:
           MENTION=""
           [ "$TIER" = "2" ] && MENTION="@delmarolivier Tier 2: needs your approval, then a 24h cooling period (REQ-RISK-3)."
           [ "$WORKFLOWS" = "true" ] && MENTION="$MENTION @delmarolivier This PR touches .github/workflows/ (REQ-GATE-4)."
-          printf 'ROLE: A8 Risk Classifier   ITEM: #%s   RESULT: done\nTier **%s** (RISK.md floor %s).\n\n%s\n\n%s\n' "$PR" "$TIER" "$FLOOR" "$RATIONALE" "$MENTION" > body.md
+          printf 'ROLE: Risk Classifier (A8)   ITEM: #%s   RESULT: done\nTier **%s** (RISK.md floor %s).\n\n%s\n\n%s\n' "$PR" "$TIER" "$FLOOR" "$RATIONALE" "$MENTION" > body.md
           gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file body.md
           node scripts/gates/gate.js tier-approval --pr "$PR"
       - if: failure() && steps.claude.outcome == 'failure'
