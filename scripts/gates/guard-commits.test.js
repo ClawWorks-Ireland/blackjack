@@ -78,3 +78,19 @@ test('main-guard is armed only after the commit that adds the marker (re-bootstr
     assert.equal(G.GUARD_MARKER, '.github/main-guard.lock');
   } finally { r.done(); }
 });
+
+test('publish path check sees both sides of a rename (A7 on #23)', () => {
+  const r = repo();
+  try {
+    fs.writeFileSync(path.join(r.dir, 'RISK.md'), 'rules\n'.repeat(20));
+    const base = r.commit('base');
+    fs.mkdirSync(path.join(r.dir, 'docs'));
+    r.git('mv', 'RISK.md', 'docs/RISK.md'); r.git('commit', '-q', '-m', 'rename');
+    const paths = G.changedPaths(r.git, base);
+    assert.ok(paths.includes('RISK.md') && paths.includes('docs/RISK.md'), paths.join(','));
+    assert.deepEqual(G.policyViolations(paths), ['RISK.md']);
+    // a plain rename-detecting diff would only show the new path:
+    assert.deepEqual(r.git('diff', '--name-only', '-M', base, 'HEAD').split('\n'), ['docs/RISK.md']);
+    assert.deepEqual(G.policyViolations(['engine/x.js', 'docs/a.md']), []);
+  } finally { r.done(); }
+});

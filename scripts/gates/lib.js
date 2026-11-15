@@ -339,6 +339,18 @@ function nextRung(implementer, attempt, ctx = {}) {
   return { replan: true };
 }
 
+// ---------------------------------------------------------------- publishing
+
+/** Implementers may never change these (spec §8.1); A10 proposals may, except `.github/`. */
+const POLICY_RE = /^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/|\.claude\/|\.github\/|scripts\/gates\/|scripts\/agents\/|scripts\/rollback|evals\/)/;
+/**
+ * Every path a range touches. `--no-renames` reports a rename as a delete plus an add, so
+ * BOTH the old and the new path are listed (a renamed policy file can't hide; A7 on #23).
+ */
+const changedPaths = (git, base, head = 'HEAD') =>
+  [...new Set(git('diff', '--name-only', '--no-renames', base, head).split('\n').map((x) => x.trim()).filter(Boolean))];
+const policyViolations = (paths, re = POLICY_RE) => paths.filter((f) => re.test(f));
+
 // ---------------------------------------------------------------- misc
 
 /** Parse "Rollback-of: <sha>" / "Main-guard-revert: <sha>" trailers. */
@@ -358,5 +370,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, decideFindings, isUsageLimited, finalResult, nextRung,
+  dublinHour, decideFindings, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations,
 };

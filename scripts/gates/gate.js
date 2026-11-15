@@ -216,10 +216,8 @@ const commands = {
 };
 
 /** Implementers may never change policy files (spec §8.1). Re-checked here, on the trusted runner, after `git am` (A7 on #23). */
-const POLICY_RE = /^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/|\.claude\/|\.github\/|scripts\/gates\/|scripts\/agents\/|scripts\/rollback|evals\/)/;
 function refusePolicyPaths(base) {
-  const files = git('diff', '--name-only', base, 'HEAD').split('\n').filter(Boolean);
-  const bad = files.filter((f) => POLICY_RE.test(f));
+  const bad = G.policyViolations(G.changedPaths(git, base));
   if (bad.length) throw new Error(`refusing to publish: the patch touches policy paths: ${bad.join(', ')}`);
 }
 function git(...a) { return execFileSync('git', a, { encoding: 'utf8' }).trim(); }
@@ -332,7 +330,7 @@ commands['a10-publish'] = async () => {
     git('config', 'user.email', 'clawworks-incident-reviewer[bot]@users.noreply.github.com');
     git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
     git('am', '--3way', mbox);
-    const files = git('diff', '--name-only', 'origin/main', 'HEAD').split('\n').filter(Boolean);
+    const files = G.changedPaths(git, 'origin/main');
     if (files.some((f) => f.startsWith('.github/'))) {
       if (target) await gh('POST', repo(`/issues/${target}/comments`), { body: 'A10 proposal not opened: it changes `.github/`, which no agent may push (REQ-GATE-4). Put workflow changes in the PR body as a patch for @delmarolivier to apply.' });
       throw new Error('proposal touches .github/: refused');
