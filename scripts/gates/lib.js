@@ -207,6 +207,20 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
 // ---------------------------------------------------------------- main-guard
 
 /**
+ * The commits main-guard judges (REQ-GATE-2): only those that landed on main
+ * itself, i.e. its first-parent history. Commits that arrive through a merge's
+ * second parent are covered by the merge commit's own verdict (an A9 merge
+ * needs claude[bot] + trusted merge-evidence), so judging them again flags
+ * every branch commit of a legitimate merge as a "direct push" (incident #12).
+ * `git` runs a git command and returns stdout. Push mode: before..after.
+ * Sweep mode: first-parent commits on `ref` since `since` (ISO date). Oldest first.
+ */
+function guardCommits(git, { before, after, since, ref = 'origin/main' } = {}) {
+  const range = since ? [`--since=${since}`, ref] : [`${before}..${after}`];
+  return git('rev-list', '--reverse', '--first-parent', ...range).split('\n').map((x) => x.trim()).filter(Boolean);
+}
+
+/**
  * REQ-GATE-2: is a commit on main allowed? Allowed are:
  *  - an A9 squash merge: the commit's PR was merged by claude[bot] at this sha,
  *    and its head carries a trusted green `merge-evidence` status;
@@ -285,6 +299,6 @@ module.exports = {
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
-  trustedStatuses, mergeVerdict, guardVerdict, revertTrailer,
+  trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer,
   dublinHour, decideFindings, isUsageLimited, nextRung,
 };
