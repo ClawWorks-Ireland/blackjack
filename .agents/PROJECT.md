@@ -22,7 +22,7 @@ flags: none   # confirmed 2026-11-14: no flag system; REQ-FLOW-3 Tier floor 1 fo
 deploy: none   # confirmed 2026-11-14: nothing deployed; server/ is home-network only, run by hand on the Mac (server/service.sh). Release = A9 merge + tag
 tracker: github-issues + github-project
 solo_owner: true
-tier2_cooling_hours: 24
+tier2_cooling_hours: 0   # Delmar 2026-11-15: BlackJack is the test project for the template; Tier 2 still needs his approval, but no cooling wait
 orchestrator_schedule: hourly 24x7   # spec v0.11; daily digest at 08:00 Europe/Dublin
 sensitive_paths_extra:   # Tier 2 floor, see RISK.md
   - server/**        # live table server, network-facing; never expose publicly

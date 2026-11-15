@@ -1,0 +1,13 @@
+diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js
+index a3f9d3f..bbafc27 100644
+--- a/scripts/gates/lib.js
++++ b/scripts/gates/lib.js
+@@ -217,7 +217,7 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
+  */
+ function guardCommits(git, { before, after, since, ref = 'origin/main' } = {}) {
+   const range = since ? [`--since=${since}`, ref] : [`${before}..${after}`];
+-  return git('rev-list', '--reverse', '--first-parent', ...range).split('\n').map((x) => x.trim()).filter(Boolean);
++  return git('rev-list', '--reverse', ...range).split('\n').map((x) => x.trim()).filter(Boolean);
+ }
+ 
+ /**

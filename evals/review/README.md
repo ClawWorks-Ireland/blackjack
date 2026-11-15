@@ -14,6 +14,7 @@ Ten planted bugs specific to BlackJack, each a real patch against `main` (2026-1
 | 08-colored-mixed-swap | Perfect Pairs colored/mixed swapped | yes |
 | 09-folded-wins-pot | poker: folded seat eligible for pots | yes, by hanging `agent/poker-scout.test.js` |
 | 10-qka-straight | 21+3 misses Q-K-A straight | yes |
+| 11-guard-second-parent | main-guard judges second-parent commits of a merge (incident #12; patch against main after #12's fix) | yes, by `scripts/gates/guard-commits.test.js` |
 
 The tests are strong, so CI already catches 9 of 10. The set still measures **reviewer** recall: reviewers see only the diff (REQ-COMMS-2), and future bugs won't all be covered by tests. The next cases A10 adds should be ones the tests miss, like 07.
 

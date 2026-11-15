@@ -169,18 +169,18 @@ const commands = {
     let shas;
     if (args.sweep) {
       const since = new Date(Date.now() - 7 * 86400e3).toISOString();
-      const commits = await all(repo(`/commits?sha=main&since=${since}`));
+      // First-parent history only, not the REST commits list (it includes second-parent commits).
       shas = [];
-      for (const c of commits.reverse()) {
-        const st = G.trustedStatuses(await all(repo(`/commits/${c.sha}/statuses`)))['main-guard'];
-        if (!st) shas.push(c.sha);
+      for (const sha of G.guardCommits(git, { since, ref: 'origin/main' })) {
+        const st = G.trustedStatuses(await all(repo(`/commits/${sha}/statuses`)))['main-guard'];
+        if (!st) shas.push(sha);
       }
     } else {
-      shas = git('rev-list', '--reverse', `${args.before}..${args.after}`).split('\n').filter(Boolean);
+      shas = G.guardCommits(git, { before: args.before, after: args.after });
     }
     const violations = [];
     for (const sha of shas) {
-      const guardActive = gitOk('cat-file', '-e', `${sha}^:.github/workflows/main-guard.yml`);
+      const guardActive = G.guardActiveFor((rev, p) => gitOk('cat-file', '-e', `${rev}:${p}`), sha);
       const message = git('log', '-1', '--format=%B', sha);
       const prs = await gh('GET', repo(`/commits/${sha}/pulls`));
       const pr = prs.find((p) => p.merge_commit_sha === sha) || null;
