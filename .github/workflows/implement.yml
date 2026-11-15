@@ -69,7 +69,10 @@ jobs:
       - name: Handoff from the previous attempt (REQ-FLOW-7, incident #21)
         if: inputs.handoff_run != ''
         env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+        run: |
+          W=$(gh run view "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" --json workflowName,event,headBranch -q '"\(.workflowName)|\(.event)|\(.headBranch)"' 2>/dev/null || true)
+          if [ "$W" = "implement|workflow_dispatch|main" ]; then gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+          else echo "Ignoring hand-off run $HANDOFF_RUN ($W): only implement.yml dispatch runs on main count (A7 on #23)"; fi
       - name: Prompt (slice + review findings for a fix round + previous attempt)
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: |
@@ -116,7 +119,7 @@ jobs:
   claude:
     needs: gate
     if: needs.gate.outputs.go == 'true' && inputs.implementer == 'claude'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: [self-hosted, claude-code]   # a model runs code here: never the runner that handles App keys (A7 on #23)
     timeout-minutes: 60
     outputs:
       result: ${{ steps.t.outputs.result }}
@@ -128,7 +131,10 @@ jobs:
       - name: Handoff context from the previous attempt (REQ-FLOW-7, incident #21)
         if: inputs.handoff_run != ''
         env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+        run: |
+          W=$(gh run view "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" --json workflowName,event,headBranch -q '"\(.workflowName)|\(.event)|\(.headBranch)"' 2>/dev/null || true)
+          if [ "$W" = "implement|workflow_dispatch|main" ]; then gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+          else echo "Ignoring hand-off run $HANDOFF_RUN ($W): only implement.yml dispatch runs on main count (A7 on #23)"; fi
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
@@ -182,7 +188,7 @@ jobs:
   verify:
     needs: [gate, local, claude]
     if: always() && (needs.local.outputs.result == 'pass' || needs.claude.outputs.result == 'pass')
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: [self-hosted, claude-code]   # a model runs code here: never the runner that handles App keys (A7 on #23)
     timeout-minutes: 30
     outputs:
       pass: ${{ steps.v.outputs.pass }}

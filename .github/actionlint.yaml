@@ -3,6 +3,7 @@ self-hosted-runner:
   # The two runners on the Windows PC (REQ-CFG-3, REQ-CFG-4).
   labels:
     - claude-jobs
+    - claude-code
     - local-llm
 paths:
   .github/workflows/**/*.yml:

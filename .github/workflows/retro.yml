@@ -42,7 +42,7 @@ jobs:
   a10:
     needs: route
     if: needs.route.outputs.mode != ''
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: [self-hosted, claude-code]   # a model runs code here: never the runner that handles App keys (A7 on #23)
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
