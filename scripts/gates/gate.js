@@ -215,6 +215,13 @@ const commands = {
   },
 };
 
+/** Implementers may never change policy files (spec §8.1). Re-checked here, on the trusted runner, after `git am` (A7 on #23). */
+const POLICY_RE = /^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/|\.claude\/|\.github\/|scripts\/gates\/|scripts\/agents\/|scripts\/rollback|evals\/)/;
+function refusePolicyPaths(base) {
+  const files = git('diff', '--name-only', base, 'HEAD').split('\n').filter(Boolean);
+  const bad = files.filter((f) => POLICY_RE.test(f));
+  if (bad.length) throw new Error(`refusing to publish: the patch touches policy paths: ${bad.join(', ')}`);
+}
 function git(...a) { return execFileSync('git', a, { encoding: 'utf8' }).trim(); }
 function gitOk(...a) { try { execFileSync('git', a, { stdio: 'ignore' }); return true; } catch { return false; } }
 
@@ -264,6 +271,7 @@ commands.publish = async () => {
     const pr = await gh('GET', repo(`/pulls/${args.pr}`));
     git('fetch', 'origin', pr.head.ref); git('checkout', '-B', pr.head.ref, `origin/${pr.head.ref}`);
     git('am', '--3way', args.patch);
+    refusePolicyPaths(`origin/${pr.head.ref}`);   // only the commits this patch adds
     push(`HEAD:refs/heads/${pr.head.ref}`);
     console.log(`pushed fix round to #${args.pr}`);
     return;
@@ -271,6 +279,7 @@ commands.publish = async () => {
   const branch = `agent/${args.issue}-${args.implementer}`;
   git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
   git('am', '--3way', args.patch);
+  refusePolicyPaths('origin/main');
   push(`+HEAD:refs/heads/${branch}`);
   const body = `Closes #${args.issue}\n\n${issue.title}\n\n\`\`\`\nROLE: ${args.implementer === 'local' ? 'Local Coder (A3a)' : 'Claude Coder (A3b)'}   ITEM: #${args.issue}   RESULT: done\nWHAT CHANGED: see diff\nEVIDENCE: npm test green; A4 self-verify passed (${RUN_URL || 'run'})\nRISKS / ASSUMPTIONS: see A4 notes\nNEXT: A5/A7/A8 review\n\`\`\``;
   const pr = await gh('POST', repo('/pulls'), { title: `${issue.title} (#${args.issue})`, head: branch, base: 'main', body });
@@ -304,12 +313,13 @@ commands['a10-publish'] = async () => {
     done.push(`comment on #${target}`);
   }
   // 2. circuit-breaker issues only (fixed label allowlist)
-  const ALLOWED = new Set(['circuit-breaker', 'cb:level-0', 'cb:level-1', 'incident']);
+  // circuit-breaker + exactly one cb:level-N; never `incident` (that would start A10 on its own output; A7 on #23)
   let issues = [];
   try { issues = JSON.parse(read('issues.json') || '[]'); } catch { issues = []; }
   for (const it of (Array.isArray(issues) ? issues : []).slice(0, 3)) {
-    const labels = (it.labels || []).filter((l) => ALLOWED.has(l));
-    if (!labels.includes('circuit-breaker') || !it.title) continue;
+    const lv = (it.labels || []).filter((l) => /^cb:level-[01]$/.test(l));
+    if (!(it.labels || []).includes('circuit-breaker') || lv.length !== 1 || !it.title) continue;
+    const labels = ['circuit-breaker', lv[0]];
     const r = await gh('POST', repo('/issues'), { title: String(it.title).slice(0, 200), body: String(it.body || '').slice(0, 30000), labels });
     done.push(`issue #${r.number}`);
   }

@@ -123,7 +123,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       result: ${{ steps.t.outputs.result }}
-    permissions: { contents: read, pull-requests: read, actions: read, issues: write }   # issues: throttle-check only
+    permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: a model runs code here
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ needs.gate.outputs.base }}", fetch-depth: 0, persist-credentials: false, clean: true }
@@ -171,9 +171,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: attempt, path: "slice.patch\ncommits.mbox\ntest.log\nchanged.txt", retention-days: 30, if-no-files-found: warn }
-      - if: failure() && steps.claude.outcome == 'failure'
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+      - name: Keep the run log for the throttle check (it runs in a job with no model)
+        if: failure() && steps.claude.outcome == 'failure'
+        run: cp "${{ steps.claude.outputs.execution_file }}" "$RUNNER_TEMP/claude-exec.json" || true
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.claude.outcome == 'failure'
+        with: { name: claude-exec-claude, path: "${{ runner.temp }}/claude-exec.json", retention-days: 7, if-no-files-found: ignore }
 
   verify:
     needs: [gate, local, claude]
@@ -182,7 +185,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       pass: ${{ steps.v.outputs.pass }}
-    permissions: { contents: read, pull-requests: read, actions: read, issues: write }   # issues: throttle-check only
+    permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: a model runs code here
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ needs.gate.outputs.base }}", fetch-depth: 0, persist-credentials: false, clean: true }
@@ -215,9 +218,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: self-verify, path: a4.json, retention-days: 30 }
-      - if: failure() && steps.claude.outcome == 'failure'
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+      - name: Keep the run log for the throttle check (it runs in a job with no model)
+        if: failure() && steps.claude.outcome == 'failure'
+        run: cp "${{ steps.claude.outputs.execution_file }}" "$RUNNER_TEMP/claude-exec.json" || true
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.claude.outcome == 'failure'
+        with: { name: claude-exec-verify, path: "${{ runner.temp }}/claude-exec.json", retention-days: 7, if-no-files-found: ignore }
 
   publish:
     needs: [gate, verify]
@@ -302,3 +308,18 @@ jobs:
           fi
           ROLE=$([ "$IMPL" = local ] && echo "Local Coder (A3a)" || echo "Claude Coder (A3b)")
           gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: %s   ITEM: #%s   RESULT: blocked\nWHAT CHANGED: attempt %s failed: %s. %s\nEVIDENCE: %s (artifact `attempt`: test.log, slice.patch)\nRISKS / ASSUMPTIONS: handoff reason logged for local-model metrics (REQ-FLOW-7)\nNEXT: %s' "$ROLE" "$ISSUE" "$ATTEMPT" "$REASON" "$WHAT" "$RUN" "$NEXTROLE")"
+
+  throttle:   # REQ-CB-4, model-free: the only job here with issues: write (A7 on #23)
+    needs: [claude, verify]
+    if: always() && (needs.claude.result == 'failure' || needs.verify.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { pattern: claude-exec-*, path: exec }
+      - env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: for f in exec/*/claude-exec.json; do [ -f "$f" ] && node scripts/gates/gate.js throttle-check --file "$f"; done; true

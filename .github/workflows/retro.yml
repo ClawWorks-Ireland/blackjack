@@ -29,11 +29,12 @@ jobs:
         env:
           MSG: ${{ github.event.head_commit.message }}
           LABEL: ${{ github.event.label.name }}
+          SENDER: ${{ github.event.sender.login }}
           IN_INCIDENT: ${{ inputs.incident }}
         run: |
           M=""
           case "${{ github.event_name }}" in
-            issues) [ "$LABEL" = incident ] && M=incident ;;
+            issues) [ "$LABEL" = incident ] && [ "$SENDER" != "clawworks-incident-reviewer[bot]" ] && M=incident ;;
             push) printf '%s' "$MSG" | grep -qE '^(Rollback-of|Main-guard-revert): ' && M=revert ;;
             schedule) M=weekly ;;
             workflow_dispatch) [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }; M=$([ -n "$IN_INCIDENT" ] && echo incident || echo weekly) ;;
@@ -44,7 +45,7 @@ jobs:
     if: needs.route.outputs.mode != ''
     runs-on: [self-hosted, claude-code]   # a model runs code here, so no App key ever comes here (A7 on #23)
     timeout-minutes: 60
-    permissions: { contents: read, issues: write, pull-requests: read, actions: read }   # issues: throttle-check only; the model's issue-writing commands are disallowed
+    permissions: { contents: read, issues: read, pull-requests: read, actions: read }   # read-only: a model runs code here
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0, clean: true, persist-credentials: false }
@@ -70,9 +71,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: a10-out, path: out/, retention-days: 30, if-no-files-found: warn }
-      - if: failure() && steps.claude.outcome == 'failure'
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+      - name: Keep the run log for the throttle check (it runs in a job with no model)
+        if: failure() && steps.claude.outcome == 'failure'
+        run: cp "${{ steps.claude.outputs.execution_file }}" "$RUNNER_TEMP/claude-exec.json" || true
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.claude.outcome == 'failure'
+        with: { name: claude-exec-a10, path: "${{ runner.temp }}/claude-exec.json", retention-days: 7, if-no-files-found: ignore }
 
   a10-publish:
     needs: [route, a10]
@@ -102,3 +106,18 @@ jobs:
         run: |
           [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }
           node scripts/gates/gate.js a10-publish --dir out ${IN_INCIDENT:+--incident $IN_INCIDENT}
+
+  throttle:   # REQ-CB-4, model-free: the only job here with issues: write (A7 on #23)
+    needs: [a10]
+    if: always() && (needs.a10.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { pattern: claude-exec-*, path: exec }
+      - env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: for f in exec/*/claude-exec.json; do [ -f "$f" ] && node scripts/gates/gate.js throttle-check --file "$f"; done; true
