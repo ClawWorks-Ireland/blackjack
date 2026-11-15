@@ -46,6 +46,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
           prompt: |
             Run the A0 sweep for ${{ github.repository }} (trigger: ${{ github.event_name }}).
             Effective autonomy level: ${{ steps.w.outputs.level }}. Open throttled issues: ${{ steps.w.outputs.throttled }}.

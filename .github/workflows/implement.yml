@@ -66,7 +66,7 @@ jobs:
       - name: A3a implement (Ollama, no credentials)
         id: impl
         continue-on-error: true
-        run: base/scripts/agents/local-implement.sh wt prompt.txt impl.log
+        run: base/scripts/agents/local-implement.sh "$GITHUB_WORKSPACE/wt" "$GITHUB_WORKSPACE/prompt.txt" "$GITHUB_WORKSPACE/impl.log"
       - name: Attempt = implement + full suite; no policy paths
         id: t
         run: |
@@ -101,6 +101,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
           prompt: |
             Implement slice #${{ env.ISSUE }} (attempt ${{ env.ATTEMPT }} of 2, Claude fallback). Read it with `gh issue view ${{ env.ISSUE }}`.
             ${{ inputs.pr != '' && format('This is a review fix round for PR #{0}: fix the open Important findings in its latest AI review comment (`gh pr view {0} --comments`).', inputs.pr) || '' }}
@@ -147,6 +148,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
           prompt: |
             Self-verify slice #${{ env.ISSUE }} before its PR opens. The implementer's diff is ./slice.diff and is applied to this checkout.
             Read the slice with `gh issue view ${{ env.ISSUE }}`. You have no context from the implementer (REQ-ROLE-2).
@@ -182,6 +184,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
           prompt: |
             Run exactly this command and report its output. Do nothing else:
             ${{ steps.cmd.outputs.run }}
