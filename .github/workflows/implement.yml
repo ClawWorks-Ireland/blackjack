@@ -123,6 +123,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       result: ${{ steps.t.outputs.result }}
+    permissions: { contents: read, pull-requests: read, actions: read, issues: write }   # issues: throttle-check only
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ needs.gate.outputs.base }}", fetch-depth: 0, persist-credentials: false, clean: true }
@@ -135,22 +136,11 @@ jobs:
           W=$(gh run view "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" --json workflowName,event,headBranch -q '"\(.workflowName)|\(.event)|\(.headBranch)"' 2>/dev/null || true)
           if [ "$W" = "implement|workflow_dispatch|main" ]; then gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
           else echo "Ignoring hand-off run $HANDOFF_RUN ($W): only implement.yml dispatch runs on main count (A7 on #23)"; fi
-      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
-        with:
-          app-id: ${{ secrets.A3B_APP_ID }}
-          private-key: ${{ secrets.A3B_APP_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
-          permission-contents: read
-          permission-issues: read
-          permission-pull-requests: read
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ steps.app.outputs.token }}
+          github_token: ${{ github.token }}   # read-only job token: no App key on the code runner (A7 on #23)
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Implement slice #${{ env.ISSUE }} (attempt ${{ env.ATTEMPT }} of 2, Claude fallback). Read it with `gh issue view ${{ env.ISSUE }}`.
@@ -192,6 +182,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       pass: ${{ steps.v.outputs.pass }}
+    permissions: { contents: read, pull-requests: read, actions: read, issues: write }   # issues: throttle-check only
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ needs.gate.outputs.base }}", fetch-depth: 0, persist-credentials: false, clean: true }
@@ -202,20 +193,11 @@ jobs:
           git -c user.name=a4 -c user.email=a4@local am --3way attempt/commits.mbox
           git diff "origin/${{ needs.gate.outputs.base }}" HEAD > slice.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json"))')" >> "$GITHUB_OUTPUT"
-      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
-        with:
-          app-id: ${{ secrets.A4_APP_ID }}
-          private-key: ${{ secrets.A4_APP_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
-          permission-pull-requests: read
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ steps.app.outputs.token }}
+          github_token: ${{ github.token }}   # read-only job token: no App key on the code runner (A7 on #23)
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Self-verify slice #${{ env.ISSUE }} before its PR opens. The implementer's diff is ./slice.diff and is applied to this checkout.

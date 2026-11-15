@@ -17,6 +17,7 @@
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R   A6 majority → ai-review status + comment
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
+ *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
  *
  * Token: GITHUB_TOKEN or GH_TOKEN. Repo: GITHUB_REPOSITORY (owner/name).
  * Policy (RISK.md, .agents/PROJECT.md) is read from the working directory,
@@ -276,6 +277,62 @@ commands.publish = async () => {
   await gh('POST', repo(`/issues/${pr.number}/labels`), { labels: [`impl:${args.implementer}`] });
   await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: [`impl:${args.implementer}`, 'status:in-review'] });
   console.log(`opened #${pr.number} from ${branch}`);
+};
+
+/**
+ * A10's GitHub writes, done without a model (A7 on #23): the A10 job runs the model on
+ * the claude-code runner with no App key, and leaves its output in a folder. This step,
+ * on claude-jobs with A10's App token, publishes only what that folder allows:
+ *   comment.md          posted on the incident issue (--incident N) or, weekly, on the digest issue
+ *   proposal.mbox       its commits, pushed as agent/retro-<date>-<run> and opened as ONE PR
+ *   pr.json             {title, body} for that PR
+ *   issues.json         [{title, body, labels}] — only circuit-breaker issues (REQ-CB-3)
+ */
+commands['a10-publish'] = async () => {
+  const dir = args.dir || 'out';
+  const read = (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8') : '');
+  const done = [];
+  // 1. the retro / weekly report comment
+  let target = args.incident && /^\d+$/.test(args.incident) ? Number(args.incident) : null;
+  if (!target) {
+    const digest = await all(repo('/issues?state=open&labels=digest'));
+    target = digest.length ? digest[0].number : null;
+  }
+  const comment = read('comment.md').trim();
+  if (comment && target) {
+    await gh('POST', repo(`/issues/${target}/comments`), { body: comment.slice(0, 60000) });
+    done.push(`comment on #${target}`);
+  }
+  // 2. circuit-breaker issues only (fixed label allowlist)
+  const ALLOWED = new Set(['circuit-breaker', 'cb:level-0', 'cb:level-1', 'incident']);
+  let issues = [];
+  try { issues = JSON.parse(read('issues.json') || '[]'); } catch { issues = []; }
+  for (const it of (Array.isArray(issues) ? issues : []).slice(0, 3)) {
+    const labels = (it.labels || []).filter((l) => ALLOWED.has(l));
+    if (!labels.includes('circuit-breaker') || !it.title) continue;
+    const r = await gh('POST', repo('/issues'), { title: String(it.title).slice(0, 200), body: String(it.body || '').slice(0, 30000), labels });
+    done.push(`issue #${r.number}`);
+  }
+  // 3. the proposal: one branch, one PR, never main, never .github/
+  const mbox = path.join(dir, 'proposal.mbox');
+  if (fs.existsSync(mbox) && fs.statSync(mbox).size > 0) {
+    let pr = {}; try { pr = JSON.parse(read('pr.json') || '{}'); } catch { pr = {}; }
+    const branch = `agent/retro-${new Date().toISOString().slice(0, 10)}-${process.env.GITHUB_RUN_ID || 'local'}`;
+    git('config', 'user.name', 'clawworks-incident-reviewer[bot]');
+    git('config', 'user.email', 'clawworks-incident-reviewer[bot]@users.noreply.github.com');
+    git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
+    git('am', '--3way', mbox);
+    const files = git('diff', '--name-only', 'origin/main', 'HEAD').split('\n').filter(Boolean);
+    if (files.some((f) => f.startsWith('.github/'))) {
+      if (target) await gh('POST', repo(`/issues/${target}/comments`), { body: 'A10 proposal not opened: it changes `.github/`, which no agent may push (REQ-GATE-4). Put workflow changes in the PR body as a patch for @delmarolivier to apply.' });
+      throw new Error('proposal touches .github/: refused');
+    }
+    const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
+    git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${branch}`);
+    const opened = await gh('POST', repo('/pulls'), { title: String(pr.title || `A10 proposal (${branch})`).slice(0, 200), head: branch, base: 'main', body: String(pr.body || '').slice(0, 60000) });
+    done.push(`PR #${opened.number} from ${branch} (${files.length} files)`);
+  }
+  console.log(done.length ? `published: ${done.join('; ')}` : 'nothing to publish');
 };
 
 commands['throttle-check'] = async () => {
