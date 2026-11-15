@@ -92,7 +92,7 @@ The template moved to v0.11 (24x7) while this setup ran. Applied here: `.agents/
 | T16 missing approval | **PASS (logic)** | Unit test: all checks green + only a bot approval → refused | GATE-1, ROLE-4 |
 | T17 serial merge | **PASS (logic)**; live after merge | Unit test: a ready PR behind `main` → `update`, not merge; `merge.yml` runs in one concurrency group | GATE-1 |
 
-Not done: the workflows weren't checked with `actionlint` (the npm/wasm build crashed, and downloading the release binary was blocked by this session's permission check). They parse as YAML and were reviewed by hand; one bash backtick bug was found and fixed. **Run `actionlint` on `.github/workflows/` before merging, or let the first live runs show any errors.**
+**actionlint: PASS** (2026-11-15). Added as a non-required `actionlint` job in `ci.yml` (official `rhysd/actionlint:1.7.7` image on a GitHub-hosted runner; it couldn't run on the PC). First run: no expression, syntax, context or permission errors; only the two custom runner labels (now declared in `.github/actionlint.yaml`) and six style/info shellcheck notes, all intended and ignored there with reasons (SC2016, SC2015, SC2129).
 
 ## Checklist for Delmar (only you can do these)
 1. ✅ **Claude GitHub App installed on ClawWorks-Ireland, all repositories** (done 2026-11-15; Delmar chose all repos over selected repos). Whether it has the org **Projects** permission is unconfirmed: if not, A0 tracks status with `status:*` labels only.
