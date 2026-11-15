@@ -1,0 +1,15 @@
+# actionlint config (ci.yml → actionlint job).
+self-hosted-runner:
+  # The two runners on the Windows PC (REQ-CFG-3, REQ-CFG-4).
+  labels:
+    - claude-jobs
+    - local-llm
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      # SC2016: '$' inside single-quoted `node -e` JavaScript and Markdown printf formats must not expand (intended).
+      - 'SC2016'
+      # SC2015: `cmd && gh pr comment || true` is meant never to fail the step (intended).
+      - 'SC2015'
+      # SC2129: style suggestion (group redirects); left as one line per output for readability.
+      - 'SC2129'
