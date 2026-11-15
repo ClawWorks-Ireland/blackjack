@@ -27,7 +27,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const G = require('./lib.js');
 
-const REPO = process.env.GITHUB_REPOSITORY || 'delmarolivier/blackjack';
+const REPO = process.env.GITHUB_REPOSITORY || 'ClawWorks-Ireland/blackjack';
 const TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 const API = process.env.GITHUB_API_URL || 'https://api.github.com';
 const RUN_URL = process.env.GITHUB_RUN_ID

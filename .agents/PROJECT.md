@@ -1,5 +1,5 @@
 project: BlackJack
-repo: delmarolivier/blackjack
+repo: ClawWorks-Ireland/blackjack   # REQ-OPS-10 (transferred 2026-11-15)
 autonomy_level: 0
 revert_ceiling: 3%
 wip_limit: 3
@@ -7,7 +7,7 @@ billing: subscription-only
 models:
   orchestrator: claude-opus
   spec_planner: claude-opus
-  implementer_local: ollama/qwen2.5-coder:14b   # attempts: 2, context 32k
+  implementer_local: ollama/qwen3.5:9b   # attempts: 2, context 32k, slim harness (REQ-CFG-4e, D12 v0.12)
   implementer_fallback: claude-sonnet   # attempts: 2
   reviewers: claude-sonnet
   verifiers: claude-haiku

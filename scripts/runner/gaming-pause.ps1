@@ -10,7 +10,7 @@
 param(
   [string[]]$Games = @('steam_game_placeholder'),   # e.g. 'eldenring','cs2','FortniteClient-Win64-Shipping','RocketLeague'
   [int]$PollSeconds = 30,
-  [string]$Service = 'actions.runner.delmarolivier-blackjack.gamingpc-local-llm.service',
+  [string]$Service = 'actions.runner.ClawWorks-Ireland-blackjack.gamingpc-local-llm.service',
   [string]$Log = 'C:\Windows\Temp\gaming-pause.log'
 )
 $paused = $false

@@ -6,12 +6,12 @@ Spec: §4 (A3a), §5 G4, REQ-FLOW-2, REQ-FLOW-7, REQ-CFG-2, REQ-CFG-4/4a–e, RE
 | Item | Value |
 |---|---|
 | Runner | self-hosted GitHub Actions runner labelled `local-llm`, inside WSL2 on the Windows PC, as Linux user `gh-llm` (no sudo, no GitHub or Claude credentials) |
-| Model | `qwen2.5-coder:14b` on Ollama (Windows, GPU), reached at `http://localhost:11434` via WSL mirrored networking |
+| Model | `qwen3.5:9b` on Ollama (Windows, GPU), reached at `http://localhost:11434` via WSL mirrored networking. D12 (spec v0.12): `qwen2.5-coder:14b` failed P1 because it never returns native tool calls through Ollama |
 | Context | 32k (`OLLAMA_CONTEXT_LENGTH=32768`, set on the Windows Ollama service) |
-| Harness | Claude Code (`claude -p`) with `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, every model tier mapped to `qwen2.5-coder:14b`: `.agents/local-harness/settings.json` |
+| Harness | Claude Code (`claude -p`) with `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, every model tier mapped to `qwen3.5:9b`: `.agents/local-harness/settings.json` |
 | Isolation | One git worktree per slice (REQ-CFG-2). `CLAUDE_CONFIG_DIR` is an empty per-job temp dir. The policy guard (`scripts/agents/policy-guard.js`) and settings load from the base checkout, never the worktree |
 | Wrapper | `scripts/agents/local-implement.sh <worktree> <prompt-file> <log>`, 45 min / 60 turns per attempt. **Slim harness:** the default system prompt is replaced by the one below, and only Read, Edit, Write, Bash, Grep and Glob are offered (~4.9k tokens on turn one, against ~26k by default; P1) |
-| Fallback harness | Qwen Code, if P1 fails (§11). Mirror the policy guard in its config |
+| Fallback harness | Qwen Code, if a future P1 fails (§11). Mirror the policy guard in its config. P1 on 2026-11-14 confirmed Claude Code with the slim harness (D9) |
 
 ## Escalation ladder (REQ-FLOW-2), run by `implement.yml`
 ```

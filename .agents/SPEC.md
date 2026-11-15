@@ -1,7 +1,7 @@
 # Claude Agent Delivery Team — Requirements & Design Spec
 
-**Version:** 0.11 · **Date:** 2026-11-14 · **Owner:** Delmar (sole human approver, "H")
-**Status:** Ready for setup. Next step: on the Air, clone this repo and run `/bootstrap-control-plane` (§12).
+**Version:** 0.12 · **Date:** 2026-11-15 · **Owner:** Delmar (sole human approver, "H")
+**Status:** Control plane bootstrapped (Phase 2 + reboot test done). BlackJack setup open as ClawWorks-Ireland/blackjack#11 (Tier 2, Level 0). Next: its checklist, then merge (§13).
 
 ---
 
@@ -9,7 +9,7 @@
 
 | # | Decision | Choice |
 |---|---|---|
-| D1 | Runtime | GitHub-native: private repos under `delmarolivier`, Claude Code GitHub Action for review/security/classification, scheduled runs for the Orchestrator |
+| D1 | Runtime | GitHub-native: private repos in the **`ClawWorks-Ireland`** organisation (H is admin; REQ-OPS-10), Claude Code GitHub Action for review/security/classification, scheduled runs for the Orchestrator |
 | D2 | Local models | Ollama/Qwen as **Implementers only**; Claude implementer takes over after 2 failed attempts on a slice |
 | D3 | Tracker | GitHub Issues + GitHub Projects |
 | D4 | Human approvers | Solo owner. Tier 2 = H's approval + 24h cooling period |
@@ -17,10 +17,10 @@
 | D6 | Budget | Claude subscription only — no API spend. Work throttles at usage limits |
 | D7 | Pilot | BlackJack (existing, low-risk project) |
 | D8 | Local runner host | The Windows PC (study). Runner inside WSL2, Ollama on Windows for direct GPU access |
-| D9 | Local harness | **Proposed, pending P1:** Claude Code pointed at Ollama's Anthropic-compatible endpoint (Ollama ≥ 0.14). Fallback: Qwen Code |
+| D9 | Local harness | **Confirmed by P1 (2026-11-14):** Claude Code pointed at Ollama's Anthropic-compatible endpoint (Ollama ≥ 0.14), in a *slim* configuration (REQ-CFG-4e). Fallback: Qwen Code |
 | D10 | GitHub plan | **GitHub Free, private repos.** No platform branch protection, rulesets, enforced CODEOWNERS or merge queue. Gates are enforced by the team's own workflows (§8.3) |
 | D11 | Agent identity | All agent actions go through the Claude GitHub App, never H's credentials, so agent PRs are not authored by H and H's approval is the real human one |
-| D12 | Local model | `qwen2.5-coder:14b` (~9 GB, fits fully in VRAM), 32k context. Host: RTX 4060 Ti 16 GB VRAM, 16 GB system RAM. Larger Qwen models (e.g. qwen3-coder:30b) need ≥ 32 GB system RAM for offload |
+| D12 | Local model | `qwen3.5:9b`, 32k context, native tool calls (P1 2026-11-14: 2/5 without fallback, no hangs or overflows). `qwen2.5-coder:14b` failed P1: through Ollama it returns tool calls as text, never as tool calls (0/5). Host: RTX 4060 Ti 16 GB VRAM, 16 GB system RAM. Larger Qwen models (e.g. qwen3-coder:30b) need ≥ 32 GB system RAM for offload |
 | D13 | Operator access | One permanent control plane (§8.4): GitHub template repo holds spec and state; a Claude Code Remote Control service on the Windows PC is H's console from any device; no per-task session linking |
 
 ---
@@ -35,7 +35,7 @@ A team of Claude agents (plus local implementer models) takes a project from bac
 - **Out (v0.2):** non-code deliverables, multi-repo work, anything work-related or tied to home systems until the pilot passes.
 
 ### 1.3 Iteration protocol
-- Base spec lives at `.agents/SPEC.md` in a template repo (`delmarolivier/agent-team-template`) and is copied into each project.
+- Base spec lives at `.agents/SPEC.md` in a template repo (`ClawWorks-Ireland/agent-team-template`) and is copied into each project.
 - Each change bumps the version and adds a Changelog line (§14): what, why (metric/incident/pilot result), affected REQ IDs.
 - Changes to the spec, `CLAUDE.md`, `REVIEW.md`, `RISK.md`, agent definitions or workflows are **Tier 2**.
 
@@ -194,7 +194,7 @@ Issue → Spec → Plan (slices) → [Local implement (≤2) → Claude implemen
   - `REQ-CFG-4b` Runner is installed as a service started at boot, so it survives logouts and reboots (lesson from SecureClaw, whose unattended jobs depended on the Windows user staying logged in).
   - `REQ-CFG-4c` Power settings: the PC runs 24x7, no operating-hours window. Sleep and hibernate are off on AC power (power plan timeouts set to 0/never); setup checks this took effect.
   - `REQ-CFG-4d` Gaming pause: a Windows scheduled task pauses the `local-llm` runner while a game is running (shared GPU); queued slices wait. The `claude-jobs` runner keeps running (it uses no GPU). If the PC is off, reviews queue too — gates are never skipped.
-  - `REQ-CFG-4e` Local harness per D9. Claude Code env for local jobs: `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, all model tiers mapped to `qwen2.5-coder:14b`, context 32k (its Ollama maximum; `OLLAMA_CONTEXT_LENGTH=32768`). Fallback jobs unset these and use the subscription token.
+  - `REQ-CFG-4e` Local harness per D9. Claude Code env for local jobs: `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, all model tiers mapped to `qwen3.5:9b`, context 32k (`OLLAMA_CONTEXT_LENGTH=32768`), and Claude Code told that window (`CLAUDE_CODE_MAX_CONTEXT_TOKENS=32768`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW=32768`). **Slim harness:** `--system-prompt` replaces the default prompt with the local implementer's own, and `--tools` offers only Read, Edit, Write, Bash, Grep, Glob (~4.9k tokens on turn one, against ~26k by default, which overflows 32k after two file reads). Never `--bare`: it would skip the policy-file hook. Fallback jobs unset these and use the subscription token.
 - `REQ-CFG-5` **Subscription auth:** Claude jobs authenticate with a Claude subscription OAuth token stored as a repo/org secret, not an API key. Verify at setup that every workflow uses it.
 - `REQ-CFG-6` Orchestrator runs on cron every 60 min, 24x7, plus event triggers (issue labelled, PR merged, check failed).
 - `REQ-CFG-7` Secrets never in agent context; deploy credentials only in the release job.
@@ -209,19 +209,20 @@ GitHub Free doesn't enforce branch protection on private repos, so the team enfo
 
 ### 8.4 Operator access (control plane)
 How H works *on* the team (setup, spec changes, troubleshooting), as opposed to the team working on projects. Goal: one durable setup, no session scaffolding.
-- `REQ-OPS-1` **State lives in GitHub.** `delmarolivier/agent-team-template` holds `.agents/SPEC.md`, decision history (Changelog) and `.agents/SETUP_REPORT.md`. Chat sessions are disposable; any session starts by reading the repo. Spec changes are Tier 2 PRs to the template repo (§1.3).
+- `REQ-OPS-1` **State lives in GitHub.** `ClawWorks-Ireland/agent-team-template` holds `.agents/SPEC.md`, decision history (Changelog) and `.agents/SETUP_REPORT.md`. Chat sessions are disposable; any session starts by reading the repo. Spec changes are Tier 2 PRs to the template repo (§1.3).
 - `REQ-OPS-2` **One console on the runner host.** The Windows PC runs Claude Code inside WSL2 as `claude remote-control --spawn worktree` in a home working folder, installed as a systemd service that starts at boot and restarts on failure. H reaches it from any device via claude.ai/code or the Claude mobile app; each conversation gets its own worktree.
 - `REQ-OPS-3` **No inbound access required for the team.** Runners connect outbound to GitHub; team jobs reach Ollama on localhost (WSL2 via mirrored networking). Ollama also stays reachable on the home LAN for the Mac's `local-models` skill and Home Assistant — H's decision (2026-11-13); setup must not change Ollama's listen address or firewall rules.
 - `REQ-OPS-4` **SSH from the Air is break-glass only** — for when the console service is down. Key-based login only; password authentication disabled in `sshd_config`.
 - `REQ-OPS-5` The console session authenticates with H's Claude subscription and acts as H. It is an operator tool, not a team role: it never approves PRs, and changes it makes to team repos go through PRs like any other change (REQ-GATE-1).
 - `REQ-OPS-9` **Unattended start:** Ollama runs as `ollama serve` from a Windows startup task that runs whether or not anyone is logged on (tray-app autostart off, so only one instance holds port 11434), and the WSL distro is started at boot by a startup task and kept running (`vmIdleTimeout=-1` in `.wslconfig`). After a reboot with nobody logged in, the console, both runners and Ollama must all come back.
+- `REQ-OPS-10` **Projects live in `ClawWorks-Ireland`.** The template repo, every project repo and each project's GitHub Project are owned by the organisation, so the Claude GitHub App can be installed once for the org (selected repos) and can reach org-owned Projects (user-owned Projects are closed to Apps). `/setup-project` expects `ClawWorks-Ireland/<repo>` and asks H before using a repo anywhere else. The org called `clawworks` is unrelated and is never used.
 - `REQ-OPS-6` The console is available 24x7 — the host never sleeps (REQ-CFG-4c). If unreachable, H uses break-glass SSH or waits; the team's queued work is unaffected.
 
 ---
 
 ## 9. Coordination
 
-- **System of record:** GitHub Issues + a GitHub Project per repo. Parent issue per feature, sub-issues per slice; PRs link with `Closes #n`.
+- **System of record:** GitHub Issues + an org-owned GitHub Project per repo (REQ-OPS-10). Parent issue per feature, sub-issues per slice; PRs link with `Closes #n`.
 - **Project status field:** Backlog → Spec → Planned → In progress → In review → Awaiting human → Cooling → Merging → Releasing → Done / Blocked.
 - **Labels:** `tier:0/1/2`, `impl:local`, `impl:claude`, `round:n`, `needs-human`, `throttled`.
 - `REQ-COORD-1` Every handoff is an issue/PR comment in this template:
@@ -331,7 +332,7 @@ Setup is driven by slash commands stored in this repo (`.claude/commands/`), so 
 
 | Step | Where | Command |
 |---|---|---|
-| 12.0 Control plane (once) | Terminal on the Air: `git clone https://github.com/delmarolivier/agent-team-template ~/agent-team && cd ~/agent-team && claude "/bootstrap-control-plane"` | `/bootstrap-control-plane` |
+| 12.0 Control plane (once) | Terminal on the Air: `git clone https://github.com/ClawWorks-Ireland/agent-team-template ~/agent-team && cd ~/agent-team && claude "/bootstrap-control-plane"` | `/bootstrap-control-plane` |
 | 12.1 Team setup (per project) | The PC console (claude.ai/code → PC session), in this repo | `/setup-project <owner/repo>` |
 
 - `REQ-OPS-7` The setup commands read this spec from the repo, never from pasted text. Changing a command is a Tier 2 change to this repo.
@@ -340,7 +341,7 @@ Setup is driven by slash commands stored in this repo (`.claude/commands/`), so 
 **Overlay for BlackJack** (`projects/blackjack/PROJECT.md`, copied to `.agents/PROJECT.md` in the project repo by `/setup-project`):
 ```
 project: BlackJack
-repo: delmarolivier/blackjack
+repo: ClawWorks-Ireland/blackjack
 autonomy_level: 0
 revert_ceiling: 3%
 wip_limit: 3
@@ -348,7 +349,7 @@ billing: subscription-only
 models:
   orchestrator: claude-opus
   spec_planner: claude-opus
-  implementer_local: ollama/qwen2.5-coder:14b   # attempts: 2, context 32k
+  implementer_local: ollama/qwen3.5:9b   # attempts: 2, context 32k, slim harness (REQ-CFG-4e)
   implementer_fallback: claude-sonnet   # attempts: 2
   reviewers: claude-sonnet
   verifiers: claude-haiku
@@ -371,15 +372,16 @@ sensitive_paths_extra: []
 ---
 
 ## 13. Open items (resume here next session)
-1. ~~Windows PC specs~~ — resolved (D12): RTX 4060 Ti 16 GB, 16 GB RAM → `qwen2.5-coder:14b`. Optional upgrade path: 32 GB+ system RAM would allow qwen3-coder:30b with offload; a larger machine (e.g. the 256GB-RAM one H was considering) would become the runner host. Decide via REQ-IMP-5 data.
-2. **Confirm D9 harness** (Claude Code + Ollama vs Qwen Code) — settled by P1 results.
+1. ~~Windows PC specs~~ — resolved (D12): RTX 4060 Ti 16 GB, 16 GB RAM → `qwen3.5:9b` (v0.12, after P1). Optional upgrade path: 32 GB+ system RAM would allow qwen3-coder:30b with offload; a larger machine (e.g. the 256GB-RAM one H was considering) would become the runner host. Decide via REQ-IMP-5 data.
+2. ~~Confirm D9 harness~~ — resolved by P1 (2026-11-14): Claude Code + Ollama, slim configuration.
 3. **BlackJack stack and deploy target:** confirmed by the setup report.
 4. **Subscription headroom:** after week 1, check throttled hours; adjust WIP limit or bug-hunter count.
-5. **Next step:** `/bootstrap-control-plane` on the Air, then `/setup-project delmarolivier/blackjack` from the PC console.
+5. **Next step:** finish the BlackJack setup checklist (ClawWorks-Ireland/blackjack#11), then merge it.
 
 ---
 
 ## 14. Changelog
+- **0.12 (2026-11-15):** H decisions after the BlackJack setup and P1. D12: the local model is now `qwen3.5:9b`. `qwen2.5-coder:14b` failed P1 (no native tool calls through Ollama, 0/5); `qwen3.5:9b` passed (2/5, no hangs or overflows) on a slim Claude Code harness, which D9 now confirms and REQ-CFG-4e specifies (replaced system prompt, six tools, real 32k window, never `--bare`). D1 + new REQ-OPS-10: all repos (template and projects) and their Projects live in the `ClawWorks-Ireland` organisation, because GitHub Apps can't write to user-owned Projects. `delmarolivier/agent-team-template` and `delmarolivier/blackjack` were transferred there on 2026-11-15; old URLs redirect. Affected: D1, D9, D12, §1.3, REQ-CFG-4e, REQ-OPS-1, REQ-OPS-10, §9, §12, §13.
 - **0.11 (2026-11-14):** H decision: run 24x7. Removed the 07:00–23:00 operating-hours window (REQ-CFG-4c, REQ-CFG-6, §9.1 cron rows, REQ-OPS-6): PC never sleeps (sleep and hibernate off on AC power), Orchestrator hourly sweep runs around the clock, console is available 24x7. Daily digest unchanged at 08:00 Europe/Dublin. `orchestrator_schedule` set to `hourly 24x7` in the BlackJack overlay and the blank template.
 - **0.10 (2026-11-13):** After Phase 1 inventory: REQ-OPS-3 keeps Ollama LAN-reachable (H's decision; Mac `local-models` skill and Home Assistant depend on it). Added REQ-OPS-9 (Ollama and WSL must run without anyone logged in).
 - **0.9 (2026-11-13):** Spec now lives in `delmarolivier/agent-team-template`. §12 prompts moved into repo slash commands (`/bootstrap-control-plane`, `/setup-project`) so nothing is pasted (REQ-OPS-7–8). BlackJack repo name corrected to `delmarolivier/blackjack`.

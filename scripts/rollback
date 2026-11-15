@@ -26,7 +26,7 @@ if [ "$PUSH" = --push ]; then
   TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
   if [ -n "$TOKEN" ]; then   # A9 in CI: push as the Claude App
     AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
-    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push "https://github.com/${GITHUB_REPOSITORY:-delmarolivier/blackjack}.git" HEAD:main
+    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push "https://github.com/${GITHUB_REPOSITORY:-ClawWorks-Ireland/blackjack}.git" HEAD:main
   else
     git push origin HEAD:main  # Delmar locally (REQ-GATE-3: H's route to main)
   fi
