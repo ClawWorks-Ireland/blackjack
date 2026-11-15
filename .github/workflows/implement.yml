@@ -50,7 +50,13 @@ jobs:
           if [ "$T" != "0" ] && [ "$ATTEMPT" = "1" ] && [ -z "$FIX_PR" ] && [ "$IMPL" = local ]; then
             echo "Throttled (REQ-CB-4a): not starting new slice #$ISSUE; A0 re-dispatches after limits reset."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          BASE=main; [ -n "$FIX_PR" ] && BASE=$(gh pr view "$FIX_PR" -R "$GITHUB_REPOSITORY" --json headRefName -q .headRefName)
+          BASE=main
+          if [ -n "$FIX_PR" ]; then
+            read -r BASE CROSS <<<"$(gh pr view "$FIX_PR" -R "$GITHUB_REPOSITORY" --json headRefName,isCrossRepository -q '"\(.headRefName) \(.isCrossRepository)"')"
+            [ "$CROSS" = false ] || { echo "fork PRs are not implemented by agents"; exit 1; }
+          fi
+          # the branch name reaches git commands: plain names only (A7 on #23)
+          git check-ref-format --branch "$BASE" >/dev/null && [[ "$BASE" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "bad base branch"; exit 1; }
           echo "go=true" >> "$GITHUB_OUTPUT"; echo "base=$BASE" >> "$GITHUB_OUTPUT"
           gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label status:in-progress --remove-label status:planned 2>/dev/null || true
 
@@ -59,6 +65,7 @@ jobs:
     if: needs.gate.outputs.go == 'true' && inputs.implementer == 'local'
     runs-on: [self-hosted, local-llm]   # queues while the PC/runner is offline; never falls back (REQ-CFG-4, T14)
     timeout-minutes: 60
+    env: { BASE: "${{ needs.gate.outputs.base }}" }   # validated in the gate job
     outputs:
       result: ${{ steps.t.outputs.result }}
     steps:
@@ -86,7 +93,7 @@ jobs:
             fi
           } > prompt.txt
       - name: Worktree (REQ-CFG-2)
-        run: git -C base worktree add -B "work/$ISSUE" "$GITHUB_WORKSPACE/wt" "origin/${{ needs.gate.outputs.base }}"
+        run: git -C base worktree add -B "work/$ISSUE" "$GITHUB_WORKSPACE/wt" "origin/$BASE"
       - name: A3a implement (Ollama, no credentials)
         id: impl
         continue-on-error: true
@@ -95,20 +102,20 @@ jobs:
         id: t
         run: |
           cd wt
-          git diff --name-only "origin/${{ needs.gate.outputs.base }}" HEAD > ../changed.txt; git status --porcelain >> ../changed.txt
+          git diff --name-only "origin/$BASE" HEAD > ../changed.txt; git status --porcelain >> ../changed.txt
           if grep -qE '^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents/|\.claude/|\.github/|scripts/gates/|scripts/agents/|scripts/rollback|evals/)' ../changed.txt; then
             echo "Diff touches a policy path" > ../test.log; echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "$(git rev-list --count "origin/${{ needs.gate.outputs.base }}..HEAD")" = 0 ]; then
+          if [ "$(git rev-list --count "origin/$BASE..HEAD")" = 0 ]; then
             if [ -n "$(git status --porcelain)" ]; then { echo "No commit made. npm test on the uncommitted work in progress:"; npm test 2>&1 || true; } > ../test.log
             else echo "No commit made and no changes" > ../test.log; fi
             echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
           if npm test > ../test.log 2>&1; then echo "result=pass" >> "$GITHUB_OUTPUT"; else echo "result=fail" >> "$GITHUB_OUTPUT"; fi
-          git format-patch "origin/${{ needs.gate.outputs.base }}" --stdout > ../commits.mbox
+          git format-patch "origin/$BASE" --stdout > ../commits.mbox
       - name: Save work in progress, committed or not, also after a timeout (incident #21)
         if: always()
         run: |
           [ -d wt ] || exit 0
-          git -C wt add -A && git -C wt diff --cached "origin/${{ needs.gate.outputs.base }}" > slice.patch || true
+          git -C wt add -A && git -C wt diff --cached "origin/$BASE" > slice.patch || true
           [ -s test.log ] || echo "No test run: the attempt ended before the tests (implement step: ${{ steps.impl.outcome }})." > test.log
       - uses: actions/upload-artifact@v4
         if: always()
@@ -121,6 +128,7 @@ jobs:
     if: needs.gate.outputs.go == 'true' && inputs.implementer == 'claude'
     runs-on: [self-hosted, claude-code]   # a model runs code here: never the runner that handles App keys (A7 on #23)
     timeout-minutes: 60
+    env: { BASE: "${{ needs.gate.outputs.base }}" }   # validated in the gate job
     outputs:
       result: ${{ steps.t.outputs.result }}
     permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: a model runs code here
@@ -154,19 +162,19 @@ jobs:
       - name: Attempt = implement + full suite; no policy paths
         id: t
         run: |
-          git diff --name-only "origin/${{ needs.gate.outputs.base }}" HEAD > changed.txt
+          git diff --name-only "origin/$BASE" HEAD > changed.txt
           if grep -qE '^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents/|\.claude/|\.github/|scripts/gates/|scripts/agents/|scripts/rollback|evals/)' changed.txt; then
             echo "Diff touches a policy path" > test.log; echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "$(git rev-list --count "origin/${{ needs.gate.outputs.base }}..HEAD")" = 0 ]; then
+          if [ "$(git rev-list --count "origin/$BASE..HEAD")" = 0 ]; then
             if [ -n "$(git status --porcelain)" ]; then { echo "No commit made. npm test on the uncommitted work in progress:"; npm test 2>&1 || true; } > test.log
             else echo "No commit made and no changes" > test.log; fi
             echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
           if npm test > test.log 2>&1; then echo "result=pass" >> "$GITHUB_OUTPUT"; else echo "result=fail" >> "$GITHUB_OUTPUT"; fi
-          git format-patch "origin/${{ needs.gate.outputs.base }}" --stdout > commits.mbox
+          git format-patch "origin/$BASE" --stdout > commits.mbox
       - name: Save work in progress, committed or not, also after a timeout (incident #21)
         if: always()
         run: |
-          git add -A && git diff --cached "origin/${{ needs.gate.outputs.base }}" > slice.patch || true
+          git add -A && git diff --cached "origin/$BASE" > slice.patch || true
           [ -s test.log ] || echo "No test run: the attempt ended before the tests (Claude step: ${{ steps.claude.outcome }})." > test.log
       - uses: actions/upload-artifact@v4
         if: always()
@@ -183,6 +191,7 @@ jobs:
     if: always() && (needs.local.outputs.result == 'pass' || needs.claude.outputs.result == 'pass')
     runs-on: [self-hosted, claude-code]   # a model runs code here: never the runner that handles App keys (A7 on #23)
     timeout-minutes: 30
+    env: { BASE: "${{ needs.gate.outputs.base }}" }   # validated in the gate job
     outputs:
       pass: ${{ steps.v.outputs.pass }}
     permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: a model runs code here
@@ -194,7 +203,7 @@ jobs:
       - id: s
         run: |
           git -c user.name=a4 -c user.email=a4@local am --3way attempt/commits.mbox
-          git diff "origin/${{ needs.gate.outputs.base }}" HEAD > slice.diff
+          git diff "origin/$BASE" HEAD > slice.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json"))')" >> "$GITHUB_OUTPUT"
       - id: claude
         uses: anthropics/claude-code-action@v1
