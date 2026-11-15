@@ -207,6 +207,15 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
 // ---------------------------------------------------------------- main-guard
 
 /**
+ * main-guard is armed for a commit only if the commit's parent contains this
+ * marker. The PR that adds it (bootstrap) is therefore exempt, and every commit
+ * after it is judged. Removing the marker is a Tier 2 change (.github/**).
+ */
+const GUARD_MARKER = '.github/main-guard.active';
+/** `hasFile(rev, path)` → true if the file exists at that revision. */
+const guardActiveFor = (hasFile, sha) => hasFile(`${sha}^`, GUARD_MARKER);
+
+/**
  * The commits main-guard judges (REQ-GATE-2): only those that landed on main
  * itself, i.e. its first-parent history. Commits that arrive through a merge's
  * second parent are covered by the merge commit's own verdict (an A9 merge
@@ -229,7 +238,7 @@ function guardCommits(git, { before, after, since, ref = 'origin/main' } = {}) {
  *  - anything before main-guard existed on main (bootstrap: guardActive false).
  */
 function guardVerdict({ sha, guardActive, pr, headStatuses = [], exactRevertOf = null, message = '' }) {
-  if (!guardActive) return { allowed: true, why: 'main-guard was not on main before this commit (bootstrap)' };
+  if (!guardActive) return { allowed: true, why: `${GUARD_MARKER} was not on main before this commit (bootstrap)` };
   if (exactRevertOf && /^(Rollback-of|Main-guard-revert): [0-9a-f]{7,40}$/m.test(message)) {
     return { allowed: true, why: `exact revert of ${exactRevertOf.slice(0, 7)}` };
   }
@@ -299,6 +308,6 @@ module.exports = {
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
-  trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer,
+  trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
   dublinHour, decideFindings, isUsageLimited, nextRung,
 };

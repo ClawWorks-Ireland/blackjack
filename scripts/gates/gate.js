@@ -180,7 +180,7 @@ const commands = {
     }
     const violations = [];
     for (const sha of shas) {
-      const guardActive = gitOk('cat-file', '-e', `${sha}^:.github/workflows/main-guard.yml`);
+      const guardActive = G.guardActiveFor((rev, p) => gitOk('cat-file', '-e', `${rev}:${p}`), sha);
       const message = git('log', '-1', '--format=%B', sha);
       const prs = await gh('GET', repo(`/commits/${sha}/pulls`));
       const pr = prs.find((p) => p.merge_commit_sha === sha) || null;

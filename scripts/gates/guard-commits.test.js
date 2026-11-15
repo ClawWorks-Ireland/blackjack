@@ -63,3 +63,18 @@ test('incident #12: a merge followed by a direct push selects the merge and the 
     assert.deepEqual(G.guardCommits(r.git, { before, after: direct }), [merge, direct]);
   } finally { r.done(); }
 });
+
+test('main-guard is armed only after the commit that adds .github/main-guard.active (re-bootstrap)', () => {
+  const r = repo();
+  try {
+    r.commit('base');
+    fs.mkdirSync(path.join(r.dir, '.github'), { recursive: true });
+    fs.writeFileSync(path.join(r.dir, '.github/main-guard.active'), 'armed\n');
+    const arming = r.commit('add marker');   // its parent lacks the marker → exempt
+    const next = r.commit('later push');     // its parent has it → judged
+    const has = (rev, p) => { try { r.git('cat-file', '-e', `${rev}:${p}`); return true; } catch { return false; } };
+    assert.equal(G.guardActiveFor(has, arming), false);
+    assert.equal(G.guardActiveFor(has, next), true);
+    assert.equal(G.GUARD_MARKER, '.github/main-guard.active');
+  } finally { r.done(); }
+});
