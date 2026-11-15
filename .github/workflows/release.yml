@@ -34,7 +34,7 @@ jobs:
 
   rollback:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

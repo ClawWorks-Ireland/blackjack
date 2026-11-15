@@ -53,7 +53,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/security-reviewer.md --model opus --max-turns 40
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
       - name: Blocking status
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }

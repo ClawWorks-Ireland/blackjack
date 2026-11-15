@@ -43,7 +43,7 @@ jobs:
   act:
     needs: plan
     if: needs.plan.outputs.action == 'merge' || needs.plan.outputs.action == 'update'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     permissions:   # read-only GITHUB_TOKEN for gate.js reads; writes use the App token
       contents: read

@@ -55,7 +55,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/risk-classifier.md --model haiku --max-turns 15
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.floor.outputs.schema }}'
       - name: Label and rationale (REQ-RISK-2)
         env:

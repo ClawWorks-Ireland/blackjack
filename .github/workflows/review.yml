@@ -92,7 +92,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/bug-hunter-${{ matrix.lens }}.md --model sonnet --max-turns 40
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
       - env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
         run: |
@@ -151,7 +151,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/finding-verifier.md --model haiku --max-turns 40
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
       - env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
         run: |

@@ -163,7 +163,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(npm test:*),Bash(node --test:*),Bash(node macos/scripts/embed-engine.js:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh pr view:*)"
-            --disallowedTools "Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
       - name: Attempt = implement + full suite; no policy paths
         id: t
         run: |
@@ -222,7 +222,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/self-verifier.md --model sonnet --max-turns 40
             --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
             --json-schema '${{ steps.s.outputs.schema }}'
       - id: v
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
@@ -242,7 +242,7 @@ jobs:
   publish:
     needs: [gate, verify]
     if: always() && needs.verify.outputs.pass == 'true'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     permissions:   # read-only GITHUB_TOKEN for gate.js reads; writes use the App token
       contents: read

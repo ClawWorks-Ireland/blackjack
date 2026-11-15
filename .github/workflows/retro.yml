@@ -62,7 +62,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/incident-retro.md --model opus --max-turns 120
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git checkout -b agent/retro-:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(git diff:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh run list:*),Bash(gh api -X GET:*),Bash(npm test:*)"
-            --disallowedTools "Bash(git push:*),Bash(gh pr create:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh issue comment:*),Bash(gh issue create:*)"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr create:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh issue comment:*),Bash(gh issue create:*)"
       - name: Package the proposal commits
         if: always()
         run: |
@@ -81,7 +81,7 @@ jobs:
   a10-publish:
     needs: [route, a10]
     if: always() && needs.route.outputs.mode != '' && needs.a10.result != 'skipped'
-    runs-on: [self-hosted, claude-jobs]   # holds A10's key; no model runs in this job
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 10
     permissions: { contents: read, issues: write }
     steps:
