@@ -136,6 +136,10 @@ jobs:
           private-key: ${{ secrets.A3B_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          # this job runs code but never writes to GitHub (publish does): read-only (A7 on #23)
+          permission-contents: read
+          permission-issues: read
+          permission-pull-requests: read
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -285,7 +289,8 @@ jobs:
           # (runner lost, gaming pause, job timeout) re-runs the same rung once; otherwise the next
           # rung gets this run's `attempt` artifact (incident #21).
           export JOB="${{ inputs.implementer == 'local' && needs.local.result || needs.claude.result }}" RETRY="$RETRY" HANDOFF="$HANDOFF_RUN"
-          NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF })))')
+          export HAS_ART=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -q '[.artifacts[]|select(.name=="attempt")]|length' 2>/dev/null || echo 0)
+          NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF, hasArtifact: Number(e.HAS_ART) > 0 })))')
           field() { node -p "String(JSON.parse(process.argv[1]).$1 ?? '')" "$NEXT"; }
           if [ "$(field infra)" = true ]; then
             gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="$(field handoffRun)" -f retry=1

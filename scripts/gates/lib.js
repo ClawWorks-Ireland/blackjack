@@ -319,6 +319,7 @@ function isUsageLimited(text) {
  *   ctx.retry      infra retries of this rung so far (0 or 1)
  *   ctx.run        this run's id: its `attempt` artifact holds the work in progress
  *   ctx.handoffRun the run whose artifact this attempt was given, if any
+ *   ctx.hasArtifact whether this run uploaded an `attempt` artifact (its work in progress)
  * An infra failure (runner lost, gaming pause, job timeout) re-runs the same rung once
  * with the hand-off it already had. Otherwise the next rung gets THIS attempt's
  * slice.patch + test.log (local→local, local→Claude, Claude→Claude), as hints for a
@@ -328,7 +329,9 @@ function nextRung(implementer, attempt, ctx = {}) {
   const run = ctx.run ? String(ctx.run) : '';
   const inherited = ctx.handoffRun ? String(ctx.handoffRun) : '';
   if ((ctx.job === 'failure' || ctx.job === 'cancelled') && Number(ctx.retry || 0) === 0) {
-    return { implementer, attempt, handoffRun: inherited, retry: 1, infra: true };
+    // Prefer this run's own saved work in progress (saved even after a timeout); fall back to
+    // the hand-off it already had if the run left no `attempt` artifact (runner lost early).
+    return { implementer, attempt, handoffRun: ctx.hasArtifact && run ? run : inherited, retry: 1, infra: true };
   }
   if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1, handoffRun: run, retry: 0 };
   if (implementer === 'local') return { implementer: 'claude', attempt: 1, handoffRun: run, retry: 0 };

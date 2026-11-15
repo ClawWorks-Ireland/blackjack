@@ -244,6 +244,11 @@ test('T11 ladder: infra failure re-runs the same rung once with the hand-off it 
     assert.deepEqual(G.nextRung('local', 2, { job, retry: '0', run: '300' }),
       { implementer: 'local', attempt: 2, handoffRun: '', retry: 1, infra: true });
   }
+  // #23 review: an infra retry gets this run's own saved work in progress when it has one
+  assert.deepEqual(G.nextRung('local', 1, { job: 'cancelled', retry: 0, run: 'R1', handoffRun: '', hasArtifact: true }),
+    { implementer: 'local', attempt: 1, handoffRun: 'R1', retry: 1, infra: true });
+  assert.deepEqual(G.nextRung('claude', 1, { job: 'failure', retry: 0, run: '300', handoffRun: '200', hasArtifact: false }),
+    { implementer: 'claude', attempt: 1, handoffRun: '200', retry: 1, infra: true });
   // Second infra failure advances, handing over that run's saved work in progress
   assert.deepEqual(G.nextRung('claude', 1, { job: 'failure', retry: 1, run: '301', handoffRun: '200' }),
     { implementer: 'claude', attempt: 2, handoffRun: '301', retry: 0 });
