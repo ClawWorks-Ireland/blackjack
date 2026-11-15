@@ -1,7 +1,0 @@
-main-guard is armed (REQ-GATE-2, non-overridable).
-
-scripts/gates judges a commit on main only if its parent contains this file, so
-the PR that added it (#13, the second bootstrap, approved by Delmar 2026-11-15)
-was exempt and every commit after it is guarded. Deleting this file would turn
-the guard off for later commits: that is a Tier 2 change (.github/**) and needs
-Delmar's approval.

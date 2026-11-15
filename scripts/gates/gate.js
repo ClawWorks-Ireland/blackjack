@@ -29,6 +29,10 @@ const G = require('./lib.js');
 
 const REPO = process.env.GITHUB_REPOSITORY || 'ClawWorks-Ireland/blackjack';
 const TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+// Reads (statuses, checks, reviews) may use a separate read-only token: the Claude App
+// token can't read commit statuses (403), so A9's re-verification reads with the job's
+// read-only GITHUB_TOKEN and only the merge itself uses the App token.
+const READ_TOKEN = process.env.GATE_READ_TOKEN || TOKEN;
 const API = process.env.GITHUB_API_URL || 'https://api.github.com';
 const RUN_URL = process.env.GITHUB_RUN_ID
   ? `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${REPO}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined;
@@ -38,7 +42,7 @@ async function gh(method, url, body) {
   const res = await fetch(url.startsWith('http') ? url : `${API}${url}`, {
     method,
     headers: {
-      authorization: `Bearer ${TOKEN}`, accept: 'application/vnd.github+json',
+      authorization: `Bearer ${method === 'GET' ? READ_TOKEN : TOKEN}`, accept: 'application/vnd.github+json',
       'x-github-api-version': '2022-11-28', 'content-type': 'application/json', 'user-agent': 'blackjack-gates',
     },
     body: body ? JSON.stringify(body) : undefined,

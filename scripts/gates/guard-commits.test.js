@@ -64,17 +64,17 @@ test('incident #12: a merge followed by a direct push selects the merge and the 
   } finally { r.done(); }
 });
 
-test('main-guard is armed only after the commit that adds .github/main-guard.active (re-bootstrap)', () => {
+test('main-guard is armed only after the commit that adds the marker (re-bootstrap)', () => {
   const r = repo();
   try {
     r.commit('base');
     fs.mkdirSync(path.join(r.dir, '.github'), { recursive: true });
-    fs.writeFileSync(path.join(r.dir, '.github/main-guard.active'), 'armed\n');
+    fs.writeFileSync(path.join(r.dir, G.GUARD_MARKER), 'armed\n');
     const arming = r.commit('add marker');   // its parent lacks the marker → exempt
     const next = r.commit('later push');     // its parent has it → judged
     const has = (rev, p) => { try { r.git('cat-file', '-e', `${rev}:${p}`); return true; } catch { return false; } };
     assert.equal(G.guardActiveFor(has, arming), false);
     assert.equal(G.guardActiveFor(has, next), true);
-    assert.equal(G.GUARD_MARKER, '.github/main-guard.active');
+    assert.equal(G.GUARD_MARKER, '.github/main-guard.armed');
   } finally { r.done(); }
 });

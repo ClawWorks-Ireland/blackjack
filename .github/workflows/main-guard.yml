@@ -57,6 +57,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
           prompt: |
             main-guard found commits on main that did not come through A9's merge path. Run exactly this command and report its output. Do nothing else:
             ${{ steps.cmd.outputs.run }}

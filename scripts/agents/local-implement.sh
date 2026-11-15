@@ -14,7 +14,11 @@
 # Not --bare: that would also skip the policy-guard hook.
 set -euo pipefail
 BASE="$(cd "$(dirname "$0")/../.." && pwd)"
-WT="$(cd "$1" && pwd)"; PROMPT_FILE="$2"; LOG="$3"
+# Resolve every path before the `cd "$WT"` below: relative prompt/log paths
+# would otherwise point inside the worktree (incident #16).
+abspath() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
+WT="$(cd "$1" && pwd)"; PROMPT_FILE="$(abspath "$2")"; LOG="$(abspath "$3")"
+[ -r "$PROMPT_FILE" ] && [ -s "$PROMPT_FILE" ] || { echo "Prompt file missing or empty: $PROMPT_FILE" >&2; exit 2; }
 : "${LOCAL_TIMEOUT_MIN:=45}" "${LOCAL_MAX_TURNS:=60}" "${LOCAL_MODEL:=qwen3.5:9b}"
 
 curl -sf -m 5 http://localhost:11434/api/version >/dev/null || { echo "Ollama not reachable on localhost:11434" >&2; exit 3; }

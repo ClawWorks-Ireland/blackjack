@@ -37,6 +37,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
           # Read-only role: no write tools, so it gets GITHUB_TOKEN and skips the
           # Claude App token exchange, which rejects pull_request_target (401 Invalid OIDC token).
           github_token: ${{ github.token }}
