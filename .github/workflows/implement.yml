@@ -241,8 +241,6 @@ jobs:
         with: { ref: main, fetch-depth: 0, persist-credentials: false, clean: true }
       - uses: actions/download-artifact@v4
         with: { name: attempt, path: attempt }
-      - id: cmd
-        run: echo "run=node scripts/gates/gate.js publish --patch attempt/commits.mbox --issue $ISSUE --implementer $IMPL${FIX_PR:+ --pr $FIX_PR}" >> "$GITHUB_OUTPUT"
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
@@ -254,20 +252,11 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write
-      - uses: anthropics/claude-code-action@v1
-        env: { GATE_READ_TOKEN: "${{ github.token }}" }
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ steps.app.outputs.token }}
-          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
-          prompt: |
-            Run exactly this command and report its output. Do nothing else:
-            ${{ steps.cmd.outputs.run }}
-          claude_args: >-
-            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
-            --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
-
+      - name: Publish the verified slice (fixed script, no model; A7 on #23)
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          GATE_READ_TOKEN: ${{ github.token }}
+        run: node scripts/gates/gate.js publish --patch attempt/commits.mbox --issue "$ISSUE" --implementer "$IMPL" ${FIX_PR:+--pr "$FIX_PR"}
   ladder:
     needs: [gate, local, claude, verify, publish]
     if: always() && needs.gate.outputs.go == 'true' && needs.publish.result != 'success'

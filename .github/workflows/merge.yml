@@ -54,13 +54,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false, clean: true }
-      - id: cmd
-        run: |
-          if [ "${{ needs.plan.outputs.action }}" = merge ]; then
-            echo "run=node scripts/gates/gate.js merge-execute --pr ${{ needs.plan.outputs.pr }} --sha ${{ needs.plan.outputs.sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=node scripts/gates/gate.js update-branch --pr ${{ needs.plan.outputs.pr }}" >> "$GITHUB_OUTPUT"
-          fi
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
@@ -74,23 +67,21 @@ jobs:
           permission-statuses: read
           permission-checks: read
           permission-workflows: write
-      - id: claude
-        uses: anthropics/claude-code-action@v1
-        env: { GATE_READ_TOKEN: "${{ github.token }}" }
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ steps.app.outputs.token }}
-          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
-          prompt: |
-            Run exactly this one command and report its output. Do nothing else:
-            ${{ steps.cmd.outputs.run }}
-          claude_args: >-
-            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
-            --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
-      - if: failure() && steps.claude.outcome == 'failure'
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+      - name: Merge or update the branch (fixed script, no model; A7 on #23)
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          GATE_READ_TOKEN: ${{ github.token }}
+          ACTION: ${{ needs.plan.outputs.action }}
+          PR: ${{ needs.plan.outputs.pr }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "bad pr"; exit 1; }
+          if [ "$ACTION" = merge ]; then
+            [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "bad sha"; exit 1; }
+            node scripts/gates/gate.js merge-execute --pr "$PR" --sha "$SHA"
+          else
+            node scripts/gates/gate.js update-branch --pr "$PR"
+          fi
 
   notes:
     needs: [plan, act]
