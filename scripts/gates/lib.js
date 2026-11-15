@@ -7,7 +7,7 @@
  * Trust model: only statuses created by `github-actions[bot]` (deterministic
  * workflow steps using GITHUB_TOKEN) count as gate results, and only reviews by
  * the owner count as human approvals. Agents write as the Claude GitHub App
- * (`claude[bot]`), so nothing they post can satisfy a gate (REQ-ROLE-4).
+ * (their own Apps, spec §8.5), so nothing they post can satisfy a gate (REQ-ROLE-4).
  */
 
 const OWNER = 'delmarolivier';
@@ -219,7 +219,7 @@ const guardActiveFor = (hasFile, sha) => hasFile(`${sha}^`, GUARD_MARKER);
  * The commits main-guard judges (REQ-GATE-2): only those that landed on main
  * itself, i.e. its first-parent history. Commits that arrive through a merge's
  * second parent are covered by the merge commit's own verdict (an A9 merge
- * needs claude[bot] + trusted merge-evidence), so judging them again flags
+ * needs MERGE_BOT + trusted merge-evidence), so judging them again flags
  * every branch commit of a legitimate merge as a "direct push" (incident #12).
  * `git` runs a git command and returns stdout. Push mode: before..after.
  * Sweep mode: first-parent commits on `ref` since `since` (ISO date). Oldest first.
@@ -231,7 +231,7 @@ function guardCommits(git, { before, after, since, ref = 'origin/main' } = {}) {
 
 /**
  * REQ-GATE-2: is a commit on main allowed? Allowed are:
- *  - an A9 squash merge: the commit's PR was merged by claude[bot] at this sha,
+ *  - an A9 squash merge: the commit's PR was merged by MERGE_BOT (A9's App) at this sha,
  *    and its head carries a trusted green `merge-evidence` status;
  *  - an exact revert (scripts/rollback or main-guard's own revert), proved by
  *    the caller replaying the revert (`exactRevertOf` = the reverted sha);

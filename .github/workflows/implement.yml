@@ -25,6 +25,8 @@ env:
   IMPL: ${{ inputs.implementer }}
   ATTEMPT: ${{ inputs.attempt }}
   FIX_PR: ${{ inputs.pr }}
+  HANDOFF_RUN: ${{ inputs.handoff_run }}
+  RETRY: ${{ inputs.retry }}
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -34,6 +36,14 @@ jobs:
       base: ${{ steps.g.outputs.base }}
     env: { GITHUB_TOKEN: "${{ github.token }}" }
     steps:
+      - name: Validate dispatch inputs (they reach shells; A7 sec-1 on #23)
+        run: |
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "bad issue: $ISSUE"; exit 1; }
+          [[ "$IMPL" =~ ^(local|claude)$ ]] || { echo "bad implementer"; exit 1; }
+          [[ "$ATTEMPT" =~ ^[12]$ ]] || { echo "bad attempt"; exit 1; }
+          [[ -z "$FIX_PR" || "$FIX_PR" =~ ^[0-9]+$ ]] || { echo "bad pr"; exit 1; }
+          [[ -z "$HANDOFF_RUN" || "$HANDOFF_RUN" =~ ^[0-9]+$ ]] || { echo "bad handoff_run"; exit 1; }
+          [[ "$RETRY" =~ ^[01]$ ]] || { echo "bad retry"; exit 1; }
       - id: g
         run: |
           T=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length)
@@ -59,7 +69,7 @@ jobs:
       - name: Handoff from the previous attempt (REQ-FLOW-7, incident #21)
         if: inputs.handoff_run != ''
         env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: gh run download "${{ inputs.handoff_run }}" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+        run: gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
       - name: Prompt (slice + review findings for a fix round + previous attempt)
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: |
@@ -118,7 +128,7 @@ jobs:
       - name: Handoff context from the previous attempt (REQ-FLOW-7, incident #21)
         if: inputs.handoff_run != ''
         env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: gh run download "${{ inputs.handoff_run }}" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+        run: gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@v2
         with:
@@ -189,6 +199,9 @@ jobs:
           private-key: ${{ secrets.A4_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          # read-only role: ask for read-only, whatever the App was granted (A7 sec-2 on #23)
+          permission-contents: read
+          permission-pull-requests: read
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -271,7 +284,7 @@ jobs:
           # The rung and its hand-off are decided in lib.js nextRung (unit-tested). Infra failure
           # (runner lost, gaming pause, job timeout) re-runs the same rung once; otherwise the next
           # rung gets this run's `attempt` artifact (incident #21).
-          export JOB="${{ inputs.implementer == 'local' && needs.local.result || needs.claude.result }}" RETRY="${{ inputs.retry }}" HANDOFF="${{ inputs.handoff_run }}"
+          export JOB="${{ inputs.implementer == 'local' && needs.local.result || needs.claude.result }}" RETRY="$RETRY" HANDOFF="$HANDOFF_RUN"
           NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF })))')
           field() { node -p "String(JSON.parse(process.argv[1]).$1 ?? '')" "$NEXT"; }
           if [ "$(field infra)" = true ]; then

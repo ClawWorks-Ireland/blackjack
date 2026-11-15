@@ -29,13 +29,14 @@ jobs:
         env:
           MSG: ${{ github.event.head_commit.message }}
           LABEL: ${{ github.event.label.name }}
+          IN_INCIDENT: ${{ inputs.incident }}
         run: |
           M=""
           case "${{ github.event_name }}" in
             issues) [ "$LABEL" = incident ] && M=incident ;;
             push) printf '%s' "$MSG" | grep -qE '^(Rollback-of|Main-guard-revert): ' && M=revert ;;
             schedule) M=weekly ;;
-            workflow_dispatch) M=$([ -n "${{ inputs.incident }}" ] && echo incident || echo weekly) ;;
+            workflow_dispatch) [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }; M=$([ -n "$IN_INCIDENT" ] && echo incident || echo weekly) ;;
           esac
           echo "mode=$M" >> "$GITHUB_OUTPUT"
   a10:

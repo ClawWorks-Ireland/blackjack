@@ -78,6 +78,9 @@ jobs:
           private-key: ${{ secrets.A5_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          # read-only role: ask for read-only, whatever the App was granted (A7 sec-2 on #23)
+          permission-contents: read
+          permission-pull-requests: read
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -134,6 +137,9 @@ jobs:
           private-key: ${{ secrets.A6_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          # read-only role: ask for read-only, whatever the App was granted (A7 sec-2 on #23)
+          permission-contents: read
+          permission-pull-requests: read
       - id: claude
         if: steps.s.outputs.n != '0'
         uses: anthropics/claude-code-action@v1

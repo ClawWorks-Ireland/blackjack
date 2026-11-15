@@ -30,14 +30,18 @@ jobs:
           LABEL: ${{ github.event.label.name }}
           SENDER: ${{ github.event.sender.login }}
           IS_FEATURE: ${{ contains(github.event.issue.labels.*.name, 'enhancement') }}
+          IN_ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          IN_ROLE: ${{ inputs.role }}
         run: |
-          ISSUE="${{ github.event.issue.number || inputs.issue }}"; ROLE="${{ inputs.role }}"
+          ISSUE="$IN_ISSUE"; ROLE="$IN_ROLE"
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "bad issue: $ISSUE"; exit 1; }
+          [[ -z "$ROLE" || "$ROLE" =~ ^(spec|plan)$ ]] || { echo "bad role"; exit 1; }
           LEVEL=$(node scripts/gates/gate.js level)
           case "$LABEL" in
             needs-spec)   ROLE=spec ;;
             needs-replan) ROLE=plan ;;
             spec-approved)
-              if [ "$SENDER" = delmarolivier ] || { [ "$LEVEL" -ge 2 ] && [ "$IS_FEATURE" != true ] && [ "$SENDER" = 'claude[bot]' ]; }; then ROLE=plan
+              if [ "$SENDER" = delmarolivier ] || { [ "$LEVEL" -ge 2 ] && [ "$IS_FEATURE" != true ] && [ "$SENDER" = 'clawworks-orchestrator[bot]' ]; }; then ROLE=plan
               else echo "spec-approved by $SENDER doesn't count at Level $LEVEL"; ROLE=""; fi ;;
           esac
           echo "role=$ROLE" >> "$GITHUB_OUTPUT"; echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
