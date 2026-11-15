@@ -254,3 +254,16 @@ test('T11 ladder: infra failure re-runs the same rung once with the hand-off it 
     { implementer: 'claude', attempt: 2, handoffRun: '301', retry: 0 });
   assert.deepEqual(G.nextRung('claude', 2, { job: 'failure', retry: 1, run: '302' }), { replan: true });
 });
+
+test('fix rounds only push to agent-owned slice PRs (A7 on #23)', () => {
+  const R = 'ClawWorks-Ireland/blackjack';
+  const ok = { state: 'open', user: { login: 'clawworks-local-coder[bot]' }, head: { ref: 'agent/15-local', repo: { full_name: R } } };
+  assert.equal(G.fixRoundRefusal(ok, R), '');
+  assert.equal(G.fixRoundRefusal({ ...ok, head: { ...ok.head, ref: 'agent/15-claude' }, user: { login: 'clawworks-claude-coder[bot]' } }, R), '');
+  assert.match(G.fixRoundRefusal({ ...ok, head: { ...ok.head, ref: 'main' } }, R), /not an agent slice branch/);
+  assert.match(G.fixRoundRefusal({ ...ok, head: { ...ok.head, ref: 'agent-team/identities' } }, R), /not an agent slice branch/);
+  assert.match(G.fixRoundRefusal({ ...ok, user: { login: 'clawworks-console[bot]' } }, R), /not a coder App/);
+  assert.match(G.fixRoundRefusal({ ...ok, user: { login: 'delmarolivier' } }, R), /not a coder App/);
+  assert.match(G.fixRoundRefusal({ ...ok, head: { ...ok.head, repo: { full_name: 'someone/fork' } } }, R), /not in this repo/);
+  assert.match(G.fixRoundRefusal({ ...ok, state: 'closed' }, R), /not open/);
+});

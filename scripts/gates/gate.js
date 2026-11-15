@@ -267,6 +267,8 @@ commands.publish = async () => {
   git('config', 'user.email', `${author}@users.noreply.github.com`);
   if (args.pr) {
     const pr = await gh('GET', repo(`/pulls/${args.pr}`));
+    const why = G.fixRoundRefusal(pr, REPO);
+    if (why) throw new Error(`refusing fix round on #${args.pr}: ${why}`);
     git('fetch', 'origin', pr.head.ref); git('checkout', '-B', pr.head.ref, `origin/${pr.head.ref}`);
     git('am', '--3way', args.patch);
     refusePolicyPaths(`origin/${pr.head.ref}`);   // only the commits this patch adds

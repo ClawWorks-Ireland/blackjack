@@ -36,6 +36,8 @@ jobs:
       base: ${{ steps.g.outputs.base }}
     env: { GITHUB_TOKEN: "${{ github.token }}" }
     steps:
+      - uses: actions/checkout@v4   # for scripts/gates/lib.js
+        with: { persist-credentials: false }
       - name: Validate dispatch inputs (they reach shells; A7 sec-1 on #23)
         run: |
           [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "bad issue: $ISSUE"; exit 1; }
@@ -52,8 +54,10 @@ jobs:
           fi
           BASE=main
           if [ -n "$FIX_PR" ]; then
-            read -r BASE CROSS <<<"$(gh pr view "$FIX_PR" -R "$GITHUB_REPOSITORY" --json headRefName,isCrossRepository -q '"\(.headRefName) \(.isCrossRepository)"')"
-            [ "$CROSS" = false ] || { echo "fork PRs are not implemented by agents"; exit 1; }
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$FIX_PR" > fixpr.json
+            WHY=$(node -e 'console.log(require("./scripts/gates/lib.js").fixRoundRefusal(require("./fixpr.json"), process.env.GITHUB_REPOSITORY))')
+            [ -z "$WHY" ] || { echo "refusing fix round on #$FIX_PR: $WHY"; exit 1; }
+            BASE=$(node -p 'require("./fixpr.json").head.ref')
           fi
           # the branch name reaches git commands: plain names only (A7 on #23)
           git check-ref-format --branch "$BASE" >/dev/null && [[ "$BASE" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "bad base branch"; exit 1; }
@@ -65,6 +69,7 @@ jobs:
     if: needs.gate.outputs.go == 'true' && inputs.implementer == 'local'
     runs-on: [self-hosted, local-llm]   # queues while the PC/runner is offline; never falls back (REQ-CFG-4, T14)
     timeout-minutes: 60
+    permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: the local model\'s code runs here (A7 on #23)
     env: { BASE: "${{ needs.gate.outputs.base }}" }   # validated in the gate job
     outputs:
       result: ${{ steps.t.outputs.result }}

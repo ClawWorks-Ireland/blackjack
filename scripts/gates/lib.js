@@ -351,6 +351,20 @@ const changedPaths = (git, base, head = 'HEAD') =>
   [...new Set(git('diff', '--name-only', '--no-renames', base, head).split('\n').map((x) => x.trim()).filter(Boolean))];
 const policyViolations = (paths, re = POLICY_RE) => paths.filter((f) => re.test(f));
 
+/** The coder Apps that open slice PRs (spec §8.5). */
+const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
+/**
+ * A fix round may only push to an agent-owned slice PR (A7 on #23): open, same repo, opened
+ * by a coder App, on a branch named agent/<issue>-local|claude. Returns a reason, or '' if OK.
+ */
+function fixRoundRefusal(pr, repoFullName) {
+  if (!pr || pr.state !== 'open') return 'PR is not open';
+  if (!pr.head || !pr.head.repo || pr.head.repo.full_name !== repoFullName) return 'head is not in this repo';
+  if (!/^agent\/\d+-(local|claude)$/.test(pr.head.ref || '')) return `branch ${pr.head && pr.head.ref} is not an agent slice branch`;
+  if (!pr.user || !CODER_BOTS.includes(pr.user.login)) return `PR was opened by ${pr.user && pr.user.login}, not a coder App`;
+  return '';
+}
+
 // ---------------------------------------------------------------- misc
 
 /** Parse "Rollback-of: <sha>" / "Main-guard-revert: <sha>" trailers. */
@@ -370,5 +384,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, decideFindings, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations,
+  dublinHour, decideFindings, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal,
 };
