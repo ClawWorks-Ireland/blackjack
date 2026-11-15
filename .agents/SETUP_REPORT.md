@@ -116,3 +116,10 @@ The template moved to v0.11 (24x7) while this setup ran. Applied here: `.agents/
   - **Console-opened PRs are authored by Delmar,** and GitHub won't let him approve them, so `tier-approval` can't pass on them. A Delmar commit on a bot-opened PR works, and also makes the gates run with a human actor.
   - Until #17 merges, bot-triggered runs (including A9's `merge.yml` act step) are refused, so the merge of #17 is started by hand (`workflow_dispatch` by Delmar, a human actor) and still goes through A9's checks.
 
+
+## Per-agent GitHub identities (spec v0.13, 2026-11-15)
+- **13 GitHub Apps created** in ClawWorks-Ireland by Delmar with `scripts/github-apps/create-apps.js` (template repo), all installed on all org repos. The 12 agent Apps' ID/key/slug are repository secrets here (`A0_APP_*` … `A10_APP_*`, `A3A_`/`A3B_`). The console App's key is on the PC (`~/.config/clawworks/`, mode 600).
+- **Token scope checked (REQ-OPS-10, REQ-ID-1):** a console App token requested for `blackjack` reaches only `ClawWorks-Ireland/blackjack`, with exactly contents/issues/pull-requests write + metadata read. The agent Apps are checked on their first workflow runs.
+- **First console-App PR:** #23 (identity switch + A10's #21/#20 fixes) was opened by `clawworks-console[bot]`, so Delmar can approve it; console PRs are no longer authored by him.
+- **Fourth (last) bootstrap:** #23 changes workflows, and `main` still merges with the Claude App, which lacks `workflows`. So Delmar merges #23 by hand, and the marker becomes `.github/main-guard.lock`. From then on, A9 merges as `clawworks-release-manager[bot]` (which holds `workflows`), including workflow changes.
+- **PC maintenance:** `gh` from GitHub's apt repo (2.104.0), `unzip` installed, Ubuntu upgraded 2026-11-15 (systemd 259.9). The console keeps Ubuntu current (Delmar's instruction).
