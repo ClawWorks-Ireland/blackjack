@@ -95,7 +95,7 @@ jobs:
           node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(j.findings))process.exit(1)' "out/${{ matrix.lens }}.json"
       - uses: actions/upload-artifact@v4
         with: { name: "findings-${{ matrix.lens }}", path: out/, retention-days: 30 }
-      - if: failure()
+      - if: failure() && steps.claude.outcome == 'failure'
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 
@@ -147,7 +147,7 @@ jobs:
           node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(j.votes))process.exit(1)' "out/votes-${{ matrix.voter }}.json"
       - uses: actions/upload-artifact@v4
         with: { name: "votes-${{ matrix.voter }}", path: out/, retention-days: 30 }
-      - if: failure()
+      - if: failure() && steps.claude.outcome == 'failure'
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 

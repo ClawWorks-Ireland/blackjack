@@ -278,15 +278,61 @@ function decideFindings(candidates, voteSets, { quorum } = {}) {
   return { kept, dropped, important: kept.filter((k) => k.severity === 'Important') };
 }
 
-/** REQ-CB-4: does a Claude run's output show a subscription usage limit? */
-const USAGE_LIMIT_RE = /usage limit|limit reached|rate[ _-]?limit(ed)?|5-hour limit|weekly limit|too many requests|\b429\b|overloaded_error/i;
-const isUsageLimited = (text) => USAGE_LIMIT_RE.test(String(text || ''));
+/**
+ * REQ-CB-4: does a Claude run's execution file show a subscription usage limit?
+ *
+ * Only the run's final `result` message is checked, and only when that result is an
+ * error (incident #21 / #20). Claude Code's stream-json carries a `rate_limit_event`
+ * in every run, and a successful run's final text may quote a limit message (A0 or A10
+ * writing about throttling), so neither may open a `throttled` issue.
+ */
+const USAGE_LIMIT_RE = /usage_limit_reached|usage limit reached|you(?:'|’)ve hit your (?:[\w-]+ )*limit|\b(?:5-hour|weekly|opus) limit\b|API Error: 429\b/i;
 
-/** REQ-FLOW-2: the next rung of the implementer ladder after a failed attempt. */
-function nextRung(implementer, attempt) {
-  if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1 };
-  if (implementer === 'local') return { implementer: 'claude', attempt: 1, handoff: true };
-  if (implementer === 'claude' && attempt < 2) return { implementer: 'claude', attempt: attempt + 1 };
+/** The last `{type: "result"}` message in an execution file (JSON array or JSON lines). */
+function finalResult(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  let msgs;
+  try {
+    const j = JSON.parse(s);
+    msgs = Array.isArray(j) ? j : [j];
+  } catch {
+    msgs = s.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } });
+  }
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i] && msgs[i].type === 'result') return msgs[i];
+  return null;
+}
+
+function isUsageLimited(text) {
+  const r = finalResult(text);
+  if (!r) return false;
+  if (Number(r.api_error_status) === 429) return true;
+  if (r.is_error !== true) return false;
+  const said = [r.result, r.error, r.subtype, ...(Array.isArray(r.errors) ? r.errors : [])]
+    .map((x) => (typeof x === 'string' ? x : JSON.stringify(x ?? ''))).join('\n');
+  return USAGE_LIMIT_RE.test(said);
+}
+
+/**
+ * REQ-FLOW-2 / FLOW-7: what the ladder does after an attempt that didn't publish.
+ *   ctx.job        the implementer job's result: success | failure | cancelled
+ *   ctx.retry      infra retries of this rung so far (0 or 1)
+ *   ctx.run        this run's id: its `attempt` artifact holds the work in progress
+ *   ctx.handoffRun the run whose artifact this attempt was given, if any
+ * An infra failure (runner lost, gaming pause, job timeout) re-runs the same rung once
+ * with the hand-off it already had. Otherwise the next rung gets THIS attempt's
+ * slice.patch + test.log (local→local, local→Claude, Claude→Claude), as hints for a
+ * clean tree (incident #21). Returns {implementer, attempt, handoffRun, retry} or {replan}.
+ */
+function nextRung(implementer, attempt, ctx = {}) {
+  const run = ctx.run ? String(ctx.run) : '';
+  const inherited = ctx.handoffRun ? String(ctx.handoffRun) : '';
+  if ((ctx.job === 'failure' || ctx.job === 'cancelled') && Number(ctx.retry || 0) === 0) {
+    return { implementer, attempt, handoffRun: inherited, retry: 1, infra: true };
+  }
+  if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1, handoffRun: run, retry: 0 };
+  if (implementer === 'local') return { implementer: 'claude', attempt: 1, handoffRun: run, retry: 0 };
+  if (implementer === 'claude' && attempt < 2) return { implementer: 'claude', attempt: attempt + 1, handoffRun: run, retry: 0 };
   return { replan: true };
 }
 
@@ -309,5 +355,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, decideFindings, isUsageLimited, nextRung,
+  dublinHour, decideFindings, isUsageLimited, finalResult, nextRung,
 };

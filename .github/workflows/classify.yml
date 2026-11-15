@@ -67,5 +67,5 @@ jobs:
           printf 'ROLE: A8 Risk Classifier   ITEM: #%s   RESULT: done\nTier **%s** (RISK.md floor %s).\n\n%s\n\n%s\n' "$PR" "$TIER" "$FLOOR" "$RATIONALE" "$MENTION" > body.md
           gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file body.md
           node scripts/gates/gate.js tier-approval --pr "$PR"
-      - if: failure()
+      - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"

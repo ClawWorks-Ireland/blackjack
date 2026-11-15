@@ -1,0 +1,12 @@
+diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js
+--- a/scripts/gates/lib.js
++++ b/scripts/gates/lib.js
+@@ -330,7 +330,7 @@
+   if ((ctx.job === 'failure' || ctx.job === 'cancelled') && Number(ctx.retry || 0) === 0) {
+     return { implementer, attempt, handoffRun: inherited, retry: 1, infra: true };
+   }
+-  if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1, handoffRun: run, retry: 0 };
++  if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1, handoffRun: inherited, retry: 0 };
+   if (implementer === 'local') return { implementer: 'claude', attempt: 1, handoffRun: run, retry: 0 };
+   if (implementer === 'claude' && attempt < 2) return { implementer: 'claude', attempt: attempt + 1, handoffRun: run, retry: 0 };
+   return { replan: true };

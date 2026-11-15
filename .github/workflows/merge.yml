@@ -76,7 +76,7 @@ jobs:
             --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
             --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
-      - if: failure()
+      - if: failure() && steps.claude.outcome == 'failure'
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 

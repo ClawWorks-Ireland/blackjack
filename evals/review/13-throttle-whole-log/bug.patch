@@ -1,0 +1,23 @@
+diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js
+--- a/scripts/gates/lib.js
++++ b/scripts/gates/lib.js
+@@ -287,7 +287,7 @@
+  * writing about throttling), so neither may open a `throttled` issue.
+  */
+-const USAGE_LIMIT_RE = /usage_limit_reached|usage limit reached|you(?:'|’)ve hit your (?:[\w-]+ )*limit|\b(?:5-hour|weekly|opus) limit\b|API Error: 429\b/i;
+-
+-/** The last `{type: "result"}` message in an execution file (JSON array or JSON lines). */
++const USAGE_LIMIT_RE = /usage_limit_reached|usage limit reached|you(?:'|’)ve hit your (?:[\w-]+ )*limit|\b(?:5-hour|weekly|opus) limit\b|rate[ _-]?limit(ed)?|API Error: 429\b/i;
++
++/** The last `{type: "result"}` message in an execution file (JSON array or JSON lines). */
+ function finalResult(text) {
+   const s = String(text || '').trim();
+@@ -309,6 +309,6 @@
+   if (Number(r.api_error_status) === 429) return true;
+   if (r.is_error !== true) return false;
+-  const said = [r.result, r.error, r.subtype, ...(Array.isArray(r.errors) ? r.errors : [])]
+-    .map((x) => (typeof x === 'string' ? x : JSON.stringify(x ?? ''))).join('\n');
++  // The limit text can be in any message of a failed run, not only the result.
++  const said = String(text || '');
+   return USAGE_LIMIT_RE.test(said);
+ }

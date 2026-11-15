@@ -186,15 +186,63 @@ test('A6 majority vote: a finding needs 2 of 3 real votes; severity by majority'
   assert.equal(tie.kept[0].severity, 'Important');
 });
 
-test('CB-4 usage-limit detection', () => {
-  assert.ok(G.isUsageLimited('Claude AI usage limit reached|1731600000'));
-  assert.ok(G.isUsageLimited('API Error: 429 Too Many Requests'));
+// Execution files as claude-code-action writes them: a JSON array of stream-json messages.
+const execFile = (result, extra = []) => JSON.stringify([
+  { type: 'system', subtype: 'init', session_id: 's' },
+  { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour' } },
+  ...extra,
+  { type: 'result', ...result },
+]);
+
+test('CB-4 usage-limit detection: the 2026-11-14 limit message matches', () => {
+  // T13 (SETUP_REPORT): the real limit hit during setup said `You've hit your 5-hour limit`
+  // with `usage_limit_reached`. Envelope reconstructed; the strings are the ones seen.
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 7pm" })));
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'error_during_execution', is_error: true, result: '', errors: ['usage_limit_reached'] })));
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'success', is_error: true, result: 'Claude AI usage limit reached|1731600000' })));
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'success', is_error: true, api_error_status: 429, result: 'API Error: 429 Too Many Requests' })));
+  // JSON-lines form too
+  const jsonl = JSON.parse(execFile({ is_error: true, result: "You've hit your weekly limit" })).map((m) => JSON.stringify(m)).join('\n');
+  assert.ok(G.isUsageLimited(jsonl));
+});
+
+test('CB-4 usage-limit detection: no false positives (incident #21 / #18)', () => {
+  // Every normal run carries rate_limit_event in its stream: must not match.
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'success', is_error: false, result: 'Done.' })));
+  // A failed run for another reason (max turns, a gh error) with rate_limit_event in the stream.
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'error_max_turns', is_error: true, result: '' })));
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'success', is_error: true, result: 'GraphQL: Projects (classic) is being deprecated' },
+    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'API Error: 429 usage_limit_reached' }] } }])));
+  // A successful run whose final text quotes a limit message (A0/A10 writing about throttling).
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'success', is_error: false, result: "Retro: the real one said You've hit your 5-hour limit" })));
+  // No result message, empty or missing file, plain text logs.
+  assert.ok(!G.isUsageLimited(JSON.stringify([{ type: 'rate_limit_event' }])));
+  assert.ok(!G.isUsageLimited(''));
+  assert.ok(!G.isUsageLimited('rate_limit_event usage limit reached 429'));
   assert.ok(!G.isUsageLimited('Error: tests failed'));
 });
 
-test('T11 ladder: local ×2, then Claude ×2 with handoff, then re-slice', () => {
-  assert.deepEqual(G.nextRung('local', 1), { implementer: 'local', attempt: 2 });
-  assert.deepEqual(G.nextRung('local', 2), { implementer: 'claude', attempt: 1, handoff: true });
-  assert.deepEqual(G.nextRung('claude', 1), { implementer: 'claude', attempt: 2 });
-  assert.deepEqual(G.nextRung('claude', 2), { replan: true });
+test('T11 ladder: local ×2, then Claude ×2, then re-slice; each rung gets the previous attempt (incident #21)', () => {
+  const ctx = { job: 'success', retry: 0, run: '200', handoffRun: '100' };
+  assert.deepEqual(G.nextRung('local', 1, ctx), { implementer: 'local', attempt: 2, handoffRun: '200', retry: 0 });
+  assert.deepEqual(G.nextRung('local', 2, ctx), { implementer: 'claude', attempt: 1, handoffRun: '200', retry: 0 });
+  assert.deepEqual(G.nextRung('claude', 1, ctx), { implementer: 'claude', attempt: 2, handoffRun: '200', retry: 0 });
+  assert.deepEqual(G.nextRung('claude', 2, ctx), { replan: true });
+  // Local attempt 1 timing out inside local-implement.sh (no commit) is a model attempt: hand it over.
+  assert.deepEqual(G.nextRung('local', 1, { job: 'success', run: '43753799564' }).handoffRun, '43753799564');
+  // First attempt with no context still works
+  assert.deepEqual(G.nextRung('local', 1), { implementer: 'local', attempt: 2, handoffRun: '', retry: 0 });
+});
+
+test('T11 ladder: infra failure re-runs the same rung once with the hand-off it had', () => {
+  for (const job of ['failure', 'cancelled']) {
+    assert.deepEqual(G.nextRung('claude', 1, { job, retry: 0, run: '300', handoffRun: '200' }),
+      { implementer: 'claude', attempt: 1, handoffRun: '200', retry: 1, infra: true });
+    assert.deepEqual(G.nextRung('local', 2, { job, retry: '0', run: '300' }),
+      { implementer: 'local', attempt: 2, handoffRun: '', retry: 1, infra: true });
+  }
+  // Second infra failure advances, handing over that run's saved work in progress
+  assert.deepEqual(G.nextRung('claude', 1, { job: 'failure', retry: 1, run: '301', handoffRun: '200' }),
+    { implementer: 'claude', attempt: 2, handoffRun: '301', retry: 0 });
+  assert.deepEqual(G.nextRung('claude', 2, { job: 'failure', retry: 1, run: '302' }), { replan: true });
 });

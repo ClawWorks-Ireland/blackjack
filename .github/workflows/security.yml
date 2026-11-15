@@ -60,7 +60,7 @@ jobs:
           gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file body.md
           if [ "$N" = "0" ]; then S=success; D="A7: no findings"; else S=failure; D="A7: $N finding(s), blocking"; fi
           node scripts/gates/gate.js status --sha "$SHA" --context security --state "$S" --description "$D"
-      - if: failure()
+      - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 
   waive:

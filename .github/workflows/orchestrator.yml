@@ -57,5 +57,5 @@ jobs:
             --append-system-prompt-file .claude/agents/orchestrator.md --model opus --max-turns 60
             --allowedTools "Read,Grep,Glob,Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh issue close:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh label list:*),Bash(gh workflow run implement.yml:*),Bash(gh workflow run spec-plan.yml:*),Bash(gh api -X GET:*),Bash(node scripts/gates/gate.js level)"
             --disallowedTools "Edit,Write,Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push:*)"
-      - if: failure()
+      - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
