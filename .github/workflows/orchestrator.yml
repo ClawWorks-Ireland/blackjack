@@ -8,6 +8,8 @@ on:
     types: [opened, labeled, closed]
   pull_request_target:
     types: [closed]
+  issue_comment:
+    types: [created]   # Delmar's answers to needs-human questions (job filters to the owner)
   workflow_dispatch:
     inputs:
       digest: { description: 'Write the daily digest now', type: boolean, default: false }
@@ -17,11 +19,17 @@ permissions:
   pull-requests: read
   actions: write
   statuses: read
-concurrency:
-  group: orchestrator
-  cancel-in-progress: false
 jobs:
   sweep:
+    # Only Delmar's comments start a sweep (answers to needs-human, `re-slice`/`take over` on a PR),
+    # not his /security-waive commands. Concurrency is on the job, so a skipped run (a bot comment)
+    # never takes the single pending slot from a real one.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.comment.user.login == 'delmarolivier' && !startsWith(github.event.comment.body, '/security-waive'))
+    concurrency:
+      group: orchestrator
+      cancel-in-progress: false
     runs-on: [self-hosted, claude-jobs]
     timeout-minutes: 30
     env: { GITHUB_TOKEN: "${{ github.token }}" }
@@ -30,16 +38,18 @@ jobs:
         with: { persist-credentials: false, clean: true }
       - id: w
         run: |
+          LAST_DIGEST=$(gh issue list -R "$GITHUB_REPOSITORY" --label digest --state open --json body -q '.[0].body // ""' | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>console.log(require("./scripts/gates/lib.js").digestStamp(b)||""))'); export LAST_DIGEST
           node -e '
             const G=require("./scripts/gates/lib.js"); const h=G.dublinHour();
             const sched=process.env.EV==="schedule";
             console.log("run=true");   // 24x7 (spec v0.11)
-            console.log("digest="+(process.env.DIGEST==="true"||(sched&&h===8)));
+            console.log("digest="+(process.env.DIGEST==="true"||G.digestDue(new Date(), process.env.LAST_DIGEST||null)));
+            console.log("today="+G.dublinDate());
             console.log("monday="+(new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Dublin",weekday:"short"}).format(new Date())==="Mon"));
           ' >> "$GITHUB_OUTPUT"
           echo "level=$(node scripts/gates/gate.js level)" >> "$GITHUB_OUTPUT"
           echo "throttled=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length)" >> "$GITHUB_OUTPUT"
-        env: { EV: "${{ github.event_name }}", DIGEST: "${{ inputs.digest }}" }
+        env: { EV: "${{ github.event_name }}", DIGEST: "${{ inputs.digest }}", GITHUB_TOKEN: "${{ github.token }}" }
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
@@ -52,22 +62,25 @@ jobs:
           permission-issues: write
           permission-pull-requests: read
           permission-actions: write
+      - name: Freeze the job guard before the model starts (a model edit cannot change it)
+        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
       - id: claude
         if: steps.w.outputs.run == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ steps.app.outputs.token }}
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Run the A0 sweep for ${{ github.repository }} (trigger: ${{ github.event_name }}).
             Effective autonomy level: ${{ steps.w.outputs.level }}. Open throttled issues: ${{ steps.w.outputs.throttled }}.
             Write the daily digest this run: ${{ steps.w.outputs.digest }} (Monday metrics: ${{ steps.w.outputs.monday }}).
-            The digest is the open pinned issue labelled `digest`; replace its body. Board status is tracked with `status:*` labels.
+            The digest is the open pinned issue labelled `digest`. ${{ steps.w.outputs.digest == 'true' && format('When you write it this run, replace its body and make its first line exactly `<!-- digest {0} -->` (that stamp is how the next run knows today''s digest is written).', steps.w.outputs.today) || 'Do not rewrite it this run; if you must edit it, keep its first line (the `<!-- digest … -->` stamp) unchanged.' }} Board status is tracked with `status:*` labels.
             If a throttled issue is open and a Claude run has succeeded since it was opened, close it with the throttled hours.
           claude_args: >-
             --append-system-prompt-file .claude/agents/orchestrator.md --model opus --max-turns 60
             --allowedTools "Read,Grep,Glob,Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh issue close:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh label list:*),Bash(gh workflow run implement.yml:*),Bash(gh workflow run spec-plan.yml:*),Bash(gh api -X GET:*),Bash(node scripts/gates/gate.js level)"
-            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push:*)"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push:*)"
       - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"

@@ -27,6 +27,14 @@ Read by A4 (Self-Verifier), A5 (Bug Hunters), A6 (Verifiers) and A7 (Security), 
 9. **Server (`server/`):** home network only. Never default the bind to a public interface beyond the current `0.0.0.0` LAN default, never add auth bypasses, never write player data outside `server/data/` (git-ignored), and validate all request input. Any `server/` change is Tier 2.
 10. **Web:** the service worker (`web/sw.js`) must cache every file the page needs (test F11). Keyboard and a11y behaviour is covered by `web/keys.test.js` and `web/a11y.test.js`; don't weaken those tests.
 
+## Lens hints (read by the bug hunters; project-specific)
+- **logic:** boundaries 0, 1, 21, 17; empty shoe, last card; ace soft/hard transitions.
+- **state:** game phases (betting → insurance → player → done); split/double/surrender state; shoe and cut-card state between rounds; server hub/SSE races (join/leave between rounds); stray `Math.random` where a seeded `rng` is in scope.
+- **performance:** quadratic loops over the shoe or hand history; unbounded leaderboards and SSE client lists; blocking the server event loop.
+- **rules:** README "Table rules" and invariant 3: dealer soft 17, blackjack payout and split 21s, surrender, doubling rules, DAS/RSA, insurance 2:1, even money, reshuffle only between rounds, side-bet pay tables, count tags, poker side pots and odd chips.
+- **security:** `server/` must stay home-network only (no public bind); static serving in `qa/serve.js` and `server/`; writes only under `server/data/`; player names reach the DOM.
+- **contract:** agent observation fields, CLI output, MCP tool names/schemas, server HTTP API; the macOS embed must be regenerated (invariant 2).
+
 ## Tests
 - New behaviour comes with tests that fail without the change (G4 "tests written first").
 - A PR that deletes, skips (`{ skip }`, `.todo`) or loosens an assertion must say why in the PR body. If it doesn't, that's Important.

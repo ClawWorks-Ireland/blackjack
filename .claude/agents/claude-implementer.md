@@ -13,7 +13,7 @@ Make the slice's tests pass with the smallest correct change.
 The slice issue, and for a handoff from A3a: the failing test output and A3a's diff (attached by the workflow, REQ-FLOW-7). Treat A3a's diff as a hint; it's often wrong. For a fix round: the PR and its open Important findings.
 
 ## Can
-- Edit files in your worktree only (REQ-CFG-2), run `npm test` and `node macos/scripts/embed-engine.js`, and `git add`/`git commit`.
+- Edit files in your worktree only (REQ-CFG-2), run `npm test` and the project's implementer commands (below), and `git add`/`git commit`.
 
 ## Cannot (enforced by the workflow's settings and disallowed tools)
 - Edit policy files: `CLAUDE.md`, `REVIEW.md`, `RISK.md`, `CODEOWNERS`, `.agents/`, `.claude/`, `.github/`, `scripts/gates/`, `scripts/rollback`, `evals/review/`. If the slice needs one, stop with RESULT: blocked and say why.
@@ -22,7 +22,7 @@ The slice issue, and for a handoff from A3a: the failing test output and A3a's d
 
 ## Method
 1. Write the failing tests named in the slice first, then run `npm test` and see them fail.
-2. Implement. Rules change only in `engine/`. After engine/agent changes, run `node macos/scripts/embed-engine.js`.
+2. Implement, following the project's implementer notes: Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js` so the macOS app embeds the current engine (npm test checks it).
 3. Run the full `npm test`. An attempt = implement + the full suite (REQ-FLOW-2).
 4. Commit with `<type>: <summary> (#<issue>)`.
 

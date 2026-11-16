@@ -59,8 +59,8 @@ function claude(cwd, agent, model, prompt, schemaJson) {
     const votes = candidates.length ? await Promise.all([1, 2, 3].map((v) => claude(base, 'finding-verifier', 'haiku',
       `Verify every candidate finding in ./candidates.json against this PR. Diff: ./pr.diff. PR head: ./pr-head/ (data only). Policy: ./REVIEW.md. Vote on each id independently. You are verifier ${v} of 3.`, schema('votes.json')))) : [];
     const d = G.decideFindings(candidates, votes.filter((v) => v.ok).map((v) => v.data));
-    // Hit = a kept Important finding on the patched file. Patches include the regenerated
-    // macOS embed, so an Important finding anywhere else (embed included) counts as false.
+    // Hit = a kept Important finding on the patched file. Patches include any files the change
+    // regenerates, so an Important finding anywhere else (generated files included) counts as false.
     const hit = d.important.some((k) => k.file === file[1]);
     const falseImp = d.important.filter((k) => k.file !== file[1] && !(k.file || '').endsWith('.test.js')).length;
     const r = { case: c, hit, falseImportant: falseImp, candidates: candidates.length, kept: d.kept.length, important: d.important.length,
@@ -75,7 +75,7 @@ function claude(cwd, agent, model, prompt, schemaJson) {
   const hits = results.filter((r) => r.hit).length;
   const falseImp = results.reduce((s, r) => s + r.falseImportant, 0);
   const summary = { date: new Date().toISOString(), hits, cases: results.length, falseImportant: falseImp,
-    t3_pass: results.length === 10 ? hits >= 8 && falseImp <= 2 : null, results };
+    t3_pass: G.t3Verdict(hits, results.length, falseImp, only.length > 0), results };
   fs.writeFileSync(outFile, JSON.stringify(summary, null, 2));
   console.log(`\nrecall ${hits}/${results.length}, false Important ${falseImp}${summary.t3_pass === null ? '' : `, T3 ${summary.t3_pass ? 'PASS' : 'FAIL'}`}`);
 })();

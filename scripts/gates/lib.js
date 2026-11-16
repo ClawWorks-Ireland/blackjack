@@ -369,6 +369,44 @@ function fixRoundRefusal(pr, repoFullName) {
   return '';
 }
 
+/**
+ * T3 / REQ-IMP-2 verdict for a full eval replay (issue #14): spec T3 is "≥ 8 of 10 flagged,
+ * ≤ 2 false Important", scaled to the set's size: recall ≥ 80% and false Important ≤ 0.2 per
+ * case. A partial replay (--cases) gets no verdict (null).
+ */
+function t3Verdict(hits, cases, falseImportant, partial = false) {
+  if (partial || !cases) return null;
+  return hits / cases >= 0.8 && falseImportant <= 0.2 * cases;
+}
+
+/** Overlay `manual_checks:` entries of the form `- <path regex> => <message>`. */
+function parseManualChecks(projectMd) {
+  // Same YAML subset as the template's render.js: comments (outside backticks/quotes) and
+  // blank lines inside the list don't end it; the next top-level key does.
+  const strip = (line) => {
+    let q = null;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) { if (c === q) q = null; continue; }
+      if (c === '`' || c === '"' || c === "'") { q = c; continue; }
+      if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+    }
+    return line;
+  };
+  const out = []; let inList = false;
+  for (const raw of String(projectMd).split('\n')) {
+    const line = strip(raw).replace(/\s+$/, '');
+    if (!line.trim()) continue;
+    if (/^manual_checks:\s*$/.test(line)) { inList = true; continue; }
+    if (!inList) continue;
+    const item = /^\s+-\s+(.*)$/.exec(line);
+    if (!item) { inList = false; continue; }
+    const l = item[1].trim(); const i = l.indexOf(' => ');
+    if (i > 0) out.push({ re: new RegExp(l.slice(0, i).trim()), message: l.slice(i + 4).trim() });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- misc
 
 /** Parse "Rollback-of: <sha>" / "Main-guard-revert: <sha>" trailers. */
@@ -377,16 +415,35 @@ function revertTrailer(message) {
   return m ? m[1] : null;
 }
 
+/** Calendar date (YYYY-MM-DD) in Europe/Dublin. */
+const dublinDate = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d));
+/** The Dublin date A0 stamped on the digest body (`<!-- digest YYYY-MM-DD -->`), or null. */
+function digestStamp(body) {
+  const m = /<!-- digest (\d{4}-\d{2}-\d{2}) -->/.exec(String(body || ''));
+  return m ? m[1] : null;
+}
+/**
+ * REQ-COORD-4 (issue #28): the digest is due on the first A0 run of any kind at or after
+ * 08:00 Dublin time whose digest body isn't stamped with that Dublin day. Scheduled runs
+ * are often late or skipped, so "only the scheduled run in the 08:00 hour" could miss every
+ * day. The stamp, not the issue's updatedAt, decides: a comment or label on the digest
+ * issue mustn't count as the digest being written.
+ */
+function digestDue(now = new Date(), lastStamp = null) {
+  if (dublinHour(now) < 8) return false;
+  return !lastStamp || lastStamp < dublinDate(now);
+}
 /** Hour in Europe/Dublin: the daily digest runs at 08:00 (REQ-COORD-4). */
 function dublinHour(now = new Date()) {
   return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Dublin', hour: '2-digit', hourCycle: 'h23' }).format(now));
 }
 
 module.exports = {
+  digestStamp,
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, decideFindings, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal,
+  dublinHour, dublinDate, digestDue, decideFindings, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

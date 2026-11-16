@@ -11,12 +11,13 @@ permissions:
   pull-requests: write
   issues: write
   statuses: write
-concurrency:
-  group: security-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+# Concurrency is per job: a skipped run (any other comment) must never take a pending review's slot.
 jobs:
   review:
     if: github.event_name == 'pull_request_target' && !github.event.pull_request.draft
+    concurrency:
+      group: security-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: [self-hosted, claude-jobs]
     timeout-minutes: 30
     env:
@@ -43,10 +44,13 @@ jobs:
           # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
           permission-contents: read   # claude-code-action fetches the base branch (PR #25)
           permission-pull-requests: read
+      - name: Freeze the job guard before the model starts (a model edit cannot change it)
+        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ steps.app.outputs.token }}
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
@@ -54,7 +58,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/security-reviewer.md --model opus --max-turns 40
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
       - name: Blocking status
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
@@ -75,6 +79,9 @@ jobs:
     if: >-
       github.event_name == 'issue_comment' && github.event.issue.pull_request &&
       github.event.comment.user.login == 'delmarolivier' && startsWith(github.event.comment.body, '/security-waive ')
+    concurrency:
+      group: security-waive-${{ github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:

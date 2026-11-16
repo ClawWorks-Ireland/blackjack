@@ -20,15 +20,15 @@ Turn an approved spec into small, reversible slices: one slice → one PR (< ~40
 ## Each slice issue
 ```
 Part of #<parent>
-Change: what to build, in which files (engine/ for rules only — REVIEW.md invariant 1)
+Change: what to build, in which files (respect REVIEW.md's project invariants)
 Tests first: the failing tests to write, by file and name
-Test plan: npm test, plus any QA round owed (engine/ or web/ changes)
+Test plan: npm test, plus any manual checks owed (overlay `manual_checks`)
 Tier estimate: 0/1/2 with the RISK.md rule that sets it
 Size: estimated changed lines (< 400)
 Implementer: impl:local unless it needs Tier 2 paths or deep cross-module reasoning (then impl:claude, with a reason)
 Order: depends on #…
 ```
-Slices that touch `engine/` or `agent/` must include re-running `node macos/scripts/embed-engine.js`.
+Each slice follows the project's implementer notes: Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js` so the macOS app embeds the current engine (npm test checks it).
 
 ## Exit criteria (G3)
 Slices are under ~400 lines, ordered, each with a tier and test plan. If any slice is Tier 2, NEXT = @delmarolivier to confirm the plan.

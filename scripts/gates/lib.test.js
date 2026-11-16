@@ -4,7 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const G = require('./lib.js');
 
-const RISK = fs.readFileSync(path.join(__dirname, '../../RISK.md'), 'utf8');
+// A small, fixed sample of risk rules. The project's own RISK.md is tested separately in
+// scripts/gates/risk-rules.test.js (project-owned, written by /setup-project).
+const RISK = ['```risk-rules', '0 **/*.md', '0 **/*.test.js', '2 .github/**', '2 .claude/**', '2 .agents/**',
+  '2 CLAUDE.md', '2 REVIEW.md', '2 RISK.md', '2 scripts/**', '2 package.json', '2 evals/review/**', '```'].join('\n');
 const rules = G.parseRiskRules(RISK);
 const H = { login: 'delmarolivier', type: 'User' };
 const BOT = { login: 'claude[bot]', type: 'Bot' };
@@ -21,17 +24,14 @@ test('globs: ** spans segments, * stays in one', () => {
   assert.ok(!G.globToRegExp('package.json').test('qa/package.json'));
 });
 
-test('RISK.md: docs and tests are Tier 0, engine Tier 1, policy and server Tier 2', () => {
+test('risk rules: last match wins; unmatched paths are Tier 1', () => {
   const t = (p) => G.tierForPath(p, rules);
   assert.equal(t('README.md'), 0);
-  assert.equal(t('engine/blackjack.test.js'), 0);
-  assert.equal(t('qa/reports/abc1234.md'), 0);
-  assert.equal(t('engine/blackjack.js'), 1);
-  assert.equal(t('web/app.js'), 1);
+  assert.equal(t('src/a.test.js'), 0);
+  assert.equal(t('src/a.js'), 1);
   assert.equal(t('some/new/file.txt'), 1);
-  for (const p of ['CLAUDE.md', 'REVIEW.md', 'RISK.md', '.agents/SPEC.md', '.claude/agents/release-manager.md',
-    '.github/workflows/merge.yml', 'scripts/rollback', 'scripts/gates/lib.js', 'server/server.js', 'server/README.md',
-    'package.json', 'evals/review/01-ace/case.md', '.mcp.json', 'macos/scripts/ci.sh']) assert.equal(t(p), 2, p);
+  for (const p of ['CLAUDE.md', 'REVIEW.md', 'RISK.md', '.agents/SPEC.md', '.claude/agents/x.md',
+    '.github/workflows/merge.yml', 'scripts/rollback', 'scripts/gates/lib.js', 'package.json', 'evals/review/01/case.md']) assert.equal(t(p), 2, p);
 });
 
 test('T5 policy tamper: a PR weakening REVIEW.md is Tier 2 even if labelled tier:0', () => {
@@ -61,7 +61,8 @@ test('circuit breakers: open cb:level-N issues and the unprotected cap lower the
   assert.equal(G.effectiveLevel(3, [], { acceptUnprotected: true }), 3);
   assert.equal(G.effectiveLevel(2, ['cb:level-0']), 0);
   assert.equal(G.effectiveLevel(2, ['cb:level-1', 'incident']), 1);
-  assert.equal(G.parseAutonomyLevel(fs.readFileSync(path.join(__dirname, '../../.agents/PROJECT.md'), 'utf8')), 0);
+  assert.equal(G.parseAutonomyLevel('project: X\nautonomy_level: 0\n'), 0);
+  assert.ok(Number.isInteger(G.parseAutonomyLevel(fs.readFileSync(path.join(__dirname, '../../.agents/PROJECT.md'), 'utf8'))));
 });
 
 test('T6/T16: bot approvals and approvals of an older commit never count', () => {
@@ -273,4 +274,39 @@ test('a verified attempt whose publish fails stops the ladder instead of advanci
   assert.deepEqual(G.nextRung('claude', 2, { verified: true, publish: 'cancelled' }), { publishFailed: true });
   // not verified: the ladder advances as before
   assert.deepEqual(G.nextRung('local', 1, { verified: false, publish: 'skipped', run: '9', hasArtifact: true }), { implementer: 'local', attempt: 2, handoffRun: '9', retry: 0 });
+});
+
+test('#28: the digest is due on the first run after 08:00 Dublin that day, whatever kind of run', () => {
+  // winter (GMT): 08:30 UTC = 08:30 Dublin
+  assert.equal(G.digestDue(new Date('2026-12-01T08:30:00Z'), '2026-11-30'), true);
+  assert.equal(G.digestDue(new Date('2026-12-01T07:59:00Z'), '2026-11-30'), false);   // before 08:00
+  assert.equal(G.digestDue(new Date('2026-12-01T13:00:00Z'), '2026-12-01'), false);   // already written today
+  assert.equal(G.digestDue(new Date('2026-12-01T22:00:00Z'), '2026-11-29'), true);    // a late run still writes it
+  assert.equal(G.digestStamp('<!-- digest 2026-12-01 -->\n# Digest'), '2026-12-01');
+  assert.equal(G.digestStamp('a comment-only update leaves no stamp'), null);
+  // summer (IST): 07:30 UTC = 08:30 Dublin
+  assert.equal(G.digestDue(new Date('2026-07-01T07:30:00Z'), '2026-06-30'), true);
+  assert.equal(G.digestDue(new Date('2026-07-01T06:30:00Z'), null), false);
+  assert.equal(G.dublinDate(new Date('2026-07-01T23:30:00Z')), '2026-07-02');                   // after midnight Dublin
+});
+
+test('#14: T3 verdict scales with the eval set; partial replays get none', () => {
+  assert.equal(G.t3Verdict(8, 10, 2), true);
+  assert.equal(G.t3Verdict(7, 10, 0), false);
+  assert.equal(G.t3Verdict(10, 10, 3), false);
+  assert.equal(G.t3Verdict(12, 14, 2), true);    // 86%, 2 ≤ 2.8
+  assert.equal(G.t3Verdict(11, 14, 0), false);   // 79%
+  assert.equal(G.t3Verdict(14, 14, 3), false);   // 3 > 2.8
+  assert.equal(G.t3Verdict(5, 5, 0, true), null);
+  assert.equal(G.t3Verdict(0, 0, 0), null);
+});
+
+test('manual checks come from the overlay as "<path regex> => <message>"', () => {
+  const md = 'project: X\nmanual_checks:\n  - ^(web/|engine/) => QA round owed\n  - ^macos/ => macOS CI owed\n  - just a note without arrow\nnext_key: 1\n';
+  const c = G.parseManualChecks(md);
+  assert.deepEqual(c.map((x) => x.message), ['QA round owed', 'macOS CI owed']);
+  assert.ok(c[0].re.test('engine/x.js') && !c[0].re.test('agent/x.js'));
+  assert.deepEqual(G.parseManualChecks('project: X\n'), []);
+  const md2 = 'manual_checks:   # owed checks\n  - ^a/ => first   # why\n  # a comment\n\n  - ^b/ => run `x # y`\nnext_key: 1\n  - ^c/ => not in the list\n';
+  assert.deepEqual(G.parseManualChecks(md2).map((x) => x.message), ['first', 'run `x # y`']);
 });

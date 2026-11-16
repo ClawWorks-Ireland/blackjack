@@ -50,10 +50,13 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0, clean: true, persist-credentials: false }
       - run: rm -rf out && mkdir -p out
+      - name: Freeze the job guard before the model starts (a model edit cannot change it)
+        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ github.token }}   # read-only; A10's writes happen in a10-publish, without a model
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
@@ -61,8 +64,8 @@ jobs:
             Follow your definition. You can't post or push: write your output to ./out/ as your definition describes, and commit any proposal on a local branch. Never merge.
           claude_args: >-
             --append-system-prompt-file .claude/agents/incident-retro.md --model opus --max-turns 120
-            --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git checkout -b agent/retro-:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(git diff:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh run list:*),Bash(gh api -X GET:*),Bash(npm test:*)"
-            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr create:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh issue comment:*),Bash(gh issue create:*)"
+            --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git checkout -b:*),Bash(git switch -c:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(git diff:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh run list:*),Bash(gh api -X GET:*),Bash(npm test:*),Bash(node --test:*)"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr create:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh issue comment:*),Bash(gh issue create:*)"
       - name: Package the proposal commits
         if: always()
         run: |

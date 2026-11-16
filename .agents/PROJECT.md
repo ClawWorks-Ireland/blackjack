@@ -27,8 +27,16 @@ orchestrator_schedule: hourly 24x7   # spec v0.11; daily digest at 08:00 Europe/
 sensitive_paths_extra:   # Tier 2 floor, see RISK.md
   - server/**        # live table server, network-facing; never expose publicly
   - .mcp.json
-ci_command: npm test   # required `ci` gate; GitHub-hosted ubuntu, ~30 s
-manual_checks:   # not gates; A9 notes them on PRs that touch the paths
-  - macos/scripts/ci.sh      # Swift build/tests, on the Mac (PR touches macos/ or engine/)
-  - node qa/run-round.js     # Chrome QA round (PR touches web/ or engine/)
+manual_checks:   # not gates; A9 notes them on merged PRs whose paths match ("<path regex> => <message>")
+  - ^(macos/|engine/|agent/) => macOS CI owed on the Mac: `macos/scripts/ci.sh`
+  - ^(web/|engine/|index\.html) => QA round owed: `node qa/run-round.js <merge sha>`
 no_lint_or_types: true   # G4 'lint, types pass' is vacuous here until one is added
+owner_login: delmarolivier   # the sole human approver (H)
+test_command: npm test
+test_tools:   # commands implementers and verifiers may run to test
+  - npm test
+  - node --test
+implementer_extra_commands:   # project commands implementers may run
+  - node macos/scripts/embed-engine.js
+implementer_notes: Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js` so the macOS app embeds the current engine (npm test checks it).
+node_version: 22
