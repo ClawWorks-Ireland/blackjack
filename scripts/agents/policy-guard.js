@@ -22,6 +22,8 @@ const os = require('os');
 const JOB = process.env.GUARD_MODE === 'job';
 const HOME = process.env.HOME || os.homedir();
 const RUNNER_FILES = ['.credentials', '.credentials_rsaparams', '.runner', '.env'];
+const LIT_DOLLAR = '\u0000';   // a $ inside single quotes: literal text, never an expansion
+const EXPANSION = /\$[A-Za-z_{(]/;
 
 /** Remove heredoc bodies (`<<'EOF' … EOF`): they are text fed to stdin, not paths. */
 const stripHeredocs = (cmd) => cmd.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2[ \t]*(?=\n|$)/g, '<<HEREDOC');
@@ -33,7 +35,7 @@ function shellWords(cmd) {
   const sep = () => { end(); if (words.length) cmds.push(words); words = []; };
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
-    if (q) { if (c === q) q = null; else if (c === '\\' && q === '"' && i + 1 < cmd.length) w += cmd[++i]; else w += c; continue; }
+    if (q) { if (c === q) q = null; else if (c === '\\' && q === '"' && i + 1 < cmd.length) w += cmd[++i]; else w += (q === "'" && c === '$') ? LIT_DOLLAR : c; continue; }
     if (c === "'" || c === '"') { q = c; w = w ?? ''; continue; }
     if (c === '\\' && i + 1 < cmd.length) { w = (w ?? '') + cmd[++i]; continue; }
     if (/\s/.test(c)) { if (c === '\n') sep(); else end(); continue; }
@@ -66,7 +68,7 @@ const segIs = (seg, name, glob) => {
 function expand(p, cwd, oldpwd) {
   const out = p.replace(/^~(?=\/|$)/, HOME).replace(/^~([a-z_][\w-]*)(?=\/|$)/, '/home/$1')
     .replace(/^\$\{?HOME\}?(?=\/|$)/, HOME).replace(/^\$\{?PWD\}?(?=\/|$)/, cwd).replace(/^\$\{?OLDPWD\}?(?=\/|$)/, oldpwd || cwd);
-  return out.includes('$') ? null : out;
+  return EXPANSION.test(out) ? null : out;
 }
 /**
  * Resolve like the kernel: follow symlinks segment by segment, so `/dev/fd/..` lands in /proc.
@@ -88,11 +90,9 @@ function resolveBoth(abs) {
 function secretPath(raw, cwd, glob = false, root = cwd, oldpwd = cwd) {
   if (!raw) return false;
   const e = expand(String(raw), cwd, oldpwd);
-  if (e === null) {   // an unknown variable: refuse `..`, protected names, or a prefix outside the project
-    const segs = String(raw).split('/');
-    if (segs.some((x) => x === '..' || x === 'proc' || x === '.claude' || RUNNER_FILES.includes(x))) return true;
-    return !`${path.resolve(cwd, String(raw).split('$')[0] || '.')}/`.startsWith(`${root}/`);
-  }
+  // A variable we can't expand could be anything (`${X:-/proc}`, `$X/.cl*`): only a lone `$NAME` is allowed,
+  // as an argument that is not a path (`gh pr view $PR`). A7 sec-1 on BlackJack #32, round 3.
+  if (e === null) return !/^\$\{?[A-Za-z_]\w*\}?$/.test(String(raw));
   const [lexical, real] = resolveBoth(path.isAbsolute(e) ? e : `${cwd}/${e}`);   // unnormalised: `..` must follow symlinks
   if (real === null) return true;   // a `..` after an unresolvable symlink (/dev/stdin/..): refuse
   return [lexical, real].some((abs) => {
@@ -113,7 +113,9 @@ function secretPath(raw, cwd, glob = false, root = cwd, oldpwd = cwd) {
 /** Every word of a Bash command that is (or ends in, after `=`) a path, checked with `cd` followed. */
 function bashReadsSecret(cmd, cwd0, root) {
   let cwd = cwd0; let oldpwd = cwd0;
-  for (const words of shellWords(stripHeredocs(cmd))) {
+  // Claude jobs' `$(cat <<'EOF' … EOF)` body (allowed by hidesArgs) is text, not a path.
+  const text = stripHeredocs(cmd).replace(/\$\(\s*cat\s+<<HEREDOC\s*\)/g, JOB ? 'HEREDOC_TEXT' : '$&');
+  for (const words of shellWords(text)) {
     if (words[0] && words[0].text === 'cd') {
       const to = expand(words[1] ? words[1].text : '~', cwd, oldpwd);
       if (to === null) return true;   // cd into an unknown variable: we'd lose track of the cwd
@@ -165,7 +167,7 @@ process.stdin.on('end', () => {
   if (['Read', 'Grep', 'Glob'].includes(ev.tool_name)) {
     // Grep's `pattern` is a search string, not a path; Glob's pattern is a path glob.
     const hit = secretPath(t.file_path, cwd, false, root) || secretPath(t.path, cwd, false, root)
-      || (ev.tool_name === 'Glob' && secretPath(path.join(t.path || cwd, t.pattern || ''), cwd, true, root));
+      || (ev.tool_name === 'Glob' && secretPath(path.isAbsolute(String(t.pattern || '')) ? t.pattern : path.join(t.path || cwd, t.pattern || ''), cwd, true, root));
     // A recursive search rooted at /, a home folder or a runner's root directory would reach the credentials.
     const root2 = ['Grep', 'Glob'].includes(ev.tool_name) && t.path ? path.resolve(cwd, expand(String(t.path), cwd) || '/') : '';
     const tooWide = root2 && (/^\/(?:home(?:\/[^/]+)?|root|proc)?\/?$/.test(root2) || /^\/home\/[^/]+\/actions-runner[^/]*\/?$/.test(root2) || root2 === HOME);

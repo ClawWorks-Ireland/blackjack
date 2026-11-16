@@ -63,7 +63,7 @@ test('relative paths, .. and cd are resolved before the check (A7 sec-1 and AI r
     'cat //proc/self/environ', 'cd ~ && cat .claude/x.json', 'cd ~/actions-runner && cat .credentials', 'cd ../../../.. && cat .runner',
     'cat /dev/fd/../environ', 'cat /dev/stdin/../../environ', 'git diff --no-index /dev/null /dev/fd/../environ', 'cd /dev/fd && cat ../environ',
     'cat $PWD/../../../../../../../proc/self/environ', 'cat $PWD/../../../../.env', 'cat ${PWD}/../../../../../.claude/.credentials.json',
-    'cat $(cat p.txt)', 'cat `cat p.txt`', 'cat <(cat x)', 'cat $RUNNER_TEMP/../.credentials', 'cd $SOMEWHERE && cat x',
+    'cat ${X:-/proc}/self/environ', 'cat ${X:-~}/.cl*/x', 'cat ${HOME:0:0}/pr?c/self/environ', 'cat $X/.credentials.json', 'cat "$X"/../y', 'cat $(cat p.txt)', 'cat `cat p.txt`', 'cat <(cat x)', 'cat $RUNNER_TEMP/../.credentials', 'cd $SOMEWHERE && cat x',
     'cat ~/actions-runner/.env', 'cat ~/.*/x', 'cat $HOME/.claude/y', 'cat ~gh-claude/.claude/z', 'cat ~/actions-runner/.{credentials,x}', 'cat /pro[c]/self/environ', 'cat /pr\\oc/1/environ', 'X=~/actions-runner/.credentials_rsaparams; cat "$X"', 'cat ~/act*/.cred*']) {
     assert.equal(at(c), 2, c);
   }
@@ -78,10 +78,12 @@ test('relative paths, .. and cd are resolved before the check (A7 sec-1 and AI r
   const glob = (pattern) => spawnSync('node', [guard], { input: JSON.stringify({ cwd: '/w/p', tool_name: 'Glob', tool_input: { pattern } }), env: { ...process.env, CLAUDE_PROJECT_DIR: '/w/p', HOME: '/home/gh-llm' } }).status;
   for (const g of ['**/*.js', 'src/**/*.ts', '*']) assert.equal(glob(g), 0, g);
   assert.equal(glob('../../../../home/*/.claude/*'), 2);
+  assert.equal(glob('/proc/*/environ'), 2);
+  assert.equal(glob('/home/*/.claude/*'), 2);
   // no false positives on ordinary commands
   for (const c of ["sed 's/.*//' file", "grep -n '.*foo' x.js", 'grep -E ".*foo" file.js', 'npm test -- --test-name-pattern=".*x"', 'ls src/proc/', 'cat .env.example',
     'grep -rn "this.credentials" src', 'cd /home/gh-llm/actions-runner/_work/p/p && npm test', 'node --test', 'cat README.md', 'cat ../wt/package.json',
-    'git add src/*', 'node --test test/**/*.test.js', 'ls *', 'cat test/fixtures/.credentials', 'cat config/.runner.yml', 'cat .env']) {
+    'git add src/*', 'node --test test/**/*.test.js', "echo 'costs $5 or ${x}' > notes.txt", 'echo $PATH', 'ls *', 'cat test/fixtures/.credentials', 'cat config/.runner.yml', 'cat .env']) {
     assert.equal(at(c), 0, c);
   }
 });
@@ -98,4 +100,5 @@ test('job mode: gh flags are checked as words, so --body text may mention them',
   assert.equal(job('gh issue comment 3 -F notes.md'), 2, '-F is --body-file outside gh api');
   assert.equal(job("gh issue comment 3 --body \"$(cat <<'EOF'\nSee ~/.claude docs and /proc notes\nEOF\n)\""), 0, 'a heredoc body is text');
   assert.equal(job('gh issue comment 3 --body "$(cat notes.md)"'), 2, 'a substitution that reads a file is refused');
+  assert.equal(job('gh pr view $PR -R "$GITHUB_REPOSITORY" --json files'), 0, 'a lone variable as an argument is fine');
 });
