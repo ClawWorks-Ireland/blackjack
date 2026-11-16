@@ -32,14 +32,16 @@
   function percent(n, digits = 1) {
     if (n === null || n === undefined || Number.isNaN(n)) return '—';
     const fmt = new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-    const result = fmt.format(n * 100);
-    // Always add % sign
-    let out = result + '%';
+    let result = fmt.format(n * 100);
+    // When the rounded value is zero (regardless of sign), drop any sign prefix
+    if (Number(result) === 0) {
+      result = '0';
+    }
     // Drop trailing ".0%" when there are no decimals (digits === 1 and value is whole)
     if (digits === 1 && result.endsWith('.0')) {
-      out = result.slice(0, -2) + '%';
+      result = result.slice(0, -2);
     }
-    return out;
+    return result + '%';
   }
 
   const api = { money, signedMoney, percent };

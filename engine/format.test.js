@@ -41,3 +41,13 @@ test('percent handles null and NaN', () => {
   assert.equal(percent(null), '—');
   assert.equal(percent(NaN), '—');
 });
+
+test('percent drops minus sign when rounded value is zero', () => {
+  assert.equal(percent(-0.0004), '0%'); // rounds to 0.0 → '0%'
+  assert.equal(percent(-0), '0%');
+  assert.equal(percent(-0.0004, 2), '-0.04%'); // doesn't round to zero, sign stays
+});
+
+test('percent keeps sign for non-zero rounded values', () => {
+  assert.equal(percent(-0.125), '-12.5%');
+});
