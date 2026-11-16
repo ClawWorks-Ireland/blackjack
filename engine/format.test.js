@@ -48,6 +48,11 @@ test('percent drops minus sign when rounded value is zero', () => {
   assert.equal(percent(-0.0004, 2), '-0.04%'); // doesn't round to zero, sign stays
 });
 
+test('percent keeps requested decimals when rounded value is zero', () => {
+  assert.equal(percent(0, 2), '0.00%');
+  assert.equal(percent(-0.00001, 2), '0.00%');
+});
+
 test('percent keeps sign for non-zero rounded values', () => {
   assert.equal(percent(-0.125), '-12.5%');
 });
