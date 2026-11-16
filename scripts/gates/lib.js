@@ -7,12 +7,12 @@
  * Trust model: only statuses created by `github-actions[bot]` (deterministic
  * workflow steps using GITHUB_TOKEN) count as gate results, and only reviews by
  * the owner count as human approvals. Agents write as the Claude GitHub App
- * (`claude[bot]`), so nothing they post can satisfy a gate (REQ-ROLE-4).
+ * (their own Apps, spec §8.5), so nothing they post can satisfy a gate (REQ-ROLE-4).
  */
 
 const OWNER = 'delmarolivier';
 const GATE_BOT = 'github-actions[bot]';
-const MERGE_BOT = 'claude[bot]';
+const MERGE_BOT = 'clawworks-release-manager[bot]';   // spec §8.5: A9's own App
 const REQUIRED_STATUSES = ['ai-review', 'security', 'tier-approval'];
 const REQUIRED_CHECK = 'ci';
 
@@ -211,7 +211,7 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
  * marker. The PR that adds it (bootstrap) is therefore exempt, and every commit
  * after it is judged. Removing the marker is a Tier 2 change (.github/**).
  */
-const GUARD_MARKER = '.github/main-guard.armed';
+const GUARD_MARKER = '.github/main-guard.lock';
 /** `hasFile(rev, path)` → true if the file exists at that revision. */
 const guardActiveFor = (hasFile, sha) => hasFile(`${sha}^`, GUARD_MARKER);
 
@@ -219,7 +219,7 @@ const guardActiveFor = (hasFile, sha) => hasFile(`${sha}^`, GUARD_MARKER);
  * The commits main-guard judges (REQ-GATE-2): only those that landed on main
  * itself, i.e. its first-parent history. Commits that arrive through a merge's
  * second parent are covered by the merge commit's own verdict (an A9 merge
- * needs claude[bot] + trusted merge-evidence), so judging them again flags
+ * needs MERGE_BOT + trusted merge-evidence), so judging them again flags
  * every branch commit of a legitimate merge as a "direct push" (incident #12).
  * `git` runs a git command and returns stdout. Push mode: before..after.
  * Sweep mode: first-parent commits on `ref` since `since` (ISO date). Oldest first.
@@ -231,7 +231,7 @@ function guardCommits(git, { before, after, since, ref = 'origin/main' } = {}) {
 
 /**
  * REQ-GATE-2: is a commit on main allowed? Allowed are:
- *  - an A9 squash merge: the commit's PR was merged by claude[bot] at this sha,
+ *  - an A9 squash merge: the commit's PR was merged by MERGE_BOT (A9's App) at this sha,
  *    and its head carries a trusted green `merge-evidence` status;
  *  - an exact revert (scripts/rollback or main-guard's own revert), proved by
  *    the caller replaying the revert (`exactRevertOf` = the reverted sha);
@@ -278,16 +278,91 @@ function decideFindings(candidates, voteSets, { quorum } = {}) {
   return { kept, dropped, important: kept.filter((k) => k.severity === 'Important') };
 }
 
-/** REQ-CB-4: does a Claude run's output show a subscription usage limit? */
-const USAGE_LIMIT_RE = /usage limit|limit reached|rate[ _-]?limit(ed)?|5-hour limit|weekly limit|too many requests|\b429\b|overloaded_error/i;
-const isUsageLimited = (text) => USAGE_LIMIT_RE.test(String(text || ''));
+/**
+ * REQ-CB-4: does a Claude run's execution file show a subscription usage limit?
+ *
+ * Only the run's final `result` message is checked, and only when that result is an
+ * error (incident #21 / #20). Claude Code's stream-json carries a `rate_limit_event`
+ * in every run, and a successful run's final text may quote a limit message (A0 or A10
+ * writing about throttling), so neither may open a `throttled` issue.
+ */
+const USAGE_LIMIT_RE = /usage_limit_reached|usage limit reached|you(?:'|’)ve hit your (?:[\w-]+ )*limit|\b(?:5-hour|weekly|opus) limit\b|API Error: 429\b/i;
 
-/** REQ-FLOW-2: the next rung of the implementer ladder after a failed attempt. */
-function nextRung(implementer, attempt) {
-  if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1 };
-  if (implementer === 'local') return { implementer: 'claude', attempt: 1, handoff: true };
-  if (implementer === 'claude' && attempt < 2) return { implementer: 'claude', attempt: attempt + 1 };
+/** The last `{type: "result"}` message in an execution file (JSON array or JSON lines). */
+function finalResult(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  let msgs;
+  try {
+    const j = JSON.parse(s);
+    msgs = Array.isArray(j) ? j : [j];
+  } catch {
+    msgs = s.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } });
+  }
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i] && msgs[i].type === 'result') return msgs[i];
+  return null;
+}
+
+function isUsageLimited(text) {
+  const r = finalResult(text);
+  if (!r) return false;
+  if (Number(r.api_error_status) === 429) return true;
+  if (r.is_error !== true) return false;
+  const said = [r.result, r.error, r.subtype, ...(Array.isArray(r.errors) ? r.errors : [])]
+    .map((x) => (typeof x === 'string' ? x : JSON.stringify(x ?? ''))).join('\n');
+  return USAGE_LIMIT_RE.test(said);
+}
+
+/**
+ * REQ-FLOW-2 / FLOW-7: what the ladder does after an attempt that didn't publish.
+ *   ctx.job        the implementer job's result: success | failure | cancelled
+ *   ctx.retry      infra retries of this rung so far (0 or 1)
+ *   ctx.run        this run's id: its `attempt` artifact holds the work in progress
+ *   ctx.handoffRun the run whose artifact this attempt was given, if any
+ *   ctx.hasArtifact whether this run uploaded an `attempt` artifact (its work in progress)
+ * An infra failure (runner lost, gaming pause, job timeout) re-runs the same rung once
+ * with the hand-off it already had. Otherwise the next rung gets THIS attempt's
+ * slice.patch + test.log (local→local, local→Claude, Claude→Claude), as hints for a
+ * clean tree (incident #21). Returns {implementer, attempt, handoffRun, retry} or {replan}.
+ */
+function nextRung(implementer, attempt, ctx = {}) {
+  const run = ctx.run ? String(ctx.run) : '';
+  const inherited = ctx.handoffRun ? String(ctx.handoffRun) : '';
+  if ((ctx.job === 'failure' || ctx.job === 'cancelled') && Number(ctx.retry || 0) === 0) {
+    // Prefer this run's own saved work in progress (saved even after a timeout); fall back to
+    // the hand-off it already had if the run left no `attempt` artifact (runner lost early).
+    return { implementer, attempt, handoffRun: ctx.hasArtifact && run ? run : inherited, retry: 1, infra: true };
+  }
+  if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1, handoffRun: run, retry: 0 };
+  if (implementer === 'local') return { implementer: 'claude', attempt: 1, handoffRun: run, retry: 0 };
+  if (implementer === 'claude' && attempt < 2) return { implementer: 'claude', attempt: attempt + 1, handoffRun: run, retry: 0 };
   return { replan: true };
+}
+
+// ---------------------------------------------------------------- publishing
+
+/** Implementers may never change these (spec §8.1); A10 proposals may, except `.github/`. */
+const POLICY_RE = /^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/|\.claude\/|\.github\/|scripts\/gates\/|scripts\/agents\/|scripts\/rollback|evals\/)/;
+/**
+ * Every path a range touches. `--no-renames` reports a rename as a delete plus an add, so
+ * BOTH the old and the new path are listed (a renamed policy file can't hide; A7 on #23).
+ */
+const changedPaths = (git, base, head = 'HEAD') =>
+  [...new Set(git('diff', '--name-only', '--no-renames', base, head).split('\n').map((x) => x.trim()).filter(Boolean))];
+const policyViolations = (paths, re = POLICY_RE) => paths.filter((f) => re.test(f));
+
+/** The coder Apps that open slice PRs (spec §8.5). */
+const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
+/**
+ * A fix round may only push to an agent-owned slice PR (A7 on #23): open, same repo, opened
+ * by a coder App, on a branch named agent/<issue>-local|claude. Returns a reason, or '' if OK.
+ */
+function fixRoundRefusal(pr, repoFullName) {
+  if (!pr || pr.state !== 'open') return 'PR is not open';
+  if (!pr.head || !pr.head.repo || pr.head.repo.full_name !== repoFullName) return 'head is not in this repo';
+  if (!/^agent\/\d+-(local|claude)$/.test(pr.head.ref || '')) return `branch ${pr.head && pr.head.ref} is not an agent slice branch`;
+  if (!pr.user || !CODER_BOTS.includes(pr.user.login)) return `PR was opened by ${pr.user && pr.user.login}, not a coder App`;
+  return '';
 }
 
 // ---------------------------------------------------------------- misc
@@ -309,5 +384,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, decideFindings, isUsageLimited, nextRung,
+  dublinHour, decideFindings, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal,
 };

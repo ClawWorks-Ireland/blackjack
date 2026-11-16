@@ -15,7 +15,6 @@ permissions:
   issues: read
   statuses: write
   checks: read
-  id-token: write
 concurrency:
   group: merge          # serial merges (REQ-GATE-1, T17)
   cancel-in-progress: false
@@ -44,7 +43,7 @@ jobs:
   act:
     needs: plan
     if: needs.plan.outputs.action == 'merge' || needs.plan.outputs.action == 'update'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     permissions:   # read-only GITHUB_TOKEN for gate.js reads; writes use the App token
       contents: read
@@ -52,33 +51,37 @@ jobs:
       statuses: read
       checks: read
       issues: write   # throttle-check only
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false, clean: true }
-      - id: cmd
-        run: |
-          if [ "${{ needs.plan.outputs.action }}" = merge ]; then
-            echo "run=node scripts/gates/gate.js merge-execute --pr ${{ needs.plan.outputs.pr }} --sha ${{ needs.plan.outputs.sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=node scripts/gates/gate.js update-branch --pr ${{ needs.plan.outputs.pr }}" >> "$GITHUB_OUTPUT"
-          fi
-      - id: claude
-        uses: anthropics/claude-code-action@v1
-        env: { GATE_READ_TOKEN: "${{ github.token }}" }
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
-          prompt: |
-            Run exactly this one command and report its output. Do nothing else:
-            ${{ steps.cmd.outputs.run }}
-          claude_args: >-
-            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
-            --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
-      - if: failure()
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+          app-id: ${{ secrets.A9_APP_ID }}
+          private-key: ${{ secrets.A9_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
+          permission-contents: write
+          permission-pull-requests: write
+          permission-statuses: read
+          permission-checks: read
+          permission-workflows: write
+      - name: Merge or update the branch (fixed script, no model; A7 on #23)
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          GATE_READ_TOKEN: ${{ github.token }}
+          ACTION: ${{ needs.plan.outputs.action }}
+          PR: ${{ needs.plan.outputs.pr }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "bad pr"; exit 1; }
+          if [ "$ACTION" = merge ]; then
+            [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "bad sha"; exit 1; }
+            node scripts/gates/gate.js merge-execute --pr "$PR" --sha "$SHA"
+          else
+            node scripts/gates/gate.js update-branch --pr "$PR"
+          fi
 
   notes:
     needs: [plan, act]
@@ -93,4 +96,4 @@ jobs:
           MSG=""
           echo "$FILES" | grep -qE '^(macos/|engine/|agent/)' && MSG="$MSG\n- macOS CI owed on the Mac: \`macos/scripts/ci.sh\`"
           echo "$FILES" | grep -qE '^(web/|engine/|index\.html)' && MSG="$MSG\n- QA round owed: \`node qa/run-round.js <merge sha>\`"
-          [ -n "$MSG" ] && gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: A9 Release Manager   ITEM: #%s   RESULT: done\nMerged by merge.yml after verifying all gates (REQ-GATE-1).\nManual checks these hosts cannot run yet:%b' "$PR" "$MSG")" || true
+          [ -n "$MSG" ] && gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: Release Manager (A9)   ITEM: #%s   RESULT: done\nMerged by merge.yml after verifying all gates (REQ-GATE-1).\nManual checks these hosts cannot run yet:%b' "$PR" "$MSG")" || true

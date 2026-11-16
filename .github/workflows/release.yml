@@ -11,7 +11,6 @@ on:
         required: true
 permissions:
   contents: read
-  id-token: write
 concurrency:
   group: release
   cancel-in-progress: false
@@ -35,24 +34,30 @@ jobs:
 
   rollback:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with: { ref: main, fetch-depth: 0, persist-credentials: false, clean: true }
-      - id: cmd
-        env: { SHA: "${{ inputs.rollback }}" }
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
+        with:
+          app-id: ${{ secrets.A9_APP_ID }}
+          private-key: ${{ secrets.A9_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
+          permission-contents: write
+          permission-pull-requests: write
+          permission-statuses: read
+          permission-checks: read
+          permission-workflows: write
+      - name: Roll back (fixed script, no model)
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          SHA: ${{ inputs.rollback }}
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || { echo "not a sha: $SHA"; exit 1; }
-          echo "run=scripts/rollback $SHA --push" >> "$GITHUB_OUTPUT"
-      - uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
-          prompt: |
-            Run exactly this command and report its output. Do nothing else:
-            ${{ steps.cmd.outputs.run }}
-          claude_args: >-
-            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
-            --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
+          git config user.name 'clawworks-release-manager[bot]'
+          git config user.email 'clawworks-release-manager[bot]@users.noreply.github.com'
+          scripts/rollback "$SHA" --push

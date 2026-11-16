@@ -17,7 +17,6 @@ permissions:
   issues: write
   pull-requests: write
   actions: write
-  id-token: write
 concurrency:
   group: implement-${{ inputs.issue }}
   cancel-in-progress: false
@@ -26,6 +25,8 @@ env:
   IMPL: ${{ inputs.implementer }}
   ATTEMPT: ${{ inputs.attempt }}
   FIX_PR: ${{ inputs.pr }}
+  HANDOFF_RUN: ${{ inputs.handoff_run }}
+  RETRY: ${{ inputs.retry }}
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -35,13 +36,31 @@ jobs:
       base: ${{ steps.g.outputs.base }}
     env: { GITHUB_TOKEN: "${{ github.token }}" }
     steps:
+      - uses: actions/checkout@v4   # for scripts/gates/lib.js
+        with: { persist-credentials: false }
+      - name: Validate dispatch inputs (they reach shells; A7 sec-1 on #23)
+        run: |
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "bad issue: $ISSUE"; exit 1; }
+          [[ "$IMPL" =~ ^(local|claude)$ ]] || { echo "bad implementer"; exit 1; }
+          [[ "$ATTEMPT" =~ ^[12]$ ]] || { echo "bad attempt"; exit 1; }
+          [[ -z "$FIX_PR" || "$FIX_PR" =~ ^[0-9]+$ ]] || { echo "bad pr"; exit 1; }
+          [[ -z "$HANDOFF_RUN" || "$HANDOFF_RUN" =~ ^[0-9]+$ ]] || { echo "bad handoff_run"; exit 1; }
+          [[ "$RETRY" =~ ^[01]$ ]] || { echo "bad retry"; exit 1; }
       - id: g
         run: |
           T=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length)
           if [ "$T" != "0" ] && [ "$ATTEMPT" = "1" ] && [ -z "$FIX_PR" ] && [ "$IMPL" = local ]; then
             echo "Throttled (REQ-CB-4a): not starting new slice #$ISSUE; A0 re-dispatches after limits reset."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          BASE=main; [ -n "$FIX_PR" ] && BASE=$(gh pr view "$FIX_PR" -R "$GITHUB_REPOSITORY" --json headRefName -q .headRefName)
+          BASE=main
+          if [ -n "$FIX_PR" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$FIX_PR" > fixpr.json
+            WHY=$(node -e 'console.log(require("./scripts/gates/lib.js").fixRoundRefusal(require("./fixpr.json"), process.env.GITHUB_REPOSITORY))')
+            [ -z "$WHY" ] || { echo "refusing fix round on #$FIX_PR: $WHY"; exit 1; }
+            BASE=$(node -p 'require("./fixpr.json").head.ref')
+          fi
+          # the branch name reaches git commands: plain names only (A7 on #23)
+          git check-ref-format --branch "$BASE" >/dev/null && [[ "$BASE" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "bad base branch"; exit 1; }
           echo "go=true" >> "$GITHUB_OUTPUT"; echo "base=$BASE" >> "$GITHUB_OUTPUT"
           gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label status:in-progress --remove-label status:planned 2>/dev/null || true
 
@@ -50,19 +69,36 @@ jobs:
     if: needs.gate.outputs.go == 'true' && inputs.implementer == 'local'
     runs-on: [self-hosted, local-llm]   # queues while the PC/runner is offline; never falls back (REQ-CFG-4, T14)
     timeout-minutes: 60
+    permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: the local model\'s code runs here (A7 on #23)
+    env: { BASE: "${{ needs.gate.outputs.base }}" }   # validated in the gate job
     outputs:
       result: ${{ steps.t.outputs.result }}
     steps:
       - uses: actions/checkout@v4   # trusted base: harness settings + policy guard
         with: { ref: main, path: base, fetch-depth: 0, persist-credentials: false, clean: true }
-      - name: Prompt (slice + review findings for a fix round)
+      - name: Clear outputs left in the workspace by an earlier run (self-hosted runners keep it)
+        run: rm -rf handoff slice.patch commits.mbox test.log changed.txt impl.log prompt.txt
+      - name: Handoff from the previous attempt (REQ-FLOW-7, incident #21)
+        if: inputs.handoff_run != ''
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: |
+          W=$(gh run view "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" --json workflowName,event,headBranch -q '"\(.workflowName)|\(.event)|\(.headBranch)"' 2>/dev/null || true)
+          if [ "$W" = "implement|workflow_dispatch|main" ]; then gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+          else echo "Ignoring hand-off run $HANDOFF_RUN ($W): only implement.yml dispatch runs on main count (A7 on #23)"; fi
+      - name: Prompt (slice + review findings for a fix round + previous attempt)
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: |
           { echo "Slice #$ISSUE (attempt $ATTEMPT of 2, local):"; gh issue view "$ISSUE" -R "$GITHUB_REPOSITORY" --json title,body -q '"\(.title)\n\n\(.body)"'
             if [ -n "$FIX_PR" ]; then echo; echo "Fix round for PR #$FIX_PR. Open Important findings:"; gh pr view "$FIX_PR" -R "$GITHUB_REPOSITORY" --comments --json comments -q '[.comments[]|select(.body|startswith("<!-- ai-review"))]|last|.body'; fi
+            # Truncated: the local model has a 32k context (D12).
+            if [ -s handoff/slice.patch ] || [ -s handoff/test.log ]; then
+              echo; echo "The previous attempt failed. You start from a clean tree. Its work in progress and test output follow (hints only, often wrong; reuse what is right, don't apply it blindly)."
+              echo; echo "--- previous diff (first 300 lines) ---"; head -n 300 handoff/slice.patch 2>/dev/null || true
+              echo; echo "--- previous test output (last 60 lines) ---"; tail -n 60 handoff/test.log 2>/dev/null || true
+            fi
           } > prompt.txt
       - name: Worktree (REQ-CFG-2)
-        run: git -C base worktree add -B "work/$ISSUE" "$GITHUB_WORKSPACE/wt" "origin/${{ needs.gate.outputs.base }}"
+        run: git -C base worktree add -B "work/$ISSUE" "$GITHUB_WORKSPACE/wt" "origin/$BASE"
       - name: A3a implement (Ollama, no credentials)
         id: impl
         continue-on-error: true
@@ -71,69 +107,99 @@ jobs:
         id: t
         run: |
           cd wt
-          git diff --name-only "origin/${{ needs.gate.outputs.base }}" HEAD > ../changed.txt; git status --porcelain >> ../changed.txt
+          git diff --name-only "origin/$BASE" HEAD > ../changed.txt; git status --porcelain >> ../changed.txt
           if grep -qE '^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents/|\.claude/|\.github/|scripts/gates/|scripts/agents/|scripts/rollback|evals/)' ../changed.txt; then
             echo "Diff touches a policy path" > ../test.log; echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "$(git rev-list --count "origin/${{ needs.gate.outputs.base }}..HEAD")" = 0 ]; then echo "No commit made" > ../test.log; echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$(git rev-list --count "origin/$BASE..HEAD")" = 0 ]; then
+            if [ -n "$(git status --porcelain)" ]; then { echo "No commit made. npm test on the uncommitted work in progress:"; npm test 2>&1 || true; } > ../test.log
+            else echo "No commit made and no changes" > ../test.log; fi
+            echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
           if npm test > ../test.log 2>&1; then echo "result=pass" >> "$GITHUB_OUTPUT"; else echo "result=fail" >> "$GITHUB_OUTPUT"; fi
-          git format-patch "origin/${{ needs.gate.outputs.base }}" --stdout > ../slice.patch
+          git format-patch "origin/$BASE" --stdout > ../commits.mbox
+      - name: Save work in progress, committed or not, also after a timeout (incident #21)
+        if: always()
+        run: |
+          [ -d wt ] || exit 0
+          git -C wt add -A && git -C wt diff --cached "origin/$BASE" > slice.patch || true
+          [ -s test.log ] || echo "No test run: the attempt ended before the tests (implement step: ${{ steps.impl.outcome }})." > test.log
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: attempt, path: "slice.patch\ntest.log\nimpl.log\nprompt.txt\nchanged.txt", retention-days: 30, if-no-files-found: warn }
+        with: { name: attempt, path: "slice.patch\ncommits.mbox\ntest.log\nimpl.log\nprompt.txt\nchanged.txt", retention-days: 30, if-no-files-found: warn }
       - if: always()
         run: git -C base worktree remove --force "$GITHUB_WORKSPACE/wt" || true
 
   claude:
     needs: gate
     if: needs.gate.outputs.go == 'true' && inputs.implementer == 'claude'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: [self-hosted, claude-code]   # a model runs code here: never the runner that handles App keys (A7 on #23)
     timeout-minutes: 60
+    env: { BASE: "${{ needs.gate.outputs.base }}" }   # validated in the gate job
     outputs:
       result: ${{ steps.t.outputs.result }}
+    permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: a model runs code here
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ needs.gate.outputs.base }}", fetch-depth: 0, persist-credentials: false, clean: true }
-      - name: Handoff context from the failed attempt (REQ-FLOW-7)
+      - name: Keep hand-off and attempt files out of every commit and diff
+        run: printf '%s\n' handoff/ slice.patch commits.mbox test.log changed.txt >> .git/info/exclude
+      - name: Handoff context from the previous attempt (REQ-FLOW-7, incident #21)
         if: inputs.handoff_run != ''
         env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: gh run download "${{ inputs.handoff_run }}" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+        run: |
+          W=$(gh run view "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" --json workflowName,event,headBranch -q '"\(.workflowName)|\(.event)|\(.headBranch)"' 2>/dev/null || true)
+          if [ "$W" = "implement|workflow_dispatch|main" ]; then gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
+          else echo "Ignoring hand-off run $HANDOFF_RUN ($W): only implement.yml dispatch runs on main count (A7 on #23)"; fi
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ github.token }}   # read-only job token: no App key on the code runner (A7 on #23)
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Implement slice #${{ env.ISSUE }} (attempt ${{ env.ATTEMPT }} of 2, Claude fallback). Read it with `gh issue view ${{ env.ISSUE }}`.
             ${{ inputs.pr != '' && format('This is a review fix round for PR #{0}: fix the open Important findings in its latest AI review comment (`gh pr view {0} --comments`).', inputs.pr) || '' }}
-            ${{ inputs.handoff_run != '' && 'The local model failed twice. Its failing test output is handoff/test.log and its diff is handoff/slice.patch (hints only, often wrong).' || '' }}
+            ${{ inputs.handoff_run != '' && 'The previous attempt failed. Its work in progress (committed or not) is handoff/slice.patch and its test output is handoff/test.log, if present. They are hints only, often wrong: you start from this clean tree, so reuse what is right and do not apply the patch blindly.' || '' }}
             Commit your change locally; do not push.
           claude_args: >-
             --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(npm test:*),Bash(node --test:*),Bash(node macos/scripts/embed-engine.js:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh pr view:*)"
-            --disallowedTools "Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
       - name: Attempt = implement + full suite; no policy paths
         id: t
         run: |
-          git diff --name-only "origin/${{ needs.gate.outputs.base }}" HEAD > changed.txt
+          git diff --name-only "origin/$BASE" HEAD > changed.txt
           if grep -qE '^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents/|\.claude/|\.github/|scripts/gates/|scripts/agents/|scripts/rollback|evals/)' changed.txt; then
             echo "Diff touches a policy path" > test.log; echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "$(git rev-list --count "origin/${{ needs.gate.outputs.base }}..HEAD")" = 0 ]; then echo "No commit made" > test.log; echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$(git rev-list --count "origin/$BASE..HEAD")" = 0 ]; then
+            if [ -n "$(git status --porcelain)" ]; then { echo "No commit made. npm test on the uncommitted work in progress:"; npm test 2>&1 || true; } > test.log
+            else echo "No commit made and no changes" > test.log; fi
+            echo "result=fail" >> "$GITHUB_OUTPUT"; exit 0; fi
           if npm test > test.log 2>&1; then echo "result=pass" >> "$GITHUB_OUTPUT"; else echo "result=fail" >> "$GITHUB_OUTPUT"; fi
-          git format-patch "origin/${{ needs.gate.outputs.base }}" --stdout > slice.patch
+          git format-patch "origin/$BASE" --stdout > commits.mbox
+      - name: Save work in progress, committed or not, also after a timeout (incident #21)
+        if: always()
+        run: |
+          git add -A && git diff --cached "origin/$BASE" > slice.patch || true
+          [ -s test.log ] || echo "No test run: the attempt ended before the tests (Claude step: ${{ steps.claude.outcome }})." > test.log
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: attempt, path: "slice.patch\ntest.log\nchanged.txt", retention-days: 30, if-no-files-found: warn }
-      - if: failure()
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+        with: { name: attempt, path: "slice.patch\ncommits.mbox\ntest.log\nchanged.txt", retention-days: 30, if-no-files-found: warn }
+      - name: Keep the run log for the throttle check (it runs in a job with no model)
+        if: failure() && steps.claude.outcome == 'failure'
+        run: cp "${{ steps.claude.outputs.execution_file }}" "$RUNNER_TEMP/claude-exec.json" || true
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.claude.outcome == 'failure'
+        with: { name: claude-exec-claude, path: "${{ runner.temp }}/claude-exec.json", retention-days: 7, if-no-files-found: ignore }
 
   verify:
     needs: [gate, local, claude]
     if: always() && (needs.local.outputs.result == 'pass' || needs.claude.outputs.result == 'pass')
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: [self-hosted, claude-code]   # a model runs code here: never the runner that handles App keys (A7 on #23)
     timeout-minutes: 30
+    env: { BASE: "${{ needs.gate.outputs.base }}" }   # validated in the gate job
     outputs:
       pass: ${{ steps.v.outputs.pass }}
+    permissions: { contents: read, pull-requests: read, actions: read, issues: read }   # read-only: a model runs code here
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ needs.gate.outputs.base }}", fetch-depth: 0, persist-credentials: false, clean: true }
@@ -141,21 +207,22 @@ jobs:
         with: { name: attempt, path: attempt }
       - id: s
         run: |
-          git -c user.name=a4 -c user.email=a4@local am --3way attempt/slice.patch
-          git diff "origin/${{ needs.gate.outputs.base }}" HEAD > slice.diff
+          git -c user.name=a4 -c user.email=a4@local am --3way attempt/commits.mbox
+          git diff "origin/$BASE" HEAD > slice.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json"))')" >> "$GITHUB_OUTPUT"
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ github.token }}   # read-only job token: no App key on the code runner (A7 on #23)
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Self-verify slice #${{ env.ISSUE }} before its PR opens. The implementer's diff is ./slice.diff and is applied to this checkout.
             Read the slice with `gh issue view ${{ env.ISSUE }}`. You have no context from the implementer (REQ-ROLE-2).
           claude_args: >-
             --append-system-prompt-file .claude/agents/self-verifier.md --model sonnet --max-turns 40
             --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
             --json-schema '${{ steps.s.outputs.schema }}'
       - id: v
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
@@ -165,14 +232,17 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: self-verify, path: a4.json, retention-days: 30 }
-      - if: failure()
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+      - name: Keep the run log for the throttle check (it runs in a job with no model)
+        if: failure() && steps.claude.outcome == 'failure'
+        run: cp "${{ steps.claude.outputs.execution_file }}" "$RUNNER_TEMP/claude-exec.json" || true
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.claude.outcome == 'failure'
+        with: { name: claude-exec-verify, path: "${{ runner.temp }}/claude-exec.json", retention-days: 7, if-no-files-found: ignore }
 
   publish:
     needs: [gate, verify]
     if: always() && needs.verify.outputs.pass == 'true'
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     permissions:   # read-only GITHUB_TOKEN for gate.js reads; writes use the App token
       contents: read
@@ -180,27 +250,27 @@ jobs:
       statuses: read
       checks: read
       issues: write   # throttle-check only
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with: { ref: main, fetch-depth: 0, persist-credentials: false, clean: true }
       - uses: actions/download-artifact@v4
         with: { name: attempt, path: attempt }
-      - id: cmd
-        run: echo "run=node scripts/gates/gate.js publish --patch attempt/slice.patch --issue $ISSUE --implementer $IMPL${FIX_PR:+ --pr $FIX_PR}" >> "$GITHUB_OUTPUT"
-      - uses: anthropics/claude-code-action@v1
-        env: { GATE_READ_TOKEN: "${{ github.token }}" }
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
-          prompt: |
-            Run exactly this command and report its output. Do nothing else:
-            ${{ steps.cmd.outputs.run }}
-          claude_args: >-
-            --append-system-prompt-file .claude/agents/release-manager.md --model haiku --max-turns 4
-            --allowedTools "Bash(${{ steps.cmd.outputs.run }})"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob"
-
+          app-id: ${{ inputs.implementer == 'local' && secrets.A3A_APP_ID || secrets.A3B_APP_ID }}
+          private-key: ${{ inputs.implementer == 'local' && secrets.A3A_APP_KEY || secrets.A3B_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Publish the verified slice (fixed script, no model; A7 on #23)
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          GATE_READ_TOKEN: ${{ github.token }}
+        run: node scripts/gates/gate.js publish --patch attempt/commits.mbox --issue "$ISSUE" --implementer "$IMPL" ${FIX_PR:+--pr "$FIX_PR"}
   ladder:
     needs: [gate, local, claude, verify, publish]
     if: always() && needs.gate.outputs.go == 'true' && needs.publish.result != 'success'
@@ -215,26 +285,44 @@ jobs:
           REASON: ${{ needs.verify.outputs.pass == 'false' && 'A4 self-verify found Important issues' || (needs.local.result == 'failure' || needs.claude.result == 'failure') && 'job error (see run)' || 'tests failed or no valid commit' }}
         run: |
           RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          # Infra failure (runner lost, gaming pause, job timeout) is not the model's attempt: retry the same rung once.
-          JOB="${{ inputs.implementer == 'local' && needs.local.result || needs.claude.result }}"
-          if { [ "$JOB" = failure ] || [ "$JOB" = cancelled ]; } && [ "${{ inputs.retry }}" = 0 ]; then
-            gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="${{ inputs.handoff_run }}" -f retry=1
-            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: A0 ladder   ITEM: #$ISSUE   RESULT: blocked
+          # The rung and its hand-off are decided in lib.js nextRung (unit-tested). Infra failure
+          # (runner lost, gaming pause, job timeout) re-runs the same rung once; otherwise the next
+          # rung gets this run's `attempt` artifact (incident #21).
+          export JOB="${{ inputs.implementer == 'local' && needs.local.result || needs.claude.result }}" RETRY="$RETRY" HANDOFF="$HANDOFF_RUN"
+          HAS_ART=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -q '[.artifacts[]|select(.name=="attempt")]|length' 2>/dev/null || echo 0)
+          export HAS_ART
+          NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF, hasArtifact: Number(e.HAS_ART) > 0 })))')
+          field() { node -p "String(JSON.parse(process.argv[1]).$1 ?? '')" "$NEXT"; }
+          if [ "$(field infra)" = true ]; then
+            gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="$(field handoffRun)" -f retry=1
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: Ladder (A0)   ITEM: #$ISSUE   RESULT: blocked
           WHAT CHANGED: the $IMPL job for attempt $ATTEMPT ended as '$JOB' (runner lost, gaming pause or timeout), not a model failure. Re-running the same attempt once.
           EVIDENCE: $RUN
           NEXT: same implementer, same attempt"
             exit 0
           fi
-          NEXT=$(node -e 'console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(process.env.IMPL, Number(process.env.ATTEMPT))))')
-          if node -e 'process.exit(JSON.parse(process.argv[1]).replan?0:1)' "$NEXT"; then
+          if [ "$(field replan)" = true ]; then
             gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label needs-replan --add-label status:blocked
             WHAT="Ladder exhausted (local ×2, Claude ×2)."; NEXTROLE="A2 Planner: re-slice"
           else
-            NI=$(node -p "JSON.parse(process.argv[1]).implementer" "$NEXT"); NA=$(node -p "JSON.parse(process.argv[1]).attempt" "$NEXT")
-            H=""; [ "$NI" = claude ] && [ "$IMPL" = local ] && H="$GITHUB_RUN_ID"
-            [ -n "${{ inputs.handoff_run }}" ] && [ "$NI" = claude ] && [ -z "$H" ] && H="${{ inputs.handoff_run }}"
+            NI=$(field implementer); NA=$(field attempt); H=$(field handoffRun)
             gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$NI" -f attempt="$NA" -f pr="$FIX_PR" -f handoff_run="$H"
-            WHAT="Dispatched $NI attempt $NA."; NEXTROLE="$([ "$NI" = claude ] && echo 'A3b Claude Implementer' || echo 'A3a Local Implementer')"
+            WHAT="Dispatched $NI attempt $NA with this attempt's work in progress as hints."; NEXTROLE="$([ "$NI" = claude ] && echo 'Claude Coder (A3b)' || echo 'Local Coder (A3a)')"
           fi
-          ROLE=$([ "$IMPL" = local ] && echo "A3a Local Implementer" || echo "A3b Claude Implementer")
+          ROLE=$([ "$IMPL" = local ] && echo "Local Coder (A3a)" || echo "Claude Coder (A3b)")
           gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: %s   ITEM: #%s   RESULT: blocked\nWHAT CHANGED: attempt %s failed: %s. %s\nEVIDENCE: %s (artifact `attempt`: test.log, slice.patch)\nRISKS / ASSUMPTIONS: handoff reason logged for local-model metrics (REQ-FLOW-7)\nNEXT: %s' "$ROLE" "$ISSUE" "$ATTEMPT" "$REASON" "$WHAT" "$RUN" "$NEXTROLE")"
+
+  throttle:   # REQ-CB-4, model-free: the only job here with issues: write (A7 on #23)
+    needs: [claude, verify]
+    if: always() && (needs.claude.result == 'failure' || needs.verify.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { pattern: claude-exec-*, path: exec }
+      - env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: for f in exec/*/claude-exec.json; do [ -f "$f" ] && node scripts/gates/gate.js throttle-check --file "$f"; done; true

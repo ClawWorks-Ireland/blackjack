@@ -17,7 +17,6 @@ permissions:
   pull-requests: read
   actions: write
   statuses: read
-  id-token: write
 concurrency:
   group: orchestrator
   cancel-in-progress: false
@@ -41,12 +40,24 @@ jobs:
           echo "level=$(node scripts/gates/gate.js level)" >> "$GITHUB_OUTPUT"
           echo "throttled=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length)" >> "$GITHUB_OUTPUT"
         env: { EV: "${{ github.event_name }}", DIGEST: "${{ inputs.digest }}" }
+      - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
+        with:
+          app-id: ${{ secrets.A0_APP_ID }}
+          private-key: ${{ secrets.A0_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
+          permission-issues: write
+          permission-pull-requests: read
+          permission-actions: write
       - id: claude
         if: steps.w.outputs.run == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ steps.app.outputs.token }}
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Run the A0 sweep for ${{ github.repository }} (trigger: ${{ github.event_name }}).
             Effective autonomy level: ${{ steps.w.outputs.level }}. Open throttled issues: ${{ steps.w.outputs.throttled }}.
@@ -56,6 +67,6 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/orchestrator.md --model opus --max-turns 60
             --allowedTools "Read,Grep,Glob,Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh issue close:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh label list:*),Bash(gh workflow run implement.yml:*),Bash(gh workflow run spec-plan.yml:*),Bash(gh api -X GET:*),Bash(node scripts/gates/gate.js level)"
-            --disallowedTools "Edit,Write,Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push:*)"
-      - if: failure()
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push:*)"
+      - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"

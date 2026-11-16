@@ -150,10 +150,13 @@ test('ci check must be the github-actions "ci" run on the current head', () => {
 });
 
 test('T15 main-guard: direct pushes are not allowed; A9 merges and exact reverts are', () => {
+  assert.equal(G.MERGE_BOT, 'clawworks-release-manager[bot]');
+  // the old shared Claude App no longer counts as A9
+  assert.equal(G.guardVerdict({ sha: 'f'.repeat(40), guardActive: true, pr: { number: 1, merged_at: 'x', merged_by: { login: 'claude[bot]' }, merge_commit_sha: 'f'.repeat(40) }, headStatuses: [status('merge-evidence', 'success')] }).allowed, false);
   const sha = 'f'.repeat(40);
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: null }).allowed, false);
   assert.equal(G.guardVerdict({ sha, guardActive: false, pr: null }).allowed, true);
-  const pr = { number: 7, merged_at: '2026-11-14T10:00:00Z', merged_by: { login: 'claude[bot]' }, merge_commit_sha: sha };
+  const pr = { number: 7, merged_at: '2026-11-14T10:00:00Z', merged_by: { login: G.MERGE_BOT }, merge_commit_sha: sha };
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr, headStatuses: [status('merge-evidence', 'success')] }).allowed, true);
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr, headStatuses: [status('merge-evidence', 'success', BOT)] }).allowed, false);
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: { ...pr, merged_by: { login: 'delmarolivier' } }, headStatuses: [status('merge-evidence', 'success')] }).allowed, false);
@@ -186,15 +189,81 @@ test('A6 majority vote: a finding needs 2 of 3 real votes; severity by majority'
   assert.equal(tie.kept[0].severity, 'Important');
 });
 
-test('CB-4 usage-limit detection', () => {
-  assert.ok(G.isUsageLimited('Claude AI usage limit reached|1731600000'));
-  assert.ok(G.isUsageLimited('API Error: 429 Too Many Requests'));
+// Execution files as claude-code-action writes them: a JSON array of stream-json messages.
+const execFile = (result, extra = []) => JSON.stringify([
+  { type: 'system', subtype: 'init', session_id: 's' },
+  { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour' } },
+  ...extra,
+  { type: 'result', ...result },
+]);
+
+test('CB-4 usage-limit detection: the 2026-11-14 limit message matches', () => {
+  // T13 (SETUP_REPORT): the real limit hit during setup said `You've hit your 5-hour limit`
+  // with `usage_limit_reached`. Envelope reconstructed; the strings are the ones seen.
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 7pm" })));
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'error_during_execution', is_error: true, result: '', errors: ['usage_limit_reached'] })));
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'success', is_error: true, result: 'Claude AI usage limit reached|1731600000' })));
+  assert.ok(G.isUsageLimited(execFile({ subtype: 'success', is_error: true, api_error_status: 429, result: 'API Error: 429 Too Many Requests' })));
+  // JSON-lines form too
+  const jsonl = JSON.parse(execFile({ is_error: true, result: "You've hit your weekly limit" })).map((m) => JSON.stringify(m)).join('\n');
+  assert.ok(G.isUsageLimited(jsonl));
+});
+
+test('CB-4 usage-limit detection: no false positives (incident #21 / #18)', () => {
+  // Every normal run carries rate_limit_event in its stream: must not match.
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'success', is_error: false, result: 'Done.' })));
+  // A failed run for another reason (max turns, a gh error) with rate_limit_event in the stream.
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'error_max_turns', is_error: true, result: '' })));
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'success', is_error: true, result: 'GraphQL: Projects (classic) is being deprecated' },
+    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'API Error: 429 usage_limit_reached' }] } }])));
+  // A successful run whose final text quotes a limit message (A0/A10 writing about throttling).
+  assert.ok(!G.isUsageLimited(execFile({ subtype: 'success', is_error: false, result: "Retro: the real one said You've hit your 5-hour limit" })));
+  // No result message, empty or missing file, plain text logs.
+  assert.ok(!G.isUsageLimited(JSON.stringify([{ type: 'rate_limit_event' }])));
+  assert.ok(!G.isUsageLimited(''));
+  assert.ok(!G.isUsageLimited('rate_limit_event usage limit reached 429'));
   assert.ok(!G.isUsageLimited('Error: tests failed'));
 });
 
-test('T11 ladder: local ×2, then Claude ×2 with handoff, then re-slice', () => {
-  assert.deepEqual(G.nextRung('local', 1), { implementer: 'local', attempt: 2 });
-  assert.deepEqual(G.nextRung('local', 2), { implementer: 'claude', attempt: 1, handoff: true });
-  assert.deepEqual(G.nextRung('claude', 1), { implementer: 'claude', attempt: 2 });
-  assert.deepEqual(G.nextRung('claude', 2), { replan: true });
+test('T11 ladder: local ×2, then Claude ×2, then re-slice; each rung gets the previous attempt (incident #21)', () => {
+  const ctx = { job: 'success', retry: 0, run: '200', handoffRun: '100' };
+  assert.deepEqual(G.nextRung('local', 1, ctx), { implementer: 'local', attempt: 2, handoffRun: '200', retry: 0 });
+  assert.deepEqual(G.nextRung('local', 2, ctx), { implementer: 'claude', attempt: 1, handoffRun: '200', retry: 0 });
+  assert.deepEqual(G.nextRung('claude', 1, ctx), { implementer: 'claude', attempt: 2, handoffRun: '200', retry: 0 });
+  assert.deepEqual(G.nextRung('claude', 2, ctx), { replan: true });
+  // Local attempt 1 timing out inside local-implement.sh (no commit) is a model attempt: hand it over.
+  assert.deepEqual(G.nextRung('local', 1, { job: 'success', run: '43753799564' }).handoffRun, '43753799564');
+  // First attempt with no context still works
+  assert.deepEqual(G.nextRung('local', 1), { implementer: 'local', attempt: 2, handoffRun: '', retry: 0 });
+});
+
+test('T11 ladder: infra failure re-runs the same rung once with the hand-off it had', () => {
+  for (const job of ['failure', 'cancelled']) {
+    assert.deepEqual(G.nextRung('claude', 1, { job, retry: 0, run: '300', handoffRun: '200' }),
+      { implementer: 'claude', attempt: 1, handoffRun: '200', retry: 1, infra: true });
+    assert.deepEqual(G.nextRung('local', 2, { job, retry: '0', run: '300' }),
+      { implementer: 'local', attempt: 2, handoffRun: '', retry: 1, infra: true });
+  }
+  // #23 review: an infra retry gets this run's own saved work in progress when it has one
+  assert.deepEqual(G.nextRung('local', 1, { job: 'cancelled', retry: 0, run: 'R1', handoffRun: '', hasArtifact: true }),
+    { implementer: 'local', attempt: 1, handoffRun: 'R1', retry: 1, infra: true });
+  assert.deepEqual(G.nextRung('claude', 1, { job: 'failure', retry: 0, run: '300', handoffRun: '200', hasArtifact: false }),
+    { implementer: 'claude', attempt: 1, handoffRun: '200', retry: 1, infra: true });
+  // Second infra failure advances, handing over that run's saved work in progress
+  assert.deepEqual(G.nextRung('claude', 1, { job: 'failure', retry: 1, run: '301', handoffRun: '200' }),
+    { implementer: 'claude', attempt: 2, handoffRun: '301', retry: 0 });
+  assert.deepEqual(G.nextRung('claude', 2, { job: 'failure', retry: 1, run: '302' }), { replan: true });
+});
+
+test('fix rounds only push to agent-owned slice PRs (A7 on #23)', () => {
+  const R = 'ClawWorks-Ireland/blackjack';
+  const ok = { state: 'open', user: { login: 'clawworks-local-coder[bot]' }, head: { ref: 'agent/15-local', repo: { full_name: R } } };
+  assert.equal(G.fixRoundRefusal(ok, R), '');
+  assert.equal(G.fixRoundRefusal({ ...ok, head: { ...ok.head, ref: 'agent/15-claude' }, user: { login: 'clawworks-claude-coder[bot]' } }, R), '');
+  assert.match(G.fixRoundRefusal({ ...ok, head: { ...ok.head, ref: 'main' } }, R), /not an agent slice branch/);
+  assert.match(G.fixRoundRefusal({ ...ok, head: { ...ok.head, ref: 'agent-team/identities' } }, R), /not an agent slice branch/);
+  assert.match(G.fixRoundRefusal({ ...ok, user: { login: 'clawworks-console[bot]' } }, R), /not a coder App/);
+  assert.match(G.fixRoundRefusal({ ...ok, user: { login: 'delmarolivier' } }, R), /not a coder App/);
+  assert.match(G.fixRoundRefusal({ ...ok, head: { ...ok.head, repo: { full_name: 'someone/fork' } } }, R), /not in this repo/);
+  assert.match(G.fixRoundRefusal({ ...ok, state: 'closed' }, R), /not open/);
 });

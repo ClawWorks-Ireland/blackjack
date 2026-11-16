@@ -15,7 +15,6 @@ permissions:
   issues: write
   pull-requests: write
   actions: read
-  id-token: write
 concurrency:
   group: retro
   cancel-in-progress: false
@@ -30,35 +29,95 @@ jobs:
         env:
           MSG: ${{ github.event.head_commit.message }}
           LABEL: ${{ github.event.label.name }}
+          SENDER: ${{ github.event.sender.login }}
+          IN_INCIDENT: ${{ inputs.incident }}
         run: |
           M=""
           case "${{ github.event_name }}" in
-            issues) [ "$LABEL" = incident ] && M=incident ;;
+            issues) [ "$LABEL" = incident ] && [ "$SENDER" != "clawworks-incident-reviewer[bot]" ] && M=incident ;;
             push) printf '%s' "$MSG" | grep -qE '^(Rollback-of|Main-guard-revert): ' && M=revert ;;
             schedule) M=weekly ;;
-            workflow_dispatch) M=$([ -n "${{ inputs.incident }}" ] && echo incident || echo weekly) ;;
+            workflow_dispatch) [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }; M=$([ -n "$IN_INCIDENT" ] && echo incident || echo weekly) ;;
           esac
           echo "mode=$M" >> "$GITHUB_OUTPUT"
   a10:
     needs: route
     if: needs.route.outputs.mode != ''
-    runs-on: [self-hosted, claude-jobs]
+    runs-on: [self-hosted, claude-code]   # a model runs code here, so no App key ever comes here (A7 on #23)
     timeout-minutes: 60
+    permissions: { contents: read, issues: read, pull-requests: read, actions: read }   # read-only: a model runs code here
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0, clean: true, persist-credentials: false }
+      - run: rm -rf out && mkdir -p out
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "github-actions,claude"   # our own automation only (REQ-COMMS-3); incident #16
+          github_token: ${{ github.token }}   # read-only; A10's writes happen in a10-publish, without a model
+          allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
             Mode: ${{ needs.route.outputs.mode }}. Incident issue: ${{ inputs.incident || github.event.issue.number || 'find the newest open issue labelled incident' }}. Commit: ${{ github.sha }}.
-            Follow your definition. Open proposals as ONE Tier 2 PR from a branch named agent/retro-<date>. Never merge.
+            Follow your definition. You can't post or push: write your output to ./out/ as your definition describes, and commit any proposal on a local branch. Never merge.
           claude_args: >-
-            --append-system-prompt-file .claude/agents/incident-retro.md --model opus --max-turns 80
-            --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git checkout -b agent/retro-:*),Bash(git add:*),Bash(git commit:*),Bash(git push origin agent/retro-:*),Bash(git log:*),Bash(git diff:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh run list:*),Bash(gh api -X GET:*),Bash(npm test:*)"
-            --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push origin main:*),Bash(git push origin HEAD:main:*)"
-      - if: failure()
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+            --append-system-prompt-file .claude/agents/incident-retro.md --model opus --max-turns 120
+            --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git checkout -b agent/retro-:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(git diff:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh run list:*),Bash(gh api -X GET:*),Bash(npm test:*)"
+            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr create:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh issue comment:*),Bash(gh issue create:*)"
+      - name: Package the proposal commits
+        if: always()
+        run: |
+          git format-patch origin/main..HEAD --stdout > out/proposal.mbox 2>/dev/null || : > out/proposal.mbox
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: a10-out, path: out/, retention-days: 30, if-no-files-found: warn }
+      - name: Keep the run log for the throttle check (it runs in a job with no model)
+        if: failure() && steps.claude.outcome == 'failure'
+        run: cp "${{ steps.claude.outputs.execution_file }}" "$RUNNER_TEMP/claude-exec.json" || true
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.claude.outcome == 'failure'
+        with: { name: claude-exec-a10, path: "${{ runner.temp }}/claude-exec.json", retention-days: 7, if-no-files-found: ignore }
+
+  a10-publish:
+    needs: [route, a10]
+    if: always() && needs.route.outputs.mode != '' && needs.a10.result != 'skipped'
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
+    timeout-minutes: 10
+    permissions: { contents: read, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, fetch-depth: 0, persist-credentials: false, clean: true }
+      - uses: actions/download-artifact@v4
+        with: { name: a10-out, path: out }
+      - id: app   # A10's own GitHub identity (spec §8.5), used by a fixed script only
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned
+        with:
+          app-id: ${{ secrets.A10_APP_ID }}
+          private-key: ${{ secrets.A10_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Publish A10's output (no model in this step)
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          IN_INCIDENT: ${{ inputs.incident || github.event.issue.number }}
+        run: |
+          [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }
+          node scripts/gates/gate.js a10-publish --dir out ${IN_INCIDENT:+--incident $IN_INCIDENT}
+
+  throttle:   # REQ-CB-4, model-free: the only job here with issues: write (A7 on #23)
+    needs: [a10]
+    if: always() && (needs.a10.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { pattern: claude-exec-*, path: exec }
+      - env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: for f in exec/*/claude-exec.json; do [ -f "$f" ] && node scripts/gates/gate.js throttle-check --file "$f"; done; true

@@ -17,6 +17,7 @@
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R   A6 majority → ai-review status + comment
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
+ *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
  *
  * Token: GITHUB_TOKEN or GH_TOKEN. Repo: GITHUB_REPOSITORY (owner/name).
  * Policy (RISK.md, .agents/PROJECT.md) is read from the working directory,
@@ -200,8 +201,8 @@ const commands = {
     console.log(JSON.stringify(violations));
   },
   async 'guard-revert'() {
-    git('config', 'user.name', 'A9 main-guard');
-    git('config', 'user.email', 'main-guard@users.noreply.github.com');
+    git('config', 'user.name', 'clawworks-release-manager[bot]');
+    git('config', 'user.email', 'clawworks-release-manager[bot]@users.noreply.github.com');
     git('fetch', 'origin', 'main');
     git('checkout', '-B', 'main', 'origin/main');
     const parents = git('log', '-1', '--format=%P', args.sha).split(' ').filter(Boolean);
@@ -214,6 +215,11 @@ const commands = {
   },
 };
 
+/** Implementers may never change policy files (spec §8.1). Re-checked here, on the trusted runner, after `git am` (A7 on #23). */
+function refusePolicyPaths(base) {
+  const bad = G.policyViolations(G.changedPaths(git, base));
+  if (bad.length) throw new Error(`refusing to publish: the patch touches policy paths: ${bad.join(', ')}`);
+}
 function git(...a) { return execFileSync('git', a, { encoding: 'utf8' }).trim(); }
 function gitOk(...a) { try { execFileSync('git', a, { stdio: 'ignore' }); return true; } catch { return false; } }
 
@@ -256,12 +262,16 @@ commands.publish = async () => {
   const issue = await gh('GET', repo(`/issues/${args.issue}`));
   const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
   const push = (ref) => git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', `https://github.com/${REPO}.git`, ref);
-  git('config', 'user.name', args.implementer === 'local' ? 'A3a local implementer' : 'A3b Claude implementer');
-  git('config', 'user.email', 'agent-team@users.noreply.github.com');
+  const author = args.implementer === 'local' ? 'clawworks-local-coder[bot]' : 'clawworks-claude-coder[bot]';   // spec §8.5
+  git('config', 'user.name', author);
+  git('config', 'user.email', `${author}@users.noreply.github.com`);
   if (args.pr) {
     const pr = await gh('GET', repo(`/pulls/${args.pr}`));
+    const why = G.fixRoundRefusal(pr, REPO);
+    if (why) throw new Error(`refusing fix round on #${args.pr}: ${why}`);
     git('fetch', 'origin', pr.head.ref); git('checkout', '-B', pr.head.ref, `origin/${pr.head.ref}`);
     git('am', '--3way', args.patch);
+    refusePolicyPaths(`origin/${pr.head.ref}`);   // only the commits this patch adds
     push(`HEAD:refs/heads/${pr.head.ref}`);
     console.log(`pushed fix round to #${args.pr}`);
     return;
@@ -269,12 +279,70 @@ commands.publish = async () => {
   const branch = `agent/${args.issue}-${args.implementer}`;
   git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
   git('am', '--3way', args.patch);
+  refusePolicyPaths('origin/main');
   push(`+HEAD:refs/heads/${branch}`);
-  const body = `Closes #${args.issue}\n\n${issue.title}\n\n\`\`\`\nROLE: ${args.implementer === 'local' ? 'A3a Local Implementer' : 'A3b Claude Implementer'}   ITEM: #${args.issue}   RESULT: done\nWHAT CHANGED: see diff\nEVIDENCE: npm test green; A4 self-verify passed (${RUN_URL || 'run'})\nRISKS / ASSUMPTIONS: see A4 notes\nNEXT: A5/A7/A8 review\n\`\`\``;
+  const body = `Closes #${args.issue}\n\n${issue.title}\n\n\`\`\`\nROLE: ${args.implementer === 'local' ? 'Local Coder (A3a)' : 'Claude Coder (A3b)'}   ITEM: #${args.issue}   RESULT: done\nWHAT CHANGED: see diff\nEVIDENCE: npm test green; A4 self-verify passed (${RUN_URL || 'run'})\nRISKS / ASSUMPTIONS: see A4 notes\nNEXT: A5/A7/A8 review\n\`\`\``;
   const pr = await gh('POST', repo('/pulls'), { title: `${issue.title} (#${args.issue})`, head: branch, base: 'main', body });
   await gh('POST', repo(`/issues/${pr.number}/labels`), { labels: [`impl:${args.implementer}`] });
   await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: [`impl:${args.implementer}`, 'status:in-review'] });
   console.log(`opened #${pr.number} from ${branch}`);
+};
+
+/**
+ * A10's GitHub writes, done without a model (A7 on #23): the A10 job runs the model on
+ * the claude-code runner with no App key, and leaves its output in a folder. This step,
+ * on claude-jobs with A10's App token, publishes only what that folder allows:
+ *   comment.md          posted on the incident issue (--incident N) or, weekly, on the digest issue
+ *   proposal.mbox       its commits, pushed as agent/retro-<date>-<run> and opened as ONE PR
+ *   pr.json             {title, body} for that PR
+ *   issues.json         [{title, body, labels}] — only circuit-breaker issues (REQ-CB-3)
+ */
+commands['a10-publish'] = async () => {
+  const dir = args.dir || 'out';
+  const read = (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8') : '');
+  const done = [];
+  // 1. the retro / weekly report comment
+  let target = args.incident && /^\d+$/.test(args.incident) ? Number(args.incident) : null;
+  if (!target) {
+    const digest = await all(repo('/issues?state=open&labels=digest'));
+    target = digest.length ? digest[0].number : null;
+  }
+  const comment = read('comment.md').trim();
+  if (comment && target) {
+    await gh('POST', repo(`/issues/${target}/comments`), { body: comment.slice(0, 60000) });
+    done.push(`comment on #${target}`);
+  }
+  // 2. circuit-breaker issues only (fixed label allowlist)
+  // circuit-breaker + exactly one cb:level-N; never `incident` (that would start A10 on its own output; A7 on #23)
+  let issues = [];
+  try { issues = JSON.parse(read('issues.json') || '[]'); } catch { issues = []; }
+  for (const it of (Array.isArray(issues) ? issues : []).slice(0, 3)) {
+    const lv = (it.labels || []).filter((l) => /^cb:level-[01]$/.test(l));
+    if (!(it.labels || []).includes('circuit-breaker') || lv.length !== 1 || !it.title) continue;
+    const labels = ['circuit-breaker', lv[0]];
+    const r = await gh('POST', repo('/issues'), { title: String(it.title).slice(0, 200), body: String(it.body || '').slice(0, 30000), labels });
+    done.push(`issue #${r.number}`);
+  }
+  // 3. the proposal: one branch, one PR, never main, never .github/
+  const mbox = path.join(dir, 'proposal.mbox');
+  if (fs.existsSync(mbox) && fs.statSync(mbox).size > 0) {
+    let pr = {}; try { pr = JSON.parse(read('pr.json') || '{}'); } catch { pr = {}; }
+    const branch = `agent/retro-${new Date().toISOString().slice(0, 10)}-${process.env.GITHUB_RUN_ID || 'local'}`;
+    git('config', 'user.name', 'clawworks-incident-reviewer[bot]');
+    git('config', 'user.email', 'clawworks-incident-reviewer[bot]@users.noreply.github.com');
+    git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
+    git('am', '--3way', mbox);
+    const files = G.changedPaths(git, 'origin/main');
+    if (files.some((f) => f.startsWith('.github/'))) {
+      if (target) await gh('POST', repo(`/issues/${target}/comments`), { body: 'A10 proposal not opened: it changes `.github/`, which no agent may push (REQ-GATE-4). Put workflow changes in the PR body as a patch for @delmarolivier to apply.' });
+      throw new Error('proposal touches .github/: refused');
+    }
+    const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
+    git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${branch}`);
+    const opened = await gh('POST', repo('/pulls'), { title: String(pr.title || `A10 proposal (${branch})`).slice(0, 200), head: branch, base: 'main', body: String(pr.body || '').slice(0, 60000) });
+    done.push(`PR #${opened.number} from ${branch} (${files.length} files)`);
+  }
+  console.log(done.length ? `published: ${done.join('; ')}` : 'nothing to publish');
 };
 
 commands['throttle-check'] = async () => {
