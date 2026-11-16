@@ -38,12 +38,18 @@ jobs:
         with: { persist-credentials: false, clean: true }
       - id: w
         run: |
-          LAST_DIGEST=$(gh issue list -R "$GITHUB_REPOSITORY" --label digest --state open --json body -q '.[0].body // ""' | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>console.log(require("./scripts/gates/lib.js").digestStamp(b)||""))'); export LAST_DIGEST
+          # If the digest issue can't be read, skip the digest this run rather than rewrite it blindly.
+          if BODY=$(gh issue list -R "$GITHUB_REPOSITORY" --label digest --state open --json body -q '.[0].body // ""'); then
+            LAST_DIGEST=$(printf '%s' "$BODY" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>console.log(require("./scripts/gates/lib.js").digestStamp(b)||""))')
+          else
+            echo "::warning::could not read the digest issue; no digest this run"; DIGEST_UNREADABLE=1
+          fi
+          export LAST_DIGEST DIGEST_UNREADABLE
           node -e '
             const G=require("./scripts/gates/lib.js"); const h=G.dublinHour();
             const sched=process.env.EV==="schedule";
             console.log("run=true");   // 24x7 (spec v0.11)
-            console.log("digest="+(process.env.DIGEST==="true"||G.digestDue(new Date(), process.env.LAST_DIGEST||null)));
+            console.log("digest="+(process.env.DIGEST==="true"||(!process.env.DIGEST_UNREADABLE&&G.digestDue(new Date(), process.env.LAST_DIGEST||null))));
             console.log("today="+G.dublinDate());
             console.log("monday="+(new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Dublin",weekday:"short"}).format(new Date())==="Mon"));
           ' >> "$GITHUB_OUTPUT"
