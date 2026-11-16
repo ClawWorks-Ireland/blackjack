@@ -21,12 +21,12 @@ Write a spec that a Planner can slice and a reviewer can check: acceptance crite
 ## Spec
 Goal / user / success signal
 Behaviour: numbered, observable statements
-Acceptance criteria: each one testable by a named test (engine/*.test.js, web/*.test.js, agent/*.test.js) or a QA check
+Acceptance criteria: each one testable by a named test or a QA check
 Out of scope
 Open questions (each yes/no or multiple choice, recommended option first)
-Tier estimate (RISK.md paths it will touch) and whether Poker (area:poker) is involved
+Tier estimate (RISK.md paths it will touch) and which `area:*` label applies, if any
 ```
-Game-rule behaviour must match the README "Table rules" and REVIEW.md invariants. If it would change them, say so as an open question.
+Domain behaviour must match the project's documented rules and REVIEW.md invariants. If it would change them, say so as an open question.
 
 ## Exit criteria (G2)
 Acceptance criteria are testable and open questions are listed. Then hand off: NEXT = @delmarolivier for approval (new features at Level ≤ 2), or A2.

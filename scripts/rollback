@@ -6,6 +6,8 @@
 #
 #   scripts/rollback <sha>          prepare the revert on a local main and run npm test
 #   scripts/rollback <sha> --push   ...and push it to origin/main
+# ROLLBACK_SKIP_TEST=1 skips the test run: only for release.yml's key-holding job, whose
+# rollback-test job already ran the tests on the same revert with no key (REQ-CFG-3).
 set -euo pipefail
 SHA="${1:?usage: scripts/rollback <sha> [--push]}"; PUSH="${2:-}"
 cd "$(git rev-parse --show-toplevel)"
@@ -15,6 +17,12 @@ TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 gitnet() { if [ -n "$TOKEN" ]; then git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)" "$@"; else git "$@"; fi; }
 gitnet fetch -q origin main
 git checkout -q -B main origin/main
+if [ -n "${ROLLBACK_SKIP_TEST:-}" ] && [ -z "${ROLLBACK_EXPECT_MAIN:-}" ]; then
+  echo "ROLLBACK_SKIP_TEST needs ROLLBACK_EXPECT_MAIN (the main the tests ran on); not pushing an untested revert" >&2; exit 1
+fi
+if [ -n "${ROLLBACK_EXPECT_MAIN:-}" ] && [ "$(git rev-parse HEAD)" != "$ROLLBACK_EXPECT_MAIN" ]; then
+  echo "main moved since the tests ran on ${ROLLBACK_EXPECT_MAIN:0:7}; not pushing an untested revert. Run the rollback again." >&2; exit 1
+fi
 FULL=$(git rev-parse --verify "$SHA^{commit}")
 git merge-base --is-ancestor "$FULL" origin/main || { echo "$SHA is not on main" >&2; exit 1; }
 PARENTS=$(git log -1 --format=%P "$FULL" | wc -w)
@@ -23,7 +31,9 @@ git revert --no-edit "${M[@]}" "$FULL"
 git commit -q --amend -m "$(git log -1 --format=%B)
 
 Rollback-of: $FULL"
-npm test >/tmp/rollback-test.log 2>&1 || { echo "npm test fails after the revert (log: /tmp/rollback-test.log); not pushing" >&2; [ "$PUSH" = --push ] && exit 1; }
+if [ -z "${ROLLBACK_SKIP_TEST:-}" ]; then
+  env -u GITHUB_TOKEN -u GH_TOKEN bash -c 'npm test' >/tmp/rollback-test.log 2>&1 || { echo "npm test fails after the revert (log: /tmp/rollback-test.log); not pushing" >&2; exit 1; }
+fi
 if [ "$PUSH" = --push ]; then
   if [ -n "$TOKEN" ]; then   # A9 in CI: push as clawworks-release-manager[bot]
     gitnet push "https://github.com/${GITHUB_REPOSITORY:-ClawWorks-Ireland/blackjack}.git" HEAD:main

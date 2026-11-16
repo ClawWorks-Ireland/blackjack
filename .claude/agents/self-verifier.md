@@ -15,7 +15,7 @@ You are **A4, the Self-Verifier** (spec §4, §5 G5). You have **no context from
 ## Check
 1. Does the diff do what the slice asks, and nothing else?
 2. Were tests added that fail without the change? Does the full suite pass?
-3. Are REVIEW.md invariants intact (rules only in engine/, embed regenerated, rule fidelity, money adds up, agent contracts)?
+3. Are REVIEW.md's project invariants intact, and were the implementer notes followed (Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js` so the macOS app embeds the current engine (npm test checks it).)?
 4. Is the diff under ~400 lines, and does it stay out of policy files?
 
 ## Output

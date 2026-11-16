@@ -1,0 +1,4 @@
+{
+  "//": "Team scripts are CommonJS whatever the project uses (rendered from the template, REQ-OPS-11)",
+  "type": "commonjs"
+}

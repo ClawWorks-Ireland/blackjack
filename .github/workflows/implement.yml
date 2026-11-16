@@ -99,6 +99,10 @@ jobs:
           } > prompt.txt
       - name: Worktree (REQ-CFG-2)
         run: git -C base worktree add -B "work/$ISSUE" "$GITHUB_WORKSPACE/wt" "origin/$BASE"
+      - name: Install dependencies (overlay install_command)
+        working-directory: wt
+        run: |
+          : no install_command in the overlay
       - name: A3a implement (Ollama, no credentials)
         id: impl
         continue-on-error: true
@@ -142,6 +146,9 @@ jobs:
         with: { ref: "${{ needs.gate.outputs.base }}", fetch-depth: 0, persist-credentials: false, clean: true }
       - name: Keep hand-off and attempt files out of every commit and diff
         run: printf '%s\n' handoff/ slice.patch commits.mbox test.log changed.txt >> .git/info/exclude
+      - name: Install dependencies (overlay install_command)
+        run: |
+          : no install_command in the overlay
       - name: Handoff context from the previous attempt (REQ-FLOW-7, incident #21)
         if: inputs.handoff_run != ''
         env: { GITHUB_TOKEN: "${{ github.token }}" }
@@ -149,10 +156,13 @@ jobs:
           W=$(gh run view "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" --json workflowName,event,headBranch -q '"\(.workflowName)|\(.event)|\(.headBranch)"' 2>/dev/null || true)
           if [ "$W" = "implement|workflow_dispatch|main" ]; then gh run download "$HANDOFF_RUN" -R "$GITHUB_REPOSITORY" -n attempt -D handoff || true
           else echo "Ignoring hand-off run $HANDOFF_RUN ($W): only implement.yml dispatch runs on main count (A7 on #23)"; fi
+      - name: Freeze the job guard before the model starts (a model edit cannot change it)
+        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ github.token }}   # read-only job token: no App key on the code runner (A7 on #23)
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
@@ -163,7 +173,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(npm test:*),Bash(node --test:*),Bash(node macos/scripts/embed-engine.js:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh pr view:*)"
-            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
       - name: Attempt = implement + full suite; no policy paths
         id: t
         run: |
@@ -208,12 +218,16 @@ jobs:
       - id: s
         run: |
           git -c user.name=a4 -c user.email=a4@local am --3way attempt/commits.mbox
+          : no install_command in the overlay
           git diff "origin/$BASE" HEAD > slice.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json"))')" >> "$GITHUB_OUTPUT"
+      - name: Freeze the job guard before the model starts (a model edit cannot change it)
+        run: git show "origin/$BASE:scripts/agents/policy-guard.js" > "$RUNNER_TEMP/job-guard.js"
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ github.token }}   # read-only job token: no App key on the code runner (A7 on #23)
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
@@ -221,8 +235,8 @@ jobs:
             Read the slice with `gh issue view ${{ env.ISSUE }}`. You have no context from the implementer (REQ-ROLE-2).
           claude_args: >-
             --append-system-prompt-file .claude/agents/self-verifier.md --model sonnet --max-turns 40
-            --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
-            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
+            --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(node --test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
             --json-schema '${{ steps.s.outputs.schema }}'
       - id: v
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }

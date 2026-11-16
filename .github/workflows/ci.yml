@@ -18,7 +18,10 @@ jobs:
         with: { persist-credentials: false }
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm test
+      - run: |
+          : no install_command in the overlay
+          npm test
+          node --test scripts/gates/*.test.js scripts/agents/*.test.js
 
   # Lints .github/workflows/ (not a required gate; informs reviewers and A7).
   actionlint:

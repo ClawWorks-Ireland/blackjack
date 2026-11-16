@@ -40,6 +40,11 @@
       "Bash(cat:*)"
     ],
     "deny": [
+      "Read(~/actions-runner*/.credentials*)",
+      "Read(~/actions-runner*/.runner)",
+      "Read(~/actions-runner*/.env)",
+      "Read(~/.claude/**)",
+      "Read(//proc/**)",
       "Bash(git push:*)",
       "Bash(gh:*)",
       "Bash(curl:*)",

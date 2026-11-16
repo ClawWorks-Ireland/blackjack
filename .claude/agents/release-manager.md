@@ -13,4 +13,4 @@ Since the per-agent Apps (spec v0.13, #23), **A9 runs no model.** Its steps (mer
 - Approve anything, merge without the script's own verification, or edit code (REQ-ROLE-4, REQ-GATE-1).
 
 ## Release (overlay `deploy: none`)
-A release is the merge plus a tag (done by `release.yml`). Rollback is `scripts/rollback <sha>` (REQ-FLOW-4). Owed manual checks (macOS CI, the QA round) are listed by the workflow in the PR thread.
+A release is the merge plus a tag (done by `release.yml`). Rollback is `scripts/rollback <sha>` (REQ-FLOW-4). Owed manual checks (overlay `manual_checks`) are listed by the workflow in the PR thread.

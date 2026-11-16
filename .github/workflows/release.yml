@@ -15,24 +15,58 @@ concurrency:
   group: release
   cancel-in-progress: false
 jobs:
-  verify-and-tag:
+  verify:
     if: github.event_name == 'push'
-    permissions: { contents: write }   # tag push only
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # runs repo code: read-only token, not persisted (REQ-CFG-3)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with: { persist-credentials: false }
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm test
+      - run: |
+          : no install_command in the overlay
+          npm test
+          node --test scripts/gates/*.test.js scripts/agents/*.test.js
+
+  tag:
+    needs: verify
+    permissions: { contents: write }   # tag push only; runs no repo code
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
       - name: Tag the release
         run: |
           TAG="r-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
           git tag "$TAG" "$GITHUB_SHA" && git push origin "$TAG"
           echo "Tagged $TAG. Rollback: Actions → release → Run workflow with this SHA, or scripts/rollback $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
 
+  # The tests run here, with no key: they are repo code (REQ-CFG-3, review of team/v1).
+  rollback-test:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      main: ${{ steps.t.outputs.main }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Prepare the revert and run the tests (no push)
+        id: t
+        env:
+          SHA: ${{ inputs.rollback }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || { echo "not a sha: $SHA"; exit 1; }
+          git config user.name rollback-test && git config user.email rollback-test@localhost
+          echo "main=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+          : no install_command in the overlay
+          scripts/rollback "$SHA"
+
   rollback:
+    needs: rollback-test
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
@@ -52,9 +86,11 @@ jobs:
           permission-statuses: read
           permission-checks: read
           permission-workflows: write
-      - name: Roll back (fixed script, no model)
+      - name: Roll back (fixed script, no model, no repo code run)
         env:
           GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          ROLLBACK_SKIP_TEST: '1'
+          ROLLBACK_EXPECT_MAIN: ${{ needs.rollback-test.outputs.main }}   # the main the tests ran on
           SHA: ${{ inputs.rollback }}
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || { echo "not a sha: $SHA"; exit 1; }

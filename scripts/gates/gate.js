@@ -44,7 +44,7 @@ async function gh(method, url, body) {
     method,
     headers: {
       authorization: `Bearer ${method === 'GET' ? READ_TOKEN : TOKEN}`, accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28', 'content-type': 'application/json', 'user-agent': 'blackjack-gates',
+      'x-github-api-version': '2022-11-28', 'content-type': 'application/json', 'user-agent': 'agent-team-gates',
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -349,6 +349,15 @@ commands['a10-publish'] = async () => {
     done.push(`PR #${opened.number} from ${branch} (${files.length} files)`);
   }
   console.log(done.length ? `published: ${done.join('; ')}` : 'nothing to publish');
+};
+
+/**
+ * Manual checks owed after a merge (overlay `manual_checks`, entries "<path regex> => <message>").
+ * Reads changed file paths on stdin; prints one "- <message>" line per check that applies.
+ */
+commands['manual-checks'] = async () => {
+  const files = fs.readFileSync(0, 'utf8').split('\n').filter(Boolean);
+  for (const c of G.parseManualChecks(projectMd())) if (files.some((f) => c.re.test(f))) console.log(`- ${c.message}`);
 };
 
 commands['throttle-check'] = async () => {

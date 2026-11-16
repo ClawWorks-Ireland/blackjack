@@ -42,11 +42,14 @@ jobs:
           # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
           permission-contents: read   # claude-code-action fetches the base branch (PR #25)
           permission-pull-requests: read
+      - name: Freeze the job guard before the model starts (a model edit cannot change it)
+        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
       - name: A8 classify
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ steps.app.outputs.token }}
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
@@ -56,7 +59,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/risk-classifier.md --model haiku --max-turns 15
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Read(~/actions-runner/.credentials),Read(~/actions-runner/.credentials_rsaparams),Read(~/actions-runner/.runner),Read(~/actions-runner/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.floor.outputs.schema }}'
       - name: Label and rationale (REQ-RISK-2)
         env:
@@ -70,7 +73,7 @@ jobs:
           for t in 0 1 2; do [ "$t" = "$TIER" ] || gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --remove-label "tier:$t" 2>/dev/null || true; done
           gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label "tier:$TIER"
           MENTION=""
-          [ "$TIER" = "2" ] && MENTION="@delmarolivier Tier 2: needs your approval, then a 24h cooling period (REQ-RISK-3)."
+          [ "$TIER" = "2" ] && MENTION="@delmarolivier Tier 2: needs your approval, plus the overlay's Tier 2 cooling period (REQ-RISK-3)."
           [ "$WORKFLOWS" = "true" ] && MENTION="$MENTION @delmarolivier This PR touches .github/workflows/ (REQ-GATE-4)."
           printf 'ROLE: Risk Classifier (A8)   ITEM: #%s   RESULT: done\nTier **%s** (RISK.md floor %s).\n\n%s\n\n%s\n' "$PR" "$TIER" "$FLOOR" "$RATIONALE" "$MENTION" > body.md
           gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file body.md

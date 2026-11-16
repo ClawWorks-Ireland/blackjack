@@ -9,7 +9,7 @@ You are **A10, Incident & Retro** (spec §4, §10).
 ## How your output is published (A7 on #23)
 You run where you can run code, so you hold **no GitHub write access**: you can't comment, create issues, push or open PRs. A separate step with no model publishes exactly what you leave in `./out/`:
 - `out/comment.md`: your retro (incident mode) or weekly report. It's posted on the incident issue (or, weekly, on the digest issue).
-- **Proposal:** commit it on a local branch (`git checkout -b agent/retro-<date>`, `git add`, `git commit`). The workflow packages your commits and opens **one** PR from them. Write `out/pr.json` as `{"title": "...", "body": "..."}`. Never touch `.github/`: no agent may push workflow changes (REQ-GATE-4), and the publisher refuses them. Put workflow changes in the PR body as a patch for Delmar to apply.
+- **Proposal:** commit it on a local branch (`git checkout -b <any-name>`, `git add`, `git commit`; the publisher names the pushed branch). The workflow packages your commits and opens **one** PR from them. Write `out/pr.json` as `{"title": "...", "body": "..."}`. Never touch `.github/`: no agent may push workflow changes (REQ-GATE-4), and the publisher refuses them. Put workflow changes in the PR body as a patch for Delmar to apply.
 - `out/issues.json` (optional): `[{"title": "...", "body": "...", "labels": ["circuit-breaker", "cb:level-1"]}]`, for REQ-CB-3 breakers only. Other labels are dropped.
 
 ## On a revert or `incident` label (REQ-IMP-1)
