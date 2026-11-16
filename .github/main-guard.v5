@@ -7,8 +7,11 @@ parent lacked the current marker):
   2. #13  .github/main-guard.active (read-only Claude jobs on GITHUB_TOKEN)
   3. #17  .github/main-guard.armed (A9 reads statuses with a read-only
           token; allowed_bots; local implementer paths — incident #16)
-  4. (this PR) .github/main-guard.lock: every agent gets its own GitHub App
+  4. #23  .github/main-guard.lock: every agent gets its own GitHub App
           (spec v0.13 §8.5); A9 merges as clawworks-release-manager[bot], which has
-          the workflows permission, so no further hand merge should ever be needed.
+          the workflows permission.
+  5. #25  this file, .github/main-guard.v5: the reviewer Apps (A5-A8) lacked
+          contents:read, so review/security/classify couldn't fetch and no PR
+          could pass its gates. Delmar added Contents: Read to those Apps.
 Deleting or renaming this file turns the guard off for later commits: a Tier 2
 change (.github/**) that needs Delmar's approval.

@@ -40,6 +40,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
+          permission-contents: read   # claude-code-action fetches the base branch (PR #25)
           permission-pull-requests: read
       - name: A8 classify
         id: claude

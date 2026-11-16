@@ -75,7 +75,7 @@ test('main-guard is armed only after the commit that adds the marker (re-bootstr
     const has = (rev, p) => { try { r.git('cat-file', '-e', `${rev}:${p}`); return true; } catch { return false; } };
     assert.equal(G.guardActiveFor(has, arming), false);
     assert.equal(G.guardActiveFor(has, next), true);
-    assert.equal(G.GUARD_MARKER, '.github/main-guard.lock');
+    assert.equal(G.GUARD_MARKER, '.github/main-guard.v5');
   } finally { r.done(); }
 });
 
