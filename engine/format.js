@@ -33,9 +33,9 @@
     if (n === null || n === undefined || Number.isNaN(n)) return '—';
     const fmt = new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
     let result = fmt.format(n * 100);
-    // When the rounded value is zero (regardless of sign), drop any sign prefix
+    // When the rounded value is exactly zero, use toFixed() to preserve requested decimals
     if (Number(result) === 0) {
-      result = '0';
+      result = Math.abs(n * 100).toFixed(digits);
     }
     // Drop trailing ".0%" when there are no decimals (digits === 1 and value is whole)
     if (digits === 1 && result.endsWith('.0')) {
