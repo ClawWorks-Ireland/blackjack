@@ -94,11 +94,11 @@ jobs:
         run: |
           N=$(gh issue list -R "$GITHUB_REPOSITORY" --label digest --state open --json number -q '.[0].number // ""')
           [ -n "$N" ] || { echo "::warning::no open digest issue"; exit 0; }
-          gh issue view "$N" -R "$GITHUB_REPOSITORY" --json body -q .body > digest-body.md
+          gh issue view "$N" -R "$GITHUB_REPOSITORY" --json body -q .body | tr -d '\r' > digest-body.md
           STAMP=$(node -e 'console.log(require("./scripts/gates/lib.js").digestStamp(require("fs").readFileSync("digest-body.md","utf8"))||"")')
           if [ "$STAMP" != "$TODAY" ]; then
             echo "::warning::A0 left the digest without today's stamp; adding it"
-            { printf '<!-- digest %s -->\n' "$TODAY"; grep -v '^<!-- digest [0-9-]* -->$' digest-body.md; } > digest-new.md
+            { printf '<!-- digest %s -->\n' "$TODAY"; grep -v '^<!-- digest [0-9-]* -->$' digest-body.md || true; } > digest-new.md   # grep exits 1 on an empty body
             gh issue edit "$N" -R "$GITHUB_REPOSITORY" --body-file digest-new.md
           fi
       - if: failure() && steps.claude.outcome == 'failure'
