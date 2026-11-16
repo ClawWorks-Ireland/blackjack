@@ -291,8 +291,17 @@ jobs:
           export JOB="${{ inputs.implementer == 'local' && needs.local.result || needs.claude.result }}" RETRY="$RETRY" HANDOFF="$HANDOFF_RUN"
           HAS_ART=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -q '[.artifacts[]|select(.name=="attempt")]|length' 2>/dev/null || echo 0)
           export HAS_ART
-          NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF, hasArtifact: Number(e.HAS_ART) > 0 })))')
+          export VERIFIED="${{ needs.verify.outputs.pass }}" PUBLISH="${{ needs.publish.result }}"
+          NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF, hasArtifact: Number(e.HAS_ART) > 0, verified: e.VERIFIED === "true", publish: e.PUBLISH })))')
           field() { node -p "String(JSON.parse(process.argv[1]).$1 ?? '')" "$NEXT"; }
+          if [ "$(field publishFailed)" = true ]; then
+            gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label needs-human --add-label status:blocked
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: Ladder (A0)   ITEM: #$ISSUE   RESULT: needs-human
+          WHAT CHANGED: attempt $ATTEMPT ($IMPL) passed A4 but the publish job failed. That's infrastructure, not the model, so the ladder stops here instead of advancing.
+          EVIDENCE: $RUN (artifact \`attempt\` holds the verified commits.mbox)
+          NEXT: @delmarolivier re-run the failed publish job (recommended) or dispatch the same attempt again."
+            exit 0
+          fi
           if [ "$(field infra)" = true ]; then
             gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="$(field handoffRun)" -f retry=1
             gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: Ladder (A0)   ITEM: #$ISSUE   RESULT: blocked

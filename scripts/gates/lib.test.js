@@ -267,3 +267,10 @@ test('fix rounds only push to agent-owned slice PRs (A7 on #23)', () => {
   assert.match(G.fixRoundRefusal({ ...ok, head: { ...ok.head, repo: { full_name: 'someone/fork' } } }, R), /not in this repo/);
   assert.match(G.fixRoundRefusal({ ...ok, state: 'closed' }, R), /not open/);
 });
+
+test('a verified attempt whose publish fails stops the ladder instead of advancing (slice #24)', () => {
+  assert.deepEqual(G.nextRung('local', 1, { verified: true, publish: 'failure', run: '9' }), { publishFailed: true });
+  assert.deepEqual(G.nextRung('claude', 2, { verified: true, publish: 'cancelled' }), { publishFailed: true });
+  // not verified: the ladder advances as before
+  assert.deepEqual(G.nextRung('local', 1, { verified: false, publish: 'skipped', run: '9', hasArtifact: true }), { implementer: 'local', attempt: 2, handoffRun: '9', retry: 0 });
+});

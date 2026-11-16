@@ -203,14 +203,13 @@ const commands = {
   async 'guard-revert'() {
     git('config', 'user.name', 'clawworks-release-manager[bot]');
     git('config', 'user.email', 'clawworks-release-manager[bot]@users.noreply.github.com');
-    git('fetch', 'origin', 'main');
+    gitNet('fetch', 'origin', 'main');
     git('checkout', '-B', 'main', 'origin/main');
     const parents = git('log', '-1', '--format=%P', args.sha).split(' ').filter(Boolean);
     git('revert', '--no-edit', ...(parents.length > 1 ? ['-m', '1'] : []), args.sha);
     const msg = `${git('log', '-1', '--format=%B')}\nMain-guard-revert: ${args.sha}\n`;
     git('commit', '--amend', '-m', msg);
-    const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
-    git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', `https://github.com/${REPO}.git`, 'HEAD:main');
+    gitNet('push', `https://github.com/${REPO}.git`, 'HEAD:main');
     console.log(`reverted ${args.sha} on main as ${git('rev-parse', 'HEAD')}`);
   },
 };
@@ -221,6 +220,15 @@ function refusePolicyPaths(base) {
   if (bad.length) throw new Error(`refusing to publish: the patch touches policy paths: ${bad.join(', ')}`);
 }
 function git(...a) { return execFileSync('git', a, { encoding: 'utf8' }).trim(); }
+/**
+ * git with the job's token for github.com. Checkouts don't persist credentials, and the
+ * private repo refuses anonymous fetches, so fetch needs it as much as push does.
+ */
+function gitNet(...a) {
+  if (!TOKEN) return git(...a);
+  const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
+  return git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, ...a);
+}
 function gitOk(...a) { try { execFileSync('git', a, { stdio: 'ignore' }); return true; } catch { return false; } }
 
 /** Replay `git revert target` on sha's parent and compare trees (REQ-GATE-2 rollback evidence). */
@@ -260,8 +268,7 @@ commands['review-decide'] = async () => {
 
 commands.publish = async () => {
   const issue = await gh('GET', repo(`/issues/${args.issue}`));
-  const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
-  const push = (ref) => git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', `https://github.com/${REPO}.git`, ref);
+  const push = (ref) => gitNet('push', `https://github.com/${REPO}.git`, ref);
   const author = args.implementer === 'local' ? 'clawworks-local-coder[bot]' : 'clawworks-claude-coder[bot]';   // spec §8.5
   git('config', 'user.name', author);
   git('config', 'user.email', `${author}@users.noreply.github.com`);
@@ -269,7 +276,7 @@ commands.publish = async () => {
     const pr = await gh('GET', repo(`/pulls/${args.pr}`));
     const why = G.fixRoundRefusal(pr, REPO);
     if (why) throw new Error(`refusing fix round on #${args.pr}: ${why}`);
-    git('fetch', 'origin', pr.head.ref); git('checkout', '-B', pr.head.ref, `origin/${pr.head.ref}`);
+    gitNet('fetch', 'origin', pr.head.ref); git('checkout', '-B', pr.head.ref, `origin/${pr.head.ref}`);
     git('am', '--3way', args.patch);
     refusePolicyPaths(`origin/${pr.head.ref}`);   // only the commits this patch adds
     push(`HEAD:refs/heads/${pr.head.ref}`);
@@ -277,7 +284,7 @@ commands.publish = async () => {
     return;
   }
   const branch = `agent/${args.issue}-${args.implementer}`;
-  git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
+  gitNet('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
   git('am', '--3way', args.patch);
   refusePolicyPaths('origin/main');
   push(`+HEAD:refs/heads/${branch}`);
@@ -330,15 +337,14 @@ commands['a10-publish'] = async () => {
     const branch = `agent/retro-${new Date().toISOString().slice(0, 10)}-${process.env.GITHUB_RUN_ID || 'local'}`;
     git('config', 'user.name', 'clawworks-incident-reviewer[bot]');
     git('config', 'user.email', 'clawworks-incident-reviewer[bot]@users.noreply.github.com');
-    git('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
+    gitNet('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
     git('am', '--3way', mbox);
     const files = G.changedPaths(git, 'origin/main');
     if (files.some((f) => f.startsWith('.github/'))) {
       if (target) await gh('POST', repo(`/issues/${target}/comments`), { body: 'A10 proposal not opened: it changes `.github/`, which no agent may push (REQ-GATE-4). Put workflow changes in the PR body as a patch for @delmarolivier to apply.' });
       throw new Error('proposal touches .github/: refused');
     }
-    const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
-    git('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${branch}`);
+    gitNet('push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${branch}`);
     const opened = await gh('POST', repo('/pulls'), { title: String(pr.title || `A10 proposal (${branch})`).slice(0, 200), head: branch, base: 'main', body: String(pr.body || '').slice(0, 60000) });
     done.push(`PR #${opened.number} from ${branch} (${files.length} files)`);
   }

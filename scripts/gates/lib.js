@@ -320,12 +320,16 @@ function isUsageLimited(text) {
  *   ctx.run        this run's id: its `attempt` artifact holds the work in progress
  *   ctx.handoffRun the run whose artifact this attempt was given, if any
  *   ctx.hasArtifact whether this run uploaded an `attempt` artifact (its work in progress)
+ *   ctx.verified / ctx.publish  A4's verdict and the publish job's result
  * An infra failure (runner lost, gaming pause, job timeout) re-runs the same rung once
  * with the hand-off it already had. Otherwise the next rung gets THIS attempt's
  * slice.patch + test.log (local→local, local→Claude, Claude→Claude), as hints for a
  * clean tree (incident #21). Returns {implementer, attempt, handoffRun, retry} or {replan}.
  */
 function nextRung(implementer, attempt, ctx = {}) {
+  // A4 passed but publishing failed: that's infrastructure (e.g. no git credentials), not the
+  // model's attempt. Don't advance the ladder; ask Delmar (slice #24).
+  if (ctx.verified && (ctx.publish === 'failure' || ctx.publish === 'cancelled')) return { publishFailed: true };
   const run = ctx.run ? String(ctx.run) : '';
   const inherited = ctx.handoffRun ? String(ctx.handoffRun) : '';
   if ((ctx.job === 'failure' || ctx.job === 'cancelled') && Number(ctx.retry || 0) === 0) {
