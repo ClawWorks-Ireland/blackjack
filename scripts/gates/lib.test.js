@@ -309,4 +309,6 @@ test('manual checks come from the overlay as "<path regex> => <message>"', () =>
   assert.deepEqual(G.parseManualChecks('project: X\n'), []);
   const md2 = 'manual_checks:   # owed checks\n  - ^a/ => first   # why\n  # a comment\n\n  - ^b/ => run `x # y`\nnext_key: 1\n  - ^c/ => not in the list\n';
   assert.deepEqual(G.parseManualChecks(md2).map((x) => x.message), ['first', 'run `x # y`']);
+  const md3 = "manual_checks:\n  - ^(web/ => broken regex\n  - ^b/ => don't skip this   # trailing comment\n";
+  assert.deepEqual(G.parseManualChecks(md3).map((x) => x.message), ["don't skip this"]);
 });

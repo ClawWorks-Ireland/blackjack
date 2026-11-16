@@ -17,6 +17,9 @@ TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 gitnet() { if [ -n "$TOKEN" ]; then git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)" "$@"; else git "$@"; fi; }
 gitnet fetch -q origin main
 git checkout -q -B main origin/main
+if [ -n "${ROLLBACK_SKIP_TEST:-}" ] && [ -z "${ROLLBACK_EXPECT_MAIN:-}" ]; then
+  echo "ROLLBACK_SKIP_TEST needs ROLLBACK_EXPECT_MAIN (the main the tests ran on); not pushing an untested revert" >&2; exit 1
+fi
 if [ -n "${ROLLBACK_EXPECT_MAIN:-}" ] && [ "$(git rev-parse HEAD)" != "$ROLLBACK_EXPECT_MAIN" ]; then
   echo "main moved since the tests ran on ${ROLLBACK_EXPECT_MAIN:0:7}; not pushing an untested revert. Run the rollback again." >&2; exit 1
 fi

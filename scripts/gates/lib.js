@@ -388,7 +388,8 @@ function parseManualChecks(projectMd) {
     for (let i = 0; i < line.length; i++) {
       const c = line[i];
       if (q) { if (c === q) q = null; continue; }
-      if (c === '`' || c === '"' || c === "'") { q = c; continue; }
+      // An apostrophe inside a word ("don't") is not a quote; one at the start of a token is.
+      if (c === '`' || c === '"' || (c === "'" && (i === 0 || /[\s:=-]/.test(line[i - 1])))) { q = c; continue; }
       if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
     }
     return line;
@@ -402,7 +403,10 @@ function parseManualChecks(projectMd) {
     const item = /^\s+-\s+(.*)$/.exec(line);
     if (!item) { inList = false; continue; }
     const l = item[1].trim(); const i = l.indexOf(' => ');
-    if (i > 0) out.push({ re: new RegExp(l.slice(0, i).trim()), message: l.slice(i + 4).trim() });
+    if (i <= 0) continue;
+    try { out.push({ re: new RegExp(l.slice(0, i).trim()), message: l.slice(i + 4).trim() }); } catch (e) {
+      process.stderr.write(`manual_checks: skipping a malformed regex (${e.message})\n`);   // one bad entry mustn't hide the rest
+    }
   }
   return out;
 }

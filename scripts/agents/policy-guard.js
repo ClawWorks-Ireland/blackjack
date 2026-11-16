@@ -24,7 +24,8 @@ const SECRET = new RegExp([
 // A glob over a hidden name (`~/a*/.cred*`, `.?unner`) would slip past SECRET once the shell expands it.
 const HIDDEN_GLOB = /(?:^|[\s"'=/])\.[^\s/]*[*?[]/;
 // Claude jobs (GUARD_MODE=job): gh flags that read a local file into a comment or API call.
-const GH_FILE_ARG = /\bgh\b[^|;&]*?(?:\s(?:--body-file|--input|-F|--field|--template)(?:[\s=]|$)|=@|\s@[~/.$])/;
+// (gh reads `@file` only in -F/--field values, which are refused outright; `--body "cc @x"` is fine.)
+const GH_FILE_ARG = /\bgh\b[^|;&]*?\s(?:--body-file|--input|-F|--field|--template)(?:[\s=]|$)/;
 const JOB = process.env.GUARD_MODE === 'job';
 
 let input = '';
