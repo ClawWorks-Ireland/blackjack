@@ -7,6 +7,7 @@ Read by A4 (Self-Verifier), A5 (Bug Hunters), A6 (Verifiers) and A7 (Security), 
 - **Nit**: style, naming, wording, a "could be cleaner". Never blocks (REQ-FLOW-5). Keep these rare. One line each.
 - **Pre-existing**: a real defect that the PR didn't introduce. It doesn't block. It becomes a new issue (REQ-FLOW-5).
 - If you can't name the failing input, it's not Important. Say what you'd need to check instead.
+- **Credential guard (`scripts/agents/policy-guard.js`) is best-effort** (spec REQ-CFG-3, Delmar 2026-11-17): a way around its credential-read check is a **Nit**, not Important, since tests on those runners can read the same files and no key lives there. Still Important: anything that puts an App key or write token where a model or repo code runs, or that weakens the policy-file edit check.
 
 ## Project invariants (Important if broken)
 1. **Rules live only in `engine/`.** Web, agent, server and macOS code call the engine; they never re-implement rules.

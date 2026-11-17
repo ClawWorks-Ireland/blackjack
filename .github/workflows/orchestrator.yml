@@ -39,10 +39,11 @@ jobs:
       - id: w
         run: |
           # If the digest issue can't be read, skip the digest this run rather than rewrite it blindly.
-          if BODY=$(gh issue list -R "$GITHUB_REPOSITORY" --label digest --state open --json body -q 'if length == 0 then "NO_DIGEST_ISSUE" else .[0].body end') && [ "$BODY" != NO_DIGEST_ISSUE ]; then
+          # No open digest issue: an empty body, so the digest is due and A0 creates the issue.
+          if BODY=$(gh issue list -R "$GITHUB_REPOSITORY" --label digest --state open --json body -q '.[0].body // ""'); then
             LAST_DIGEST=$(printf '%s' "$BODY" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>console.log(require("./scripts/gates/lib.js").digestStamp(b)||""))')
           else
-            echo "::warning::no open digest issue, or it could not be read; no digest this run"; DIGEST_UNREADABLE=1
+            echo "::warning::could not read the digest issue; no digest this run"; DIGEST_UNREADABLE=1
           fi
           export LAST_DIGEST DIGEST_UNREADABLE
           node -e '
