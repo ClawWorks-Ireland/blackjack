@@ -22,9 +22,17 @@ const os = require('os');
 const JOB = process.env.GUARD_MODE === 'job';
 const HOME = process.env.HOME || os.homedir();
 const RUNNER_FILES = ['.credentials', '.credentials_rsaparams', '.runner', '.env'];
+const LIT_DOLLAR = '\u0000';   // a $ inside single quotes: literal text, never an expansion
+const EXPANSION = /\$/;   // after $HOME/$PWD/$OLDPWD are expanded, any $ left ($X, $1, $@, $'…', $"…") is unknown: refuse
+// Commands that re-read a string as a new command line or run inline code: the guard can't see inside them.
+const REPARSERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'eval', 'exec', 'source', '.', 'xargs', 'env', 'nohup', 'timeout',
+  'nice', 'setsid', 'stdbuf', 'command', 'builtin', 'awk', 'gawk', 'perl', 'python', 'python3', 'ruby', 'php', 'lua', 'tclsh', 'script',
+  'printf', 'read', 'declare', 'typeset', 'export', 'local', 'let', 'readarray', 'mapfile']);
+const INLINE_CODE = /^(?:-e|-p|-c|-r|--eval|--print|--require|--import|--input-type|-pe|-ne)(?:=|$)/;
 
 /** Remove heredoc bodies (`<<'EOF' … EOF`): they are text fed to stdin, not paths. */
-const stripHeredocs = (cmd) => cmd.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2[ \t]*(?=\n|$)/g, '<<HEREDOC');
+// The rest of the opening line stays: `cat <<'EOF' /proc/self/environ` names a file (A7 sec-2 on BlackJack #33).
+const stripHeredocs = (cmd) => cmd.replace(/<<-?[ \t]*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<HEREDOC$3');
 
 /** Split a shell command into simple commands of words: [{ text, glob }], glob = unquoted * ? [ {. */
 function shellWords(cmd) {
@@ -33,7 +41,7 @@ function shellWords(cmd) {
   const sep = () => { end(); if (words.length) cmds.push(words); words = []; };
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
-    if (q) { if (c === q) q = null; else if (c === '\\' && q === '"' && i + 1 < cmd.length) w += cmd[++i]; else w += c; continue; }
+    if (q) { if (c === q) q = null; else if (c === '\\' && q === '"' && i + 1 < cmd.length) w += cmd[++i]; else w += (q === "'" && c === '$') ? LIT_DOLLAR : c; continue; }
     if (c === "'" || c === '"') { q = c; w = w ?? ''; continue; }
     if (c === '\\' && i + 1 < cmd.length) { w = (w ?? '') + cmd[++i]; continue; }
     if (/\s/.test(c)) { if (c === '\n') sep(); else end(); continue; }
@@ -66,7 +74,9 @@ const segIs = (seg, name, glob) => {
 function expand(p, cwd, oldpwd) {
   const out = p.replace(/^~(?=\/|$)/, HOME).replace(/^~([a-z_][\w-]*)(?=\/|$)/, '/home/$1')
     .replace(/^\$\{?HOME\}?(?=\/|$)/, HOME).replace(/^\$\{?PWD\}?(?=\/|$)/, cwd).replace(/^\$\{?OLDPWD\}?(?=\/|$)/, oldpwd || cwd);
-  return out.includes('$') ? null : out;
+  // ~+ / ~- (the shell's PWD/OLDPWD from earlier commands) and other ~ forms are unknown here
+  if (EXPANSION.test(out) || out.startsWith('~')) return null;
+  return out;
 }
 /**
  * Resolve like the kernel: follow symlinks segment by segment, so `/dev/fd/..` lands in /proc.
@@ -88,11 +98,9 @@ function resolveBoth(abs) {
 function secretPath(raw, cwd, glob = false, root = cwd, oldpwd = cwd) {
   if (!raw) return false;
   const e = expand(String(raw), cwd, oldpwd);
-  if (e === null) {   // an unknown variable: refuse `..`, protected names, or a prefix outside the project
-    const segs = String(raw).split('/');
-    if (segs.some((x) => x === '..' || x === 'proc' || x === '.claude' || RUNNER_FILES.includes(x))) return true;
-    return !`${path.resolve(cwd, String(raw).split('$')[0] || '.')}/`.startsWith(`${root}/`);
-  }
+  // A variable we can't expand could be anything (`${X:-/proc}`, `$1/proc`, `$'\x2fproc'`): refuse
+  // (A7 on BlackJack #32 round 3 and #33). Write values out literally instead.
+  if (e === null) return true;
   const [lexical, real] = resolveBoth(path.isAbsolute(e) ? e : `${cwd}/${e}`);   // unnormalised: `..` must follow symlinks
   if (real === null) return true;   // a `..` after an unresolvable symlink (/dev/stdin/..): refuse
   return [lexical, real].some((abs) => {
@@ -113,9 +121,14 @@ function secretPath(raw, cwd, glob = false, root = cwd, oldpwd = cwd) {
 /** Every word of a Bash command that is (or ends in, after `=`) a path, checked with `cd` followed. */
 function bashReadsSecret(cmd, cwd0, root) {
   let cwd = cwd0; let oldpwd = cwd0;
-  for (const words of shellWords(stripHeredocs(cmd))) {
-    if (words[0] && words[0].text === 'cd') {
-      const to = expand(words[1] ? words[1].text : '~', cwd, oldpwd);
+  // Claude jobs' `$(cat <<'EOF' … EOF)` body (allowed by hidesArgs) is text, not a path.
+  const text = stripHeredocs(cmd).replace(/\$\(\s*cat\s+<<HEREDOC\s*\)/g, JOB ? 'HEREDOC_TEXT' : '$&');
+  for (const words of shellWords(text)) {
+    if (words[0] && /^(?:popd|dirs)$/.test(words[0].text)) return true;   // the directory stack is unknown here
+    if (words[0] && /^(?:cd|pushd)$/.test(words[0].text)) {
+      const arg = words.slice(1).map((x) => x.text).find((x) => !/^-[LPe@]+$/.test(x));
+      if (arg === '-' || (words[0].text === 'pushd' && !arg) || /^[+-]\d+$/.test(arg || '')) return true;   // cd -, pushd +N: unknown target
+      const to = expand(arg || '~', cwd, oldpwd);
       if (to === null) return true;   // cd into an unknown variable: we'd lose track of the cwd
       oldpwd = cwd; cwd = path.resolve(cwd, to);
       if (secretPath(cwd, cwd, false, root, oldpwd)) return true;
@@ -132,6 +145,15 @@ function bashReadsSecret(cmd, cwd0, root) {
 /** Command or process substitution hides the real argument from this check. */
 function hidesArgs(cmd) {
   const c = stripHeredocs(cmd);
+  // A command that re-parses a string (bash -c '…', eval, xargs, find -exec) or runs inline code
+  // (node -e, python -c): single-quoted text there is code, so the guard refuses it.
+  for (const ws of shellWords(c)) {
+    let i = 0; while (i < ws.length && /^[A-Za-z_]\w*=/.test(ws[i].text)) i++;   // leading VAR=value words
+    const cmd0 = ws[i] ? path.basename(ws[i].text) : '';
+    if (REPARSERS.has(cmd0)) return true;
+    if (ws.slice(i + 1).some((w) => /^-(?:exec|execdir|ok|okdir)$/.test(w.text) && cmd0 === 'find')) return true;
+    if (/^(?:node|deno|bun|tsx|ts-node|npx)$/.test(cmd0) && ws.slice(i + 1).some((w) => INLINE_CODE.test(w.text))) return true;
+  }
   if (/`|<\(|>\(/.test(c)) return true;
   // Claude jobs pass long text as --body "$(cat <<'EOF' … EOF)": a heredoc into cat reads no file.
   const subs = c.match(/\$\([^)]*/g) || [];
@@ -165,7 +187,7 @@ process.stdin.on('end', () => {
   if (['Read', 'Grep', 'Glob'].includes(ev.tool_name)) {
     // Grep's `pattern` is a search string, not a path; Glob's pattern is a path glob.
     const hit = secretPath(t.file_path, cwd, false, root) || secretPath(t.path, cwd, false, root)
-      || (ev.tool_name === 'Glob' && secretPath(path.join(t.path || cwd, t.pattern || ''), cwd, true, root));
+      || (ev.tool_name === 'Glob' && secretPath(path.isAbsolute(String(t.pattern || '')) ? t.pattern : path.join(t.path || cwd, t.pattern || ''), cwd, true, root));
     // A recursive search rooted at /, a home folder or a runner's root directory would reach the credentials.
     const root2 = ['Grep', 'Glob'].includes(ev.tool_name) && t.path ? path.resolve(cwd, expand(String(t.path), cwd) || '/') : '';
     const tooWide = root2 && (/^\/(?:home(?:\/[^/]+)?|root|proc)?\/?$/.test(root2) || /^\/home\/[^/]+\/actions-runner[^/]*\/?$/.test(root2) || root2 === HOME);
@@ -173,7 +195,7 @@ process.stdin.on('end', () => {
   }
   if (ev.tool_name === 'Bash') {
     const c = String(t.command || '');
-    if (hidesArgs(c)) block('command and process substitution ($( ), backticks, <( )) are not allowed: write the path out');
+    if (hidesArgs(c)) block('the guard must be able to read the whole command: no $( ), backticks, <( ), bash -c/eval/xargs/env, or inline code (node -e). Write paths and values out literally');
     if (bashReadsSecret(c, cwd, root)) block('runner credentials, Claude config and /proc are not readable by models');
     if (JOB && ghReadsFile(c)) block('gh flags that read local files (--body-file, --input, -F file) are not allowed; pass text with --body');
   }

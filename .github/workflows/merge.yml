@@ -108,4 +108,5 @@ jobs:
           MSG=$(echo "$FILES" | node scripts/gates/gate.js manual-checks)
           [ -z "$MSG" ] && exit 0
           BODY=$(printf 'ROLE: Release Manager (A9)   ITEM: #%s   RESULT: done\nMerged by merge.yml after verifying all gates (REQ-GATE-1).\nManual checks these hosts cannot run yet:\n%s' "$PR" "$MSG")
-          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$BODY"
+          # The merge already happened: a failed note must not turn the run red.
+          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$BODY" || echo "::warning::could not post the owed-checks note on #$PR"
