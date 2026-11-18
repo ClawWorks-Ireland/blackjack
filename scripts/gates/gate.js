@@ -248,7 +248,7 @@ function isExactRevert(sha, target) {
 
 commands['repro-run'] = async () => {
   // Hunters' checks (template#12, REQ-ROLE-3a). Runs on a GitHub-hosted VM (review.yml repro job).
-  // --head/--base are copies owned by --user (a throwaway account): every check runs as that user
+  // --head/--base are root-owned copies made by a SEPARATE install account; every check runs as --user
   // in a FRESH copy, in its own PID and network namespace, with a 10 s limit and an empty
   // environment. This process (another user) owns the gate script and the results, so PR code
   // can't rewrite them, signal us or reach the network; when a check ends, the kernel kills
@@ -261,12 +261,16 @@ commands['repro-run'] = async () => {
   const node = process.execPath;
   const gid = String(spawnSync('id', ['-g', user], { encoding: 'utf8' }).stdout || '').trim();   // the account's own group (nobody's is nogroup)
   if (!/^\d+$/.test(gid)) throw new Error(`no such account: ${user}`);
+  // Run dirs: random names in a root-owned 0711 folder (no guessable paths, no /tmp races).
+  const RUNS = path.resolve(args.runs || '/sandbox-run');   // root-owned; --runs only for local testing (CI uses the default on its throwaway VM)
+  sudo('mkdir', '-p', RUNS); sudo('chown', 'root:root', RUNS); sudo('chmod', '0711', RUNS);
   const run = (code, src) => {
-    const dir = `/tmp/repro-run-${process.pid}`;
-    if (sudo('rm', '-rf', dir).status !== 0 || sudo('cp', '-a', path.resolve(src), dir).status !== 0
+    const dir = String(sudo('mktemp', '-d', `${RUNS}/run.XXXXXXXX`).stdout || '').trim();
+    if (!dir.startsWith(`${RUNS}/run.`)) return 'error';
+    if (sudo('rmdir', dir).status !== 0 || sudo('cp', '-a', path.resolve(src), dir).status !== 0
       || sudo('chown', '-R', `${user}:${gid}`, dir).status !== 0) { sudo('rm', '-rf', dir); return 'error'; }
     const r = spawnSync('sudo', ['-n', 'unshare', '-n', '-p', '-f', '--kill-child', '--mount-proc', '--wd', dir,
-      'setpriv', `--reuid=${user}`, `--regid=${gid}`, '--clear-groups',
+      'setpriv', `--reuid=${user}`, `--regid=${gid}`, '--clear-groups', '--no-new-privs', '--inh-caps=-all', '--bounding-set=-all',
       'env', '-i', `PATH=${path.dirname(node)}:/usr/bin:/bin`, `HOME=${dir}`, 'LANG=C.UTF-8',
       'timeout', '-s', 'KILL', '10', node, '-e', code], { encoding: 'utf8', maxBuffer: 1 << 20, timeout: 30000 });
     sudo('rm', '-rf', dir);
