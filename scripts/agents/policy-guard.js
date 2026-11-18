@@ -138,7 +138,9 @@ function bashReadsSecret(cmd, cwd0, root) {
   for (const words of shellWords(text)) {
     if (words[0] && /^(?:popd|dirs)$/.test(words[0].text)) return true;   // the directory stack is unknown here
     if (words[0] && /^(?:cd|pushd)$/.test(words[0].text)) {
-      const arg = words.slice(1).map((x) => x.text).find((x) => !/^-[LPe@]+$/.test(x));
+      const rest = words.slice(1).map((x) => x.text);
+      const dd = rest.indexOf('--');   // `cd -- DIR`: the word after -- is the folder (blackjack#36)
+      const arg = dd >= 0 ? rest[dd + 1] : rest.find((x) => !/^-[LPe@]+$/.test(x));
       if (arg === '-' || (words[0].text === 'pushd' && !arg) || /^[+-]\d+$/.test(arg || '')) return true;   // cd -, pushd +N: unknown target
       const to = expand(arg || '~', cwd, oldpwd);
       if (to === null) return true;   // cd into an unknown variable: we'd lose track of the cwd
@@ -155,6 +157,19 @@ function bashReadsSecret(cmd, cwd0, root) {
   return false;
 }
 /** Command or process substitution hides the real argument from this check. */
+/** The text a shell would still expand: single-quoted spans removed ('…' is literal; inside "…" a ' is literal). */
+function expandable(cmd) {
+  let out = ''; let q = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (q === "'") { if (c === "'") q = null; continue; }
+    if (q === '"') { if (c === '\\' && i + 1 < cmd.length) { out += c + cmd[++i]; continue; } if (c === '"') q = null; out += c; continue; }
+    if (c === '\\' && i + 1 < cmd.length) { i++; continue; }   // an escaped char is literal
+    if (c === "'" || c === '"') { q = c; if (c === '"') out += c; continue; }
+    out += c;
+  }
+  return out;
+}
 function hidesArgs(cmd) {
   const c = stripHeredocs(cmd);
   // A command that re-parses a string (bash -c '…', eval, xargs, find -exec) or runs inline code
@@ -181,7 +196,10 @@ function hidesArgs(cmd) {
     if (ws.slice(i + 1).some((w) => /^-(?:exec|execdir|ok|okdir)$/.test(w.text) && cmd0 === 'find')) return true;
     if (NODE_LIKE.test(cmd0) && ws.slice(i + 1).some((w) => INLINE_CODE.test(w.text))) return true;
   }
-  if (/`|<\(|>\(/.test(c)) return true;
+  // Backticks and process substitution only run outside single quotes (and quoted heredoc bodies are
+  // already gone): code spans in '…' or <<'EOF' text are fine (spec writer on blackjack#39/#40).
+  const live = expandable(c);
+  if (/`|<\(|>\(/.test(live.replace(/\\`/g, ''))) return true;
   // Claude jobs pass long text as --body "$(cat <<'EOF' … EOF)": a heredoc into cat reads no file.
   const subs = c.match(/\$\([^)]*/g) || [];
   return subs.some((x) => !(JOB && /^\$\(\s*cat\s+<<HEREDOC\s*$/.test(x.trim())));

@@ -70,7 +70,7 @@ jobs:
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: |
           gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
-          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/hunter.json"))')" >> "$GITHUB_OUTPUT"
+          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/hunter.json")).replace(/\x27/g, "\\u0027")')" >> "$GITHUB_OUTPUT"   # no single quote can reach the '...' argument (blackjack#46)
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
@@ -133,7 +133,7 @@ jobs:
           gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
           node -e 'const fs=require("fs");const all=fs.readdirSync("findings").flatMap(f=>JSON.parse(fs.readFileSync("findings/"+f,"utf8")).findings||[]);fs.writeFileSync("candidates.json",JSON.stringify(all,null,1));console.log(all.length+" candidates")'
           echo "n=$(node -p 'require("./candidates.json").length')" >> "$GITHUB_OUTPUT"
-          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/votes.json"))')" >> "$GITHUB_OUTPUT"
+          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/votes.json")).replace(/\x27/g, "\\u0027")')" >> "$GITHUB_OUTPUT"   # no single quote can reach the '...' argument (blackjack#46)
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
@@ -253,7 +253,7 @@ jobs:
           IMPL=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
           ISSUE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
           if [ -z "$ISSUE" ]; then gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "AI review found Important issues, but this PR has no \`Closes #n\` slice to send back to an implementer. @delmarolivier please fix by hand."; exit 0; fi
-          gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR"
+          gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR"
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: review-decision, path: "review-decision.json", retention-days: 90 }

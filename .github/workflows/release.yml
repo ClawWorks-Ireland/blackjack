@@ -70,6 +70,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
+    permissions: { contents: read, issues: write, actions: write }   # the incident issue and the retro dispatch
     steps:
       - uses: actions/checkout@v4
         with: { ref: main, fetch-depth: 0, persist-credentials: false, clean: true }
@@ -97,3 +98,14 @@ jobs:
           git config user.name 'clawworks-release-manager[bot]'
           git config user.email 'clawworks-release-manager[bot]@users.noreply.github.com'
           scripts/rollback "$SHA" --push
+      # A rollback always gets a retro, whatever retro.yml the rollback restored (blackjack#46 action 4):
+      # open the incident here and dispatch the retro for it (GITHUB_TOKEN-created issues trigger nothing).
+      - name: Incident for the rollback, and its retro
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.rollback }}
+        run: |
+          RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          N=$(gh issue create -R "$GITHUB_REPOSITORY" --title "Incident: rollback of ${SHA:0:7}" --label incident \
+            --body "$(printf '@delmarolivier The release manager rolled back %s on main (run %s). The incident reviewer writes the retro (REQ-IMP-1); close this issue when it is done.' "$SHA" "$RUN")" | grep -oE '[0-9]+$')
+          gh workflow run retro.yml -R "$GITHUB_REPOSITORY" --ref main -f incident="$N"

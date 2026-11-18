@@ -31,7 +31,7 @@ jobs:
           node scripts/gates/gate.js floor --pr "$PR" > floor.json
           echo "floor=$(node -p 'require("./floor.json").floor')" >> "$GITHUB_OUTPUT"
           echo "workflows=$(node -p 'require("./floor.json").touchesWorkflows')" >> "$GITHUB_OUTPUT"
-          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/tier.json"))')" >> "$GITHUB_OUTPUT"
+          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/tier.json")).replace(/\x27/g, "\\u0027")')" >> "$GITHUB_OUTPUT"   # no single quote can reach the '...' argument (blackjack#46)
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
