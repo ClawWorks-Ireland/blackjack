@@ -1,8 +1,9 @@
 {
   "name": "Blackjack",
   "short_name": "Blackjack",
-  "description": "Casino blackjack with a basic-strategy coach, Hi-Lo counting trainer and side bets.",
-  "start_url": "./index.html",
+  "description": "Solo blackjack with a basic-strategy coach, Hi-Lo counting trainer and side bets, live blackjack tables and poker.",
+  "id": "./index.html",
+  "start_url": "./lobby.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
