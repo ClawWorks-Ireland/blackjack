@@ -265,6 +265,12 @@ commands['carry-over'] = async () => {
     .sort((x, y) => (y.updated_at > x.updated_at ? 1 : -1))[0];
   if (!st || st.state !== 'success') return say(false, `no green ${args.context} on ${prev.slice(0, 7)}`);
   if (/^Waived by/.test(st.description || '')) return say(false, 'a waiver applies to the reviewed head only');
+  // The rules the verdict was judged by must not have changed on main (A7 sec-1 on blackjack#63).
+  const base = await gh('GET', repo(`/compare/${pr.base.ref}...${prev}`));
+  const since = await gh('GET', repo(`/compare/${base.merge_base_commit.sha}...${mainParent}`));
+  if ((since.files || []).length >= 300) return say(false, 'too many changes on main to check');
+  const refusal = G.carryOverRefusal((since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)));
+  if (refusal) return say(false, refusal);
   const diffOf = async (h) => {
     const c = await gh('GET', repo(`/compare/${mainParent}...${h}`));
     const files = c.files || [];
