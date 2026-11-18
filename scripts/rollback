@@ -39,6 +39,13 @@ if [ "$PUSH" = --push ]; then
     gitnet push "https://github.com/${GITHUB_REPOSITORY:-ClawWorks-Ireland/blackjack}.git" HEAD:main
   else
     git push origin HEAD:main  # Delmar locally (REQ-GATE-3: H's route to main)
+    # The retro must not depend on the retro.yml this rollback restored: open the incident now
+    # (an issue opened with Delmar's account starts the retro through its label; blackjack#46).
+    if command -v gh >/dev/null; then
+      gh issue create --title "Incident: rollback of ${FULL:0:7}" --label incident \
+        --body "Rolled back ${FULL} on main by hand (scripts/rollback). The incident reviewer writes the retro (REQ-IMP-1)." \
+        || echo "could not open the incident issue: open one labelled incident by hand" >&2
+    fi
   fi
 fi
 echo "rolled back ${FULL:0:7} as $(git rev-parse --short HEAD) in $(( $(date +%s) - start ))s${PUSH:+ (pushed)}"

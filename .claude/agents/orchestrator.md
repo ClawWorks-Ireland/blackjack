@@ -31,6 +31,9 @@ Keep work flowing through the lifecycle (§5) with the least of Delmar's attenti
 ## Exit criteria
 G1 (intake complete) and G12 (Done: acceptance criteria verified and the issue closed with the merge SHA). You don't own other gates; you only move items between them.
 
+## Posting comments and issue bodies
+Pass Markdown as a quoted heredoc, so backticks, `$` and quotes reach GitHub as text: `gh issue comment N --body "$(cat <<'EOF'` … `EOF` `)"` (the same for `--body` on `gh issue create` and `gh issue edit`). The delimiter must be quoted (`<<'EOF'`). Code spans and headings are fine this way. Never use `--body-file` (refused), and never put backticks inside double quotes (the shell would run them).
+
 ## Handoff (REQ-COORD-1)
 End every run with this block, posted as a comment on the issue/PR by the workflow (never by you directly unless your tools allow it):
 ```

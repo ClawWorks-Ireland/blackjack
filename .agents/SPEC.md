@@ -1,6 +1,6 @@
 # Claude Agent Delivery Team — Requirements & Design Spec
 
-**Version:** 0.16 · **Date:** 2026-11-17 · **Owner:** Delmar (sole human approver, "H")
+**Version:** 0.17 · **Date:** 2026-11-18 · **Owner:** Delmar (sole human approver, "H")
 **Status:** Control plane bootstrapped (Phase 2 + reboot test done). BlackJack setup open as ClawWorks-Ireland/blackjack#11 (Tier 2, Level 0). Next: its checklist, then merge (§13).
 
 ---
@@ -120,7 +120,7 @@ Issue → Spec → Plan (slices) → [Local implement (≤2) → Claude implemen
 - `REQ-FLOW-1` Review round cap = 3; a 4th round escalates to A2 (re-slice) or H.
 - `REQ-FLOW-2` **Implementer escalation ladder:** local Qwen gets 2 attempts per slice (an attempt = implement + run full test suite). On the 2nd failure, hand to the Claude implementer with the failing test output and the local diff as context. Claude gets 2 attempts; on failure, back to A2 for re-slicing. **Infrastructure isn't an attempt:** a job that fails (runner lost, timeout, Ollama not serving the model, checked before each local attempt, or a model that never answered) re-runs the same rung once. A local rung that fails on infrastructure twice goes straight to the Claude coder.
 - `REQ-FLOW-3` Behaviour changes ship behind a flag unless the overlay says no flag system exists (then Tier floor = 1).
-- `REQ-FLOW-4` One-step rollback available to A9 and H; tested in §11.
+- `REQ-FLOW-4` One-step rollback available to A9 and H; tested in §11. **A rollback opens its own incident issue** (the release manager's job, or `scripts/rollback` run by H), so its retro never depends on the `retro.yml` the rollback restored (blackjack#46).
 - `REQ-FLOW-5` Nits never block; Pre-existing findings become new issues.
 - `REQ-FLOW-6` WIP limit: 3 open PRs per project (lowered from 5 for subscription-only usage).
 - `REQ-FLOW-7` Every local→Claude handoff is logged with the reason, so local-model success rate can be measured (§10).
@@ -411,6 +411,7 @@ sensitive_paths_extra: []
 ---
 
 ## 14. Changelog
+- **0.17 (2026-11-18):** Lessons from the v1.1.0 rollback (blackjack#46). Schemas reach `--json-schema '…'` with every single quote escaped as `\u0027`, plus a test that team schemas contain none. A rollback opens its own incident and dispatches the retro, and `retro.yml` no longer has a push route (REQ-FLOW-4). The credential guard allows backticks inside single quotes and quoted heredocs, and handles `cd -- DIR`; the posting roles use quoted heredocs. Affected: REQ-FLOW-4; `release.yml`, `retro.yml`, `scripts/rollback`, `policy-guard.js`, orchestrator/spec-writer/planner roles.
 - **0.16 (2026-11-17):** Dry-run findings (template#12). New REQ-ROLE-3a: the bug hunters' checks are run, and an Important finding whose check passes on the PR is downgraded. REQ-FLOW-2: an Ollama check runs before each local attempt, and a model that never answered counts as infrastructure. A local rung that fails on infrastructure twice goes to the Claude coder. The ladder posts as the orchestrator's App, and the orchestrator doesn't start a sweep for its own issue actions. A rollback's retro is dispatched (claude-code-action rejects push events), and retro concurrency is per job. The credential guard has fewer false positives (wrappers such as `timeout`, config flags, an escaped `\$`) and treats an unquoted heredoc body as commands. The independent reviewer reviewed the branch: the repro job moved off the PC to a sandboxed hosted VM. Affected: REQ-ROLE-3a, REQ-FLOW-2; `implement.yml`, `review.yml`, `retro.yml`, the bug-hunter roles, `hunter.json`, `gate.js`, `lib.js`.
 - **0.15 (2026-11-17):** New REQ-ID-8: App keys live on the PC and are set per repo by `repo-secrets.js`, because org secrets don't reach private repos on GitHub Free. Affected: REQ-ID-8, `/setup-project` step 4.
 - **0.14 (2026-11-16):** Lessons from BlackJack's first live runs, and the team moves into the template. New REQ-OPS-11 (team files in `team/`, rendered per project, drift check; fixes go template-first), REQ-OPS-12 (PC prerequisites), REQ-ID-6/7. REQ-CFG-3 rewritten: three runners and users, no App key where a model runs code, read-only job tokens for code-running jobs, key-only jobs on GitHub-hosted runners, secret-read denial for every model (any runner directory), and key-holding jobs run no repo code (tests run first, in a job with no key). A9 runs no model (§4). Independent review of the template branch before its PR: overlay parsing, manifest pruning, an `install_command` key, team scripts pinned to CommonJS, the digest stamped in its body, per-job concurrency, the credential guard as a hook in every Claude job, rollback pushes only onto the main its tests ran on. The credential guard is best-effort: bypasses are Nits, not blockers (after three review rounds on BlackJack #32/#33 kept finding new shell forms). §8.1 workflow list completed. Affected: §4, §8.1, REQ-CFG-3, REQ-OPS-11/12, REQ-ID-6/7.

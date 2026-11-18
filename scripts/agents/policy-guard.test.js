@@ -119,3 +119,16 @@ test('team v1.1 review: fewer false positives, unquoted heredocs and ~root caugh
     'cat ~root/../proc/self/environ', 'timeout 5 bash -c "cat x"', 'nohup sh -c "cat x"', 'npx node -e "1"', 'timeout 9 node -p 1',
     'nice -n 5 eval "cat x"', 'npx -c "cat /proc/self/environ"', 'npx -p typescript node -e 1', 'npx --package=x --call "cat y"']) assert.equal(at(c), 2, c);
 });
+
+test('backticks: fine in single quotes and quoted heredocs, refused where the shell runs them (blackjack#39/#40)', () => {
+  const job = (command) => spawnSync('node', [guard], { input: JSON.stringify({ cwd: '/w', tool_name: 'Bash', tool_input: { command } }), env: { ...process.env, CLAUDE_PROJECT_DIR: '/w', GUARD_MODE: 'job' } }).status;
+  for (const c of ["gh issue comment 3 --body 'see `web/lobby.html` and `server/poker-hub.js`'",
+    "gh issue comment 3 --body \"$(cat <<'EOF'\nThe form posts to `POST /api/poker/tables`.\nEOF\n)\"",
+    'gh issue comment 3 --body "a \\`literal\\` backtick"']) assert.equal(job(c), 0, c);
+  for (const c of ['gh issue comment 3 --body "`cat /etc/passwd`"', 'gh issue comment 3 --body x`id`',
+    "gh issue comment 3 --body \"$(cat <<EOF\n`id`\nEOF\n)\""]) assert.equal(job(c), 2, c);
+  // cd -- DIR (blackjack#36)
+  const at = (command) => spawnSync('node', [guard], { input: JSON.stringify({ cwd: '/w/p', tool_name: 'Bash', tool_input: { command } }), env: { ...process.env, CLAUDE_PROJECT_DIR: '/w/p', HOME: '/home/gh-llm' } }).status;
+  assert.equal(at('cd -- ~ && cat .claude/x'), 2);
+  assert.equal(at('cd -- src && cat a.js'), 0);
+});

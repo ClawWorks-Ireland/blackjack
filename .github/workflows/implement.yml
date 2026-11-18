@@ -241,7 +241,7 @@ jobs:
           git -c user.name=a4 -c user.email=a4@local am --3way attempt/commits.mbox
           : no install_command in the overlay
           git diff "origin/$BASE" HEAD > slice.diff
-          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json"))')" >> "$GITHUB_OUTPUT"
+          echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json")).replace(/\x27/g, "\\u0027")')" >> "$GITHUB_OUTPUT"   # no single quote can reach the '...' argument (blackjack#46)
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
         run: git show "origin/$BASE:scripts/agents/policy-guard.js" > "$RUNNER_TEMP/job-guard.js"
       - id: claude

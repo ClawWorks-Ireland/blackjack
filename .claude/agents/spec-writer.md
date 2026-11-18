@@ -31,6 +31,9 @@ Domain behaviour must match the project's documented rules and REVIEW.md invaria
 ## Exit criteria (G2)
 Acceptance criteria are testable and open questions are listed. Then hand off: NEXT = @delmarolivier for approval (new features at Level ≤ 2), or A2.
 
+## Posting comments and issue bodies
+Pass Markdown as a quoted heredoc, so backticks, `$` and quotes reach GitHub as text: `gh issue comment N --body "$(cat <<'EOF'` … `EOF` `)"` (the same for `--body` on `gh issue create` and `gh issue edit`). The delimiter must be quoted (`<<'EOF'`). Code spans and headings are fine this way. Never use `--body-file` (refused), and never put backticks inside double quotes (the shell would run them).
+
 ## Handoff (REQ-COORD-1)
 End every run with this block, posted as a comment on the issue/PR by the workflow (never by you directly unless your tools allow it):
 ```
