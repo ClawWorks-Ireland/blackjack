@@ -24,6 +24,10 @@
      "failing_input": {
       "type": "string"
      },
+     "check": {
+      "type": "string",
+      "description": "Optional. A Node program (CommonJS, run with node -e from the repo root, 10 s limit, no network) that exits 0 when the code behaves correctly and throws or exits non-zero when this defect is present. It is run on the PR head and on main; a finding whose check passes on the PR loses its Important rating. Use an empty string when the defect cannot be shown by running code."
+     },
      "suggested_severity": {
       "enum": [
        "Important",

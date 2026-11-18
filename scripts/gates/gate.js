@@ -14,7 +14,8 @@
  *   gate.js update-branch --pr N              bring a PR up to date with main (App token step)
  *   gate.js guard --before B --after A | --sweep   check commits on main; JSON list of violations
  *   gate.js guard-revert --sha S              revert S on main with a Main-guard-revert trailer (App token step)
- *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R   A6 majority → ai-review status + comment
+ *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
+ *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; hosted VM)
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
  *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
@@ -245,14 +246,61 @@ function isExactRevert(sha, target) {
   }
 }
 
+commands['repro-run'] = async () => {
+  // Hunters' checks (template#12, REQ-ROLE-3a). Runs on a GitHub-hosted VM (review.yml repro job).
+  // --head/--base are root-owned copies made by a SEPARATE install account; every check runs as --user
+  // in a FRESH copy, in its own PID and network namespace, with a 10 s limit and an empty
+  // environment. This process (another user) owns the gate script and the results, so PR code
+  // can't rewrite them, signal us or reach the network; when a check ends, the kernel kills
+  // anything it left in its namespace. Needs passwordless sudo. Any setup error is 'error' (no change).
+  const { spawnSync } = require('child_process');
+  const user = args.user;
+  if (!/^[a-z][a-z0-9-]*$/.test(String(user || ''))) throw new Error('repro-run needs --user <sandbox account>');
+  const candidates = fs.existsSync(args.candidates) ? JSON.parse(fs.readFileSync(args.candidates, 'utf8')) : [];
+  const sudo = (...a) => spawnSync('sudo', ['-n', ...a], { encoding: 'utf8', maxBuffer: 1 << 22, timeout: 120000 });
+  const node = process.execPath;
+  const gid = String(spawnSync('id', ['-g', user], { encoding: 'utf8' }).stdout || '').trim();   // the account's own group (nobody's is nogroup)
+  if (!/^\d+$/.test(gid)) throw new Error(`no such account: ${user}`);
+  // Run dirs: random names in a root-owned 0711 folder (no guessable paths, no /tmp races).
+  const RUNS = path.resolve(args.runs || '/sandbox-run');   // root-owned; --runs only for local testing (CI uses the default on its throwaway VM)
+  sudo('mkdir', '-p', RUNS); sudo('chown', 'root:root', RUNS); sudo('chmod', '0711', RUNS);
+  const run = (code, src) => {
+    const dir = String(sudo('mktemp', '-d', `${RUNS}/run.XXXXXXXX`).stdout || '').trim();
+    if (!dir.startsWith(`${RUNS}/run.`)) return 'error';
+    if (sudo('rmdir', dir).status !== 0 || sudo('cp', '-a', path.resolve(src), dir).status !== 0
+      || sudo('chown', '-R', `${user}:${gid}`, dir).status !== 0) { sudo('rm', '-rf', dir); return 'error'; }
+    const r = spawnSync('sudo', ['-n', 'unshare', '-n', '-p', '-f', '--kill-child', '--mount-proc', '--wd', dir,
+      'setpriv', `--reuid=${user}`, `--regid=${gid}`, '--clear-groups', '--no-new-privs', '--inh-caps=-all', '--bounding-set=-all',
+      'env', '-i', `PATH=${path.dirname(node)}:/usr/bin:/bin`, `HOME=${dir}`, 'LANG=C.UTF-8',
+      'timeout', '-s', 'KILL', '10', node, '-e', code], { encoding: 'utf8', maxBuffer: 1 << 20, timeout: 30000 });
+    sudo('rm', '-rf', dir);
+    if (r.error && r.error.code !== 'ETIMEDOUT') return 'error';
+    if (r.status === 124 || r.status === 137 || r.signal || (r.error && r.error.code === 'ETIMEDOUT')) return 'timeout';   // 124: GNU timeout fired
+    if (/^(unshare|setpriv|sudo): /m.test(r.stderr || '')) return 'error';
+    return r.status === 0 ? 'passes' : 'fails';
+  };
+  const out = [];
+  for (const c of candidates) {
+    if (typeof c.check !== 'string' || !c.check.trim()) continue;
+    out.push({ id: c.id, head: run(c.check, args.head), base: run(c.check, args.base) });
+  }
+  fs.writeFileSync(args.out, `${JSON.stringify(out, null, 1)}\n`);
+  console.log(`${out.length} check(s) run: ${out.map((o) => `${o.id} head=${o.head} base=${o.base}`).join('; ') || 'none'}`);
+};
+
 commands['review-decide'] = async () => {
   const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
   const candidates = fs.existsSync(args.candidates) ? read(args.candidates) : [];
   const voteSets = String(args.votes || '').split(',').filter((f) => f && fs.existsSync(f)).map(read);
-  const d = candidates.length ? G.decideFindings(candidates, voteSets) : { kept: [], dropped: [], important: [] };
-  const line = (k) => `- **${k.severity}** \`${k.file}:${k.line}\` (${k.votes} verifiers): ${k.claim}\n  - Failing input: ${k.failing_input}`;
+  const d0 = candidates.length ? G.decideFindings(candidates, voteSets) : { kept: [], dropped: [], important: [] };
+  // Hunters' runnable checks (template#12): a finding whose check passes on the PR loses its Important rating.
+  const repro = args.repro && fs.existsSync(args.repro) ? read(args.repro) : [];
+  const kept = G.applyRepro(d0.kept, repro);
+  const d = { ...d0, kept, important: kept.filter((k) => k.severity === 'Important') };
+  const line = (k) => `- **${k.severity}** \`${k.file}:${k.line}\` (${k.votes} verifiers): ${k.claim}\n  - Failing input: ${k.failing_input}${k.repro ? `\n  - Check: ${k.repro}` : ''}`;
   const body = [`<!-- ai-review round ${args.round} -->`, `### AI review: round ${args.round} of 3 on ${args.sha.slice(0, 7)}`,
     `Hunters: ${[...new Set(candidates.map((c) => c.id.split('-')[0]))].join(', ') || 'none found anything'} · candidates ${candidates.length} · kept ${d.kept.length} (≥ 2/3 verifier votes)`,
+    ...(kept.some((k) => /downgraded/.test(k.repro || '')) ? ['', `> **⚠ @delmarolivier: ${kept.filter((k) => /downgraded/.test(k.repro || '')).length} Important finding(s) were downgraded to Nit because their check passed on the PR (REQ-ROLE-3a).** The PR's own code ran those checks, so read each one before approving.`] : []),
     '', ...(d.kept.length ? d.kept.map(line) : ['No findings survived verification.']),
     '', `Important findings block merge (G6). Nits never block. Pre-existing findings become new issues (REQ-FLOW-5).`].join('\n');
   await gh('POST', repo(`/issues/${args.pr}/comments`), { body });
@@ -372,5 +420,6 @@ commands['throttle-check'] = async () => {
 
 const cmd = commands[process.argv[2]];
 if (!cmd) { console.error(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 21).join('\n')); process.exit(2); }
-if (!TOKEN) { console.error('GITHUB_TOKEN or GH_TOKEN is required'); process.exit(2); }
+const OFFLINE = new Set(['repro-run', 'manual-checks']);   // no API calls: they run without a token
+if (!TOKEN && !OFFLINE.has(process.argv[2])) { console.error('GITHUB_TOKEN or GH_TOKEN is required'); process.exit(2); }
 cmd().catch((e) => { console.error(e.message); process.exit(1); });

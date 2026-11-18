@@ -279,6 +279,29 @@ function decideFindings(candidates, voteSets, { quorum } = {}) {
 }
 
 /**
+ * Reviewers reason about failing inputs; they can't run code (template#12). A hunter may attach a
+ * `check`: a Node program that exits 0 when the code is right and non-zero when the defect is present.
+ * The repro job runs it on the PR head and on main (no keys, no model). Here its results adjust the
+ * kept findings: an Important finding whose check PASSES on the PR head didn't reproduce, so it is
+ * downgraded to a Nit with the reason; one whose check fails is marked reproduced. A check that
+ * errored or timed out changes nothing. Findings without a check are unchanged.
+ *   repro: [{ id, head: 'passes'|'fails'|'timeout', base: ... }]
+ */
+function applyRepro(kept, repro = []) {
+  const byId = new Map((repro || []).map((r) => [r.id, r]));
+  return kept.map((k) => {
+    const r = byId.get(k.id);
+    if (!r) return k;
+    // Failing on main too is inconclusive: the check may just crash (a bad require, a syntax error).
+    if (r.head === 'fails' && r.base === 'fails') return { ...k, repro: 'inconclusive: its check fails on main too (it may not exercise the defect)' };
+    if (r.head === 'fails') return { ...k, repro: `reproduced on the PR${r.base === 'passes' ? ' (passes on main)' : ''}` };
+    if (r.head === 'passes' && k.severity === 'Important') return { ...k, severity: 'Nit', repro: "not reproduced: its check passes on the PR, so it was downgraded from Important" };
+    if (r.head === 'passes') return { ...k, repro: 'not reproduced: its check passes on the PR' };
+    return { ...k, repro: `check ${r.head}: no change` };
+  });
+}
+
+/**
  * REQ-CB-4: does a Claude run's execution file show a subscription usage limit?
  *
  * Only the run's final `result` message is checked, and only when that result is an
@@ -337,6 +360,9 @@ function nextRung(implementer, attempt, ctx = {}) {
     // the hand-off it already had if the run left no `attempt` artifact (runner lost early).
     return { implementer, attempt, handoffRun: ctx.hasArtifact && run ? run : inherited, retry: 1, infra: true };
   }
+  // A local rung that failed on infrastructure twice (e.g. Ollama can't serve the model): the next
+  // local rung would hit the same wall, so go straight to Claude (template#12, review item 8).
+  if (implementer === 'local' && (ctx.job === 'failure' || ctx.job === 'cancelled')) return { implementer: 'claude', attempt: 1, handoffRun: run, retry: 0 };
   if (implementer === 'local' && attempt < 2) return { implementer: 'local', attempt: attempt + 1, handoffRun: run, retry: 0 };
   if (implementer === 'local') return { implementer: 'claude', attempt: 1, handoffRun: run, retry: 0 };
   if (implementer === 'claude' && attempt < 2) return { implementer: 'claude', attempt: attempt + 1, handoffRun: run, retry: 0 };
@@ -449,5 +475,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };
