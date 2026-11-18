@@ -24,12 +24,9 @@ jobs:
     # Only Delmar's comments start a sweep (answers to needs-human, `re-slice`/`take over` on a PR),
     # not his /security-waive commands. Concurrency is on the job, so a skipped run (a bot comment)
     # never takes the single pending slot from a real one.
-    # Its own issue actions (labels the ladder or a sweep adds, issues it opens or closes) don't start
-    # another sweep: the next sweep picks them up (template#12 review item 9).
     if: >-
-      (github.event_name != 'issue_comment' ||
-       (github.event.comment.user.login == 'delmarolivier' && !startsWith(github.event.comment.body, '/security-waive'))) &&
-      !(github.event_name == 'issues' && github.event.sender.login == 'clawworks-orchestrator[bot]')
+      github.event_name != 'issue_comment' ||
+      (github.event.comment.user.login == 'delmarolivier' && !startsWith(github.event.comment.body, '/security-waive'))
     concurrency:
       group: orchestrator
       cancel-in-progress: false

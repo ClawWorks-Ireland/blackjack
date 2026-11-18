@@ -103,19 +103,6 @@ jobs:
         working-directory: wt
         run: |
           : no install_command in the overlay
-      - name: Ollama answers with the local model (fast infrastructure check, template#12)
-        # Ollama is shared (e.g. BlackJack's Gemma players): if it can't serve our model, fail this job
-        # in minutes. A failed job is infrastructure: the ladder re-runs the same rung once, instead
-        # of spending a 45-minute attempt on API retries and counting it against the model.
-        run: |
-          S=base/.agents/local-harness/settings.json
-          MODEL=$(node -p "require('./$S').env.ANTHROPIC_MODEL"); URL=$(node -p "require('./$S').env.ANTHROPIC_BASE_URL")
-          for i in 1 2 3; do
-            if curl -sf -m 300 "$URL/api/generate" -d "{\"model\":\"$MODEL\",\"prompt\":\"OK\",\"stream\":false,\"options\":{\"num_predict\":1}}" | grep '"done":true' >/dev/null; then
-              echo "Ollama serves $MODEL"; exit 0; fi
-            echo "::warning::Ollama didn't answer with $MODEL (try $i of 3)"; sleep 60
-          done
-          echo "::error::Ollama didn't answer with $MODEL: infrastructure, not the model's attempt"; exit 1
       - name: A3a implement (Ollama, no credentials)
         id: impl
         continue-on-error: true
@@ -123,14 +110,6 @@ jobs:
       - name: Attempt = implement + full suite; no policy paths
         id: t
         run: |
-          # The model never produced a turn (Ollama stopped answering mid-run): infrastructure, so fail
-          # the job and let the ladder re-run this rung once (template#12).
-          # Claude Code writes a synthetic assistant message (model "<synthetic>") for API errors, so
-          # only a turn from the real model counts (template#12 review item 7).
-          if ! grep '"type":"assistant"' impl.log 2>/dev/null | grep -v '"model":"<synthetic>"' >/dev/null; then   # no -q: with pipefail an early exit SIGPIPEs the first grep
-            echo "The local model never answered (see impl.log): infrastructure, not the model's attempt" > test.log
-            echo "::error::the local model never answered"; exit 1
-          fi
           cd wt
           git diff --name-only "origin/$BASE" HEAD > ../changed.txt; git status --porcelain >> ../changed.txt
           if grep -qE '^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents/|\.claude/|\.github/|scripts/gates/|scripts/agents/|scripts/rollback|evals/)' ../changed.txt; then
@@ -309,23 +288,14 @@ jobs:
   ladder:
     needs: [gate, local, claude, verify, publish]
     if: always() && needs.gate.outputs.go == 'true' && needs.publish.result != 'success'
-    runs-on: ubuntu-latest   # holds an App key and runs no model or repo code beyond the gate scripts on main
+    runs-on: ubuntu-latest
     timeout-minutes: 5
+    env: { GITHUB_TOKEN: "${{ github.token }}" }
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
-      - id: app   # the ladder is the orchestrator's process: it comments and dispatches as the orchestrator (REQ-ID-1, template#12)
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
-        with:
-          app-id: ${{ secrets.A0_APP_ID }}
-          private-key: ${{ secrets.A0_APP_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-issues: write
-          permission-actions: write
       - name: Next rung (REQ-FLOW-2) + handoff comment (REQ-FLOW-7)
         env:
-          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
           REASON: ${{ needs.verify.outputs.pass == 'false' && 'A4 self-verify found Important issues' || (needs.local.result == 'failure' || needs.claude.result == 'failure') && 'job error (see run)' || 'tests failed or no valid commit' }}
         run: |
           RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -362,7 +332,7 @@ jobs:
             gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$NI" -f attempt="$NA" -f pr="$FIX_PR" -f handoff_run="$H"
             WHAT="Dispatched $NI attempt $NA with this attempt's work in progress as hints."; NEXTROLE="$([ "$NI" = claude ] && echo 'Claude Coder (A3b)' || echo 'Local Coder (A3a)')"
           fi
-          ROLE="Orchestrator (A0), ladder for the $([ "$IMPL" = local ] && echo "Local Coder (A3a)" || echo "Claude Coder (A3b)")"
+          ROLE=$([ "$IMPL" = local ] && echo "Local Coder (A3a)" || echo "Claude Coder (A3b)")
           gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "$(printf 'ROLE: %s   ITEM: #%s   RESULT: blocked\nWHAT CHANGED: attempt %s failed: %s. %s\nEVIDENCE: %s (artifact `attempt`: test.log, slice.patch)\nRISKS / ASSUMPTIONS: handoff reason logged for local-model metrics (REQ-FLOW-7)\nNEXT: %s' "$ROLE" "$ISSUE" "$ATTEMPT" "$REASON" "$WHAT" "$RUN" "$NEXTROLE")"
 
   throttle:   # REQ-CB-4, model-free: the only job here with issues: write (A7 on #23)

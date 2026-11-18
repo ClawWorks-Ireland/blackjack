@@ -103,8 +103,7 @@ jobs:
           # Fail closed: a lens with no result fails the job, so `decide` never runs and
           # ai-review stays pending. A review is never skipped or degraded (REQ-CB-4).
           mkdir -p out && printf '%s' "$OUT" > "out/${{ matrix.lens }}.json"
-          # Keep only this lens's own ids, once each: a hunter can't speak for (or downgrade) another lens (template#12).
-          node -e 'const fs=require("fs"),f=process.argv[1],L=process.argv[2];const j=JSON.parse(fs.readFileSync(f,"utf8"));if(!Array.isArray(j.findings))process.exit(1);const seen=new Set();j.findings=j.findings.filter(x=>typeof x.id==="string"&&x.id.startsWith(L+"-")&&!seen.has(x.id)&&seen.add(x.id));fs.writeFileSync(f,JSON.stringify(j))' "out/${{ matrix.lens }}.json" "${{ matrix.lens }}"
+          node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(j.findings))process.exit(1)' "out/${{ matrix.lens }}.json"
       - uses: actions/upload-artifact@v4
         with: { name: "findings-${{ matrix.lens }}", path: out/, retention-days: 30 }
       - if: failure() && steps.claude.outcome == 'failure'
@@ -174,59 +173,9 @@ jobs:
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 
-  # Hunters reason about failing inputs; this job runs their `check`s (template#12, REQ-ROLE-3a).
-  # PR code runs here, so: a fresh GitHub-hosted VM (never the PC), no key, read-only token, and the
-  # install and every check run as a throwaway `sandbox` account that can't write the gate script or
-  # the results, each check in a fresh copy with no network and a 10 s limit (gate.js repro-run).
-  repro:
-    needs: [prep, hunt]
-    if: needs.prep.outputs.capped == 'false'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions: { contents: read }
-    steps:
-      - uses: actions/checkout@v4   # base: the gate script, and main for the comparison
-        with: { persist-credentials: false }
-      - uses: actions/checkout@v4
-        with: { ref: "${{ env.SHA }}", path: pr-head, persist-credentials: false }
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - uses: actions/download-artifact@v4
-        with: { pattern: "findings-*", path: findings, merge-multiple: true }
-      - name: Sandbox accounts and their copies (main first, then the PR head)
-        # Two accounts: sandbox-install runs the PR's install (with network) and can never write a
-        # check's copy; sandbox-check runs the checks. Neither may use cron or at, the install runs in
-        # its own PID namespace (nothing it starts survives), and main's copy is installed and locked
-        # before the PR's install runs (template#12 review N1-N3).
-        run: |
-          node -e 'const fs=require("fs");const all=fs.readdirSync("findings").flatMap(f=>JSON.parse(fs.readFileSync("findings/"+f,"utf8")).findings||[]);fs.writeFileSync("candidates.json",JSON.stringify(all))'
-          for u in sandbox-install sandbox-check; do
-            sudo useradd --system --no-create-home --shell /usr/sbin/nologin "$u"
-            echo "$u" | sudo tee -a /etc/cron.deny /etc/at.deny >/dev/null
-          done
-          sudo mkdir -p /sandbox/head /sandbox/base
-          git archive HEAD | sudo tar -x -C /sandbox/base
-          sudo cp -a pr-head/. /sandbox/head/ && sudo rm -rf /sandbox/head/.git
-          sudo chown -R root: /sandbox && sudo chmod -R a+rX /sandbox
-          for d in base head; do
-            sudo chown -R sandbox-install: "/sandbox/$d"
-            sudo unshare -p -f --kill-child --mount-proc --wd "/sandbox/$d" \
-              setpriv --reuid=sandbox-install --regid="$(id -g sandbox-install)" --clear-groups --no-new-privs --inh-caps=-all --bounding-set=-all \
-              env -i PATH="$PATH" HOME="/sandbox/$d" bash -c ': no install_command in the overlay' || echo "::warning::install failed in $d"
-            for i in 1 2 3 4 5; do sudo pkill -KILL -u sandbox-install || break; sleep 1; done
-            sudo crontab -r -u sandbox-install 2>/dev/null || true
-            sudo chown -R root: "/sandbox/$d" && sudo chmod -R a+rX "/sandbox/$d"   # locked before the next install
-          done
-          if pgrep -u sandbox-install >/dev/null; then echo "::error::sandbox-install processes survived"; exit 1; fi
-      - name: Run the hunters' checks on the PR head and on main
-        run: node scripts/gates/gate.js repro-run --candidates candidates.json --head /sandbox/head --base /sandbox/base --user sandbox-check --out repro.json
-      - uses: actions/upload-artifact@v4
-        with: { name: repro, path: repro.json, retention-days: 30 }
-
   decide:
-    needs: [prep, hunt, verify, repro]
-    # The checks can only weaken a finding, so a failed repro job means "no change", never a skipped review.
-    if: ${{ !cancelled() && needs.prep.outputs.capped == 'false' && needs.hunt.result == 'success' && needs.verify.result == 'success' }}
+    needs: [prep, hunt, verify]
+    if: needs.prep.outputs.capped == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env: { GITHUB_TOKEN: "${{ github.token }}" }
@@ -237,15 +186,12 @@ jobs:
         with: { pattern: "findings-*", path: findings, merge-multiple: true }
       - uses: actions/download-artifact@v4
         with: { pattern: "votes-*", path: votes, merge-multiple: true }
-      - uses: actions/download-artifact@v4
-        continue-on-error: true   # no repro results: findings stand as voted
-        with: { name: repro, path: repro }
       - name: Majority vote → ai-review status
         id: d
         run: |
           node -e 'const fs=require("fs");const all=fs.readdirSync("findings").flatMap(f=>JSON.parse(fs.readFileSync("findings/"+f,"utf8")).findings||[]);fs.writeFileSync("candidates.json",JSON.stringify(all))'
           node scripts/gates/gate.js review-decide --candidates candidates.json --votes votes/votes-1.json,votes/votes-2.json,votes/votes-3.json \
-            --pr "$PR" --sha "$SHA" --round "${{ needs.prep.outputs.round }}" --repro repro/repro.json | tee result.json
+            --pr "$PR" --sha "$SHA" --round "${{ needs.prep.outputs.round }}" | tee result.json
           echo "important=$(node -p 'require("./result.json").important')" >> "$GITHUB_OUTPUT"
       - name: Next round — dispatch the implementer fix job
         if: steps.d.outputs.important != '0' && needs.prep.outputs.round != '3'

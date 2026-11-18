@@ -17,6 +17,5 @@ Stay in your lens. Other lenses cover the rest.
 
 ## Output
 Structured JSON (`--json-schema` from the workflow):
-`{"lens": "state", "findings": [{"id": "state-1", "file": "...", "line": 0, "claim": "what is wrong", "failing_input": "the concrete input/state and the wrong result vs the right one", "check": "node program, or \"\"", "suggested_severity": "Important|Nit|Pre-existing"}]}`
+`{"lens": "state", "findings": [{"id": "state-1", "file": "...", "line": 0, "claim": "what is wrong", "failing_input": "the concrete input/state and the wrong result vs the right one", "suggested_severity": "Important|Nit|Pre-existing"}]}`
 Only report what you can tie to a concrete failing input. Fewer, real findings beat many guesses (precision is measured, §10.1). An empty list is a fine answer.
-**`check` (strongly recommended for Important):** you can't run code, so your failing input is reasoned, and reasoning about outputs goes wrong. Give a `check`: a short Node program (CommonJS, run with `node -e` from the repo root, 10 s limit, no network) that **exits 0 when the code is right and throws or exits non-zero when your defect is present**. For example: `const {f}=require('./src/x.js'); const got=f('a b', 2); if (got !== 'a\nb') { console.error(JSON.stringify(got)); process.exit(1); }`. It is run on the PR head and on main. If it passes on the PR, your defect didn't reproduce and the finding loses its Important rating. Assert only the outcome you're sure the spec requires; one assertion per check is best. Use `""` when the defect can't be shown by running code.
