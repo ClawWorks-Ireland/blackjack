@@ -25,14 +25,21 @@ const RUNNER_FILES = ['.credentials', '.credentials_rsaparams', '.runner', '.env
 const LIT_DOLLAR = '\u0000';   // a $ inside single quotes: literal text, never an expansion
 const EXPANSION = /\$/;   // after $HOME/$PWD/$OLDPWD are expanded, any $ left ($X, $1, $@, $'…', $"…") is unknown: refuse
 // Commands that re-read a string as a new command line or run inline code: the guard can't see inside them.
-const REPARSERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'eval', 'exec', 'source', '.', 'xargs', 'env', 'nohup', 'timeout',
+const REPARSERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'eval', 'exec', 'source', '.', 'xargs', 'env',
   'nice', 'setsid', 'stdbuf', 'command', 'builtin', 'awk', 'gawk', 'perl', 'python', 'python3', 'ruby', 'php', 'lua', 'tclsh', 'script',
   'printf', 'read', 'declare', 'typeset', 'export', 'local', 'let', 'readarray', 'mapfile']);
-const INLINE_CODE = /^(?:-e|-p|-c|-r|--eval|--print|--require|--import|--input-type|-pe|-ne)(?:=|$)/;
+// Inline code for node-like runtimes only: -e/-p/--eval/--print. Config and loader flags (-c, -r,
+// --import) name files, so `npx jest -c x` or `node --import tsx --test` are fine (template#12 review).
+const INLINE_CODE = /^(?:-e|-p|-pe|--eval|--print)(?:=|$)/;
+const NODE_LIKE = /^(?:node|nodejs|deno|bun|tsx|ts-node)$/;
+// Prefix commands that just run the next word (with their own options): look through them.
+const WRAPPERS = { timeout: 1, nice: 0, stdbuf: 0, nohup: 0, ionice: 0, time: 0 };   // value: positional args before the command
 
 /** Remove heredoc bodies (`<<'EOF' … EOF`): they are text fed to stdin, not paths. */
 // The rest of the opening line stays: `cat <<'EOF' /proc/self/environ` names a file (A7 sec-2 on BlackJack #33).
-const stripHeredocs = (cmd) => cmd.replace(/<<-?[ \t]*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<HEREDOC$3');
+// Only a QUOTED delimiter (<<'EOF', <<"EOF") makes the body plain text; an unquoted body still runs
+// $( ) and backticks, so it stays in view (template#12 review).
+const stripHeredocs = (cmd) => cmd.replace(/<<-?[ \t]*(['"])(\w+)\1([^\n]*)\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<HEREDOC$3');
 
 /** Split a shell command into simple commands of words: [{ text, glob }], glob = unquoted * ? [ {. */
 function shellWords(cmd) {
@@ -41,9 +48,14 @@ function shellWords(cmd) {
   const sep = () => { end(); if (words.length) cmds.push(words); words = []; };
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
-    if (q) { if (c === q) q = null; else if (c === '\\' && q === '"' && i + 1 < cmd.length) w += cmd[++i]; else w += (q === "'" && c === '$') ? LIT_DOLLAR : c; continue; }
+    if (q) {
+      if (c === q) q = null;
+      else if (c === '\\' && q === '"' && i + 1 < cmd.length) { const n = cmd[++i]; w += n === '$' ? LIT_DOLLAR : n; }
+      else w += (q === "'" && c === '$') ? LIT_DOLLAR : c;
+      continue;
+    }
     if (c === "'" || c === '"') { q = c; w = w ?? ''; continue; }
-    if (c === '\\' && i + 1 < cmd.length) { w = (w ?? '') + cmd[++i]; continue; }
+    if (c === '\\' && i + 1 < cmd.length) { const n = cmd[++i]; w = (w ?? '') + (n === '$' ? LIT_DOLLAR : n); continue; }
     if (/\s/.test(c)) { if (c === '\n') sep(); else end(); continue; }
     if (';&|()<>'.includes(c)) { sep(); continue; }
     if ('*?[{'.includes(c)) glob = true;
@@ -72,7 +84,7 @@ const segIs = (seg, name, glob) => {
 };
 /** Expand ~, ~user, $HOME, $PWD, $OLDPWD at the start of a word. Returns null if another $ remains. */
 function expand(p, cwd, oldpwd) {
-  const out = p.replace(/^~(?=\/|$)/, HOME).replace(/^~([a-z_][\w-]*)(?=\/|$)/, '/home/$1')
+  const out = p.replace(/^~(?=\/|$)/, HOME).replace(/^~([a-z_][\w-]*)(?=\/|$)/, (m, u) => (u === 'root' ? '/root' : `/home/${u}`))
     .replace(/^\$\{?HOME\}?(?=\/|$)/, HOME).replace(/^\$\{?PWD\}?(?=\/|$)/, cwd).replace(/^\$\{?OLDPWD\}?(?=\/|$)/, oldpwd || cwd);
   // ~+ / ~- (the shell's PWD/OLDPWD from earlier commands) and other ~ forms are unknown here
   if (EXPANSION.test(out) || out.startsWith('~')) return null;
@@ -149,10 +161,20 @@ function hidesArgs(cmd) {
   // (node -e, python -c): single-quoted text there is code, so the guard refuses it.
   for (const ws of shellWords(c)) {
     let i = 0; while (i < ws.length && /^[A-Za-z_]\w*=/.test(ws[i].text)) i++;   // leading VAR=value words
-    const cmd0 = ws[i] ? path.basename(ws[i].text) : '';
+    // look through wrappers: `timeout 300 npm test`, `nice -n 5 node x`
+    for (let guard = 0; ws[i] && path.basename(ws[i].text) in WRAPPERS && guard < 5; guard++) {
+      const pos = WRAPPERS[path.basename(ws[i].text)]; i++;
+      while (ws[i] && ws[i].text.startsWith('-')) i += /^-(?:n|s|k|o|e|i|c)$/.test(ws[i].text) ? 2 : 1;   // options, some with a value
+      i += pos;
+    }
+    let cmd0 = ws[i] ? path.basename(ws[i].text) : '';
+    if (/^(?:npx|bunx|pnpx)$/.test(cmd0)) {   // npx <tool>: judge the tool
+      let j = i + 1; while (ws[j] && ws[j].text.startsWith('-')) j++;
+      i = j; cmd0 = ws[i] ? path.basename(ws[i].text) : '';
+    }
     if (REPARSERS.has(cmd0)) return true;
     if (ws.slice(i + 1).some((w) => /^-(?:exec|execdir|ok|okdir)$/.test(w.text) && cmd0 === 'find')) return true;
-    if (/^(?:node|deno|bun|tsx|ts-node|npx)$/.test(cmd0) && ws.slice(i + 1).some((w) => INLINE_CODE.test(w.text))) return true;
+    if (NODE_LIKE.test(cmd0) && ws.slice(i + 1).some((w) => INLINE_CODE.test(w.text))) return true;
   }
   if (/`|<\(|>\(/.test(c)) return true;
   // Claude jobs pass long text as --body "$(cat <<'EOF' … EOF)": a heredoc into cat reads no file.

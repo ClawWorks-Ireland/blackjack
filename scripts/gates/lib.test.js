@@ -254,6 +254,8 @@ test('T11 ladder: infra failure re-runs the same rung once with the hand-off it 
   assert.deepEqual(G.nextRung('claude', 1, { job: 'failure', retry: 1, run: '301', handoffRun: '200' }),
     { implementer: 'claude', attempt: 2, handoffRun: '301', retry: 0 });
   assert.deepEqual(G.nextRung('claude', 2, { job: 'failure', retry: 1, run: '302' }), { replan: true });
+  // A local rung's second infra failure (Ollama can't serve the model) goes straight to Claude (template#12)
+  assert.deepEqual(G.nextRung('local', 1, { job: 'failure', retry: 1, run: '303' }), { implementer: 'claude', attempt: 1, handoffRun: '303', retry: 0 });
 });
 
 test('fix rounds only push to agent-owned slice PRs (A7 on #23)', () => {
@@ -311,4 +313,20 @@ test('manual checks come from the overlay as "<path regex> => <message>"', () =>
   assert.deepEqual(G.parseManualChecks(md2).map((x) => x.message), ['first', 'run `x # y`']);
   const md3 = "manual_checks:\n  - ^(web/ => broken regex\n  - ^b/ => don't skip this   # trailing comment\n";
   assert.deepEqual(G.parseManualChecks(md3).map((x) => x.message), ["don't skip this"]);
+});
+
+test('applyRepro: a check that passes on the PR downgrades an Important finding; one that fails confirms it (template#12)', () => {
+  const kept = [{ id: 'logic-1', severity: 'Important' }, { id: 'logic-2', severity: 'Important' }, { id: 'state-1', severity: 'Important' }, { id: 'rules-1', severity: 'Nit' }, { id: 'contract-1', severity: 'Important' }];
+  const out = G.applyRepro(kept, [
+    { id: 'logic-1', head: 'fails', base: 'passes' },
+    { id: 'logic-2', head: 'passes', base: 'passes' },
+    { id: 'state-1', head: 'timeout', base: 'passes' },
+    { id: 'rules-1', head: 'passes', base: 'passes' },
+  ]);
+  assert.equal(out[0].severity, 'Important'); assert.match(out[0].repro, /reproduced on the PR \(passes on main\)/);
+  assert.equal(out[1].severity, 'Nit'); assert.match(out[1].repro, /downgraded/);
+  assert.equal(out[2].severity, 'Important'); assert.match(out[2].repro, /timeout: no change/);
+  assert.equal(out[3].severity, 'Nit');
+  assert.equal(out[4].repro, undefined, 'no check: unchanged');
+  assert.deepEqual(G.applyRepro(kept), kept);
 });

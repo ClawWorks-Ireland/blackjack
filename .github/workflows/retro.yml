@@ -10,18 +10,17 @@ on:
   workflow_dispatch:
     inputs:
       incident: { description: 'Incident issue number', required: false, default: '' }
+      revert: { description: 'SHA of a rollback commit on main (dispatched by the push route)', required: false, default: '' }
 permissions:
   contents: read   # A10 pushes branches with the Claude App token, never GITHUB_TOKEN
   issues: write
   pull-requests: write
   actions: read
-concurrency:
-  group: retro
-  cancel-in-progress: false
 jobs:
   route:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions: { contents: read, actions: write }   # to dispatch the rollback retro
     outputs:
       mode: ${{ steps.r.outputs.mode }}
     steps:
@@ -31,18 +30,29 @@ jobs:
           LABEL: ${{ github.event.label.name }}
           SENDER: ${{ github.event.sender.login }}
           IN_INCIDENT: ${{ inputs.incident }}
+          IN_REVERT: ${{ inputs.revert }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           M=""
           case "${{ github.event_name }}" in
             issues) [ "$LABEL" = incident ] && [ "$SENDER" != "clawworks-incident-reviewer[bot]" ] && M=incident ;;
-            push) printf '%s' "$MSG" | grep -qE '^(Rollback-of|Main-guard-revert): ' && M=revert ;;
+            # claude-code-action rejects push events (template#12), so a rollback push dispatches the
+            # retro instead. Main-guard reverts get theirs from main-guard's incident dispatch.
+            push) if printf '%s' "$MSG" | grep -E '^Rollback-of: ' >/dev/null; then
+                    gh workflow run retro.yml -R "$GITHUB_REPOSITORY" -f revert="$GITHUB_SHA"; fi ;;
             schedule) M=weekly ;;
-            workflow_dispatch) [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }; M=$([ -n "$IN_INCIDENT" ] && echo incident || echo weekly) ;;
+            workflow_dispatch)
+              [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }
+              [[ -z "$IN_REVERT" || "$IN_REVERT" =~ ^[0-9a-f]{40}$ ]] || { echo "bad revert sha"; exit 1; }
+              if [ -n "$IN_REVERT" ]; then M=revert; elif [ -n "$IN_INCIDENT" ]; then M=incident; else M=weekly; fi ;;
           esac
           echo "mode=$M" >> "$GITHUB_OUTPUT"
   a10:
     needs: route
     if: needs.route.outputs.mode != ''
+    concurrency:   # per job: the route run on every push to main must never take a pending retro's slot
+      group: retro
+      cancel-in-progress: false
     runs-on: [self-hosted, claude-code]   # a model runs code here, so no App key ever comes here (A7 on #23)
     timeout-minutes: 60
     permissions: { contents: read, issues: read, pull-requests: read, actions: read }   # read-only: a model runs code here
@@ -60,7 +70,7 @@ jobs:
           github_token: ${{ github.token }}   # read-only; A10's writes happen in a10-publish, without a model
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
           prompt: |
-            Mode: ${{ needs.route.outputs.mode }}. Incident issue: ${{ inputs.incident || github.event.issue.number || 'find the newest open issue labelled incident' }}. Commit: ${{ github.sha }}.
+            Mode: ${{ needs.route.outputs.mode }}. Incident issue: ${{ inputs.incident || github.event.issue.number || 'find the newest open issue labelled incident' }}. Commit: ${{ inputs.revert || github.sha }}.
             Follow your definition. You can't post or push: write your output to ./out/ as your definition describes, and commit any proposal on a local branch. Never merge.
           claude_args: >-
             --append-system-prompt-file .claude/agents/incident-retro.md --model opus --max-turns 120
