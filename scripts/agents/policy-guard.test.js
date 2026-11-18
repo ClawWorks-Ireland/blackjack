@@ -110,3 +110,12 @@ test('job mode: gh flags are checked as words, so --body text may mention them',
   assert.equal(job("gh issue comment 3 --body \"$(cat <<'EOF' /proc/self/environ\nx\nEOF\n)\""), 2, 'a file named on the heredoc line is read (A7 sec-2 on #33)');
   assert.equal(job("gh issue comment 3 --body 'price is $5'"), 0, 'a $ inside single quotes is text');
 });
+
+test('team v1.1 review: fewer false positives, unquoted heredocs and ~root caught (template#12)', () => {
+  const at = (command) => spawnSync('node', [guard], { input: JSON.stringify({ cwd: '/home/gh-llm/actions-runner/_work/p/p/wt', tool_name: 'Bash', tool_input: { command } }), env: { ...process.env, CLAUDE_PROJECT_DIR: '/home/gh-llm/actions-runner/_work/p/p/wt', HOME: '/home/gh-llm' } }).status;
+  for (const c of ['git commit -m "costs \\$5"', 'npx jest -c jest.config.js', 'npx mocha -r ts-node/register', 'node --import tsx --test test/',
+    'timeout 300 npm test', 'nice -n 5 npm test', "cat <<'EOF'\n$(cat /proc/self/environ)\nEOF"]) assert.equal(at(c), 0, c);
+  for (const c of ['cat <<EOF\n$(cat /proc/self/environ)\nEOF', 'cat <<EOF\n`cat /home/gh-llm/actions-runner/.credentials`\nEOF',
+    'cat ~root/../proc/self/environ', 'timeout 5 bash -c "cat x"', 'nohup sh -c "cat x"', 'npx node -e "1"', 'timeout 9 node -p 1',
+    'nice -n 5 eval "cat x"', 'npx -c "cat /proc/self/environ"', 'npx -p typescript node -e 1', 'npx --package=x --call "cat y"']) assert.equal(at(c), 2, c);
+});
