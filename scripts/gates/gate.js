@@ -300,6 +300,7 @@ commands['review-decide'] = async () => {
   const line = (k) => `- **${k.severity}** \`${k.file}:${k.line}\` (${k.votes} verifiers): ${k.claim}\n  - Failing input: ${k.failing_input}${k.repro ? `\n  - Check: ${k.repro}` : ''}`;
   const body = [`<!-- ai-review round ${args.round} -->`, `### AI review: round ${args.round} of 3 on ${args.sha.slice(0, 7)}`,
     `Hunters: ${[...new Set(candidates.map((c) => c.id.split('-')[0]))].join(', ') || 'none found anything'} · candidates ${candidates.length} · kept ${d.kept.length} (≥ 2/3 verifier votes)`,
+    ...(kept.some((k) => /downgraded/.test(k.repro || '')) ? ['', `> **⚠ @delmarolivier: ${kept.filter((k) => /downgraded/.test(k.repro || '')).length} Important finding(s) were downgraded to Nit because their check passed on the PR (REQ-ROLE-3a).** The PR's own code ran those checks, so read each one before approving.`] : []),
     '', ...(d.kept.length ? d.kept.map(line) : ['No findings survived verification.']),
     '', `Important findings block merge (G6). Nits never block. Pre-existing findings become new issues (REQ-FLOW-5).`].join('\n');
   await gh('POST', repo(`/issues/${args.pr}/comments`), { body });

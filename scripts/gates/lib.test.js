@@ -323,6 +323,7 @@ test('applyRepro: a check that passes on the PR downgrades an Important finding;
     { id: 'state-1', head: 'timeout', base: 'passes' },
     { id: 'rules-1', head: 'passes', base: 'passes' },
   ]);
+  assert.match(G.applyRepro([{ id: 'x-1', severity: 'Important' }], [{ id: 'x-1', head: 'fails', base: 'fails' }])[0].repro, /inconclusive/);
   assert.equal(out[0].severity, 'Important'); assert.match(out[0].repro, /reproduced on the PR \(passes on main\)/);
   assert.equal(out[1].severity, 'Nit'); assert.match(out[1].repro, /downgraded/);
   assert.equal(out[2].severity, 'Important'); assert.match(out[2].repro, /timeout: no change/);

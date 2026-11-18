@@ -292,7 +292,9 @@ function applyRepro(kept, repro = []) {
   return kept.map((k) => {
     const r = byId.get(k.id);
     if (!r) return k;
-    if (r.head === 'fails') return { ...k, repro: `reproduced on the PR${r.base === 'passes' ? ' (passes on main)' : r.base === 'fails' ? ' (also fails on main)' : ''}` };
+    // Failing on main too is inconclusive: the check may just crash (a bad require, a syntax error).
+    if (r.head === 'fails' && r.base === 'fails') return { ...k, repro: 'inconclusive: its check fails on main too (it may not exercise the defect)' };
+    if (r.head === 'fails') return { ...k, repro: `reproduced on the PR${r.base === 'passes' ? ' (passes on main)' : ''}` };
     if (r.head === 'passes' && k.severity === 'Important') return { ...k, severity: 'Nit', repro: "not reproduced: its check passes on the PR, so it was downgraded from Important" };
     if (r.head === 'passes') return { ...k, repro: 'not reproduced: its check passes on the PR' };
     return { ...k, repro: `check ${r.head}: no change` };

@@ -117,5 +117,5 @@ test('team v1.1 review: fewer false positives, unquoted heredocs and ~root caugh
     'timeout 300 npm test', 'nice -n 5 npm test', "cat <<'EOF'\n$(cat /proc/self/environ)\nEOF"]) assert.equal(at(c), 0, c);
   for (const c of ['cat <<EOF\n$(cat /proc/self/environ)\nEOF', 'cat <<EOF\n`cat /home/gh-llm/actions-runner/.credentials`\nEOF',
     'cat ~root/../proc/self/environ', 'timeout 5 bash -c "cat x"', 'nohup sh -c "cat x"', 'npx node -e "1"', 'timeout 9 node -p 1',
-    'nice -n 5 eval "cat x"']) assert.equal(at(c), 2, c);
+    'nice -n 5 eval "cat x"', 'npx -c "cat /proc/self/environ"', 'npx -p typescript node -e 1', 'npx --package=x --call "cat y"']) assert.equal(at(c), 2, c);
 });

@@ -169,7 +169,12 @@ function hidesArgs(cmd) {
     }
     let cmd0 = ws[i] ? path.basename(ws[i].text) : '';
     if (/^(?:npx|bunx|pnpx)$/.test(cmd0)) {   // npx <tool>: judge the tool
-      let j = i + 1; while (ws[j] && ws[j].text.startsWith('-')) j++;
+      // npx's own options come before the tool: -c/--call runs a shell string; -p/--package take a value
+      let j = i + 1;
+      while (ws[j] && ws[j].text.startsWith('-')) {
+        if (/^(?:-c|--call)(?:=|$)/.test(ws[j].text)) return true;   // npx -c '<shell string>'
+        j += /^(?:-p|--package)$/.test(ws[j].text) ? 2 : 1;
+      }
       i = j; cmd0 = ws[i] ? path.basename(ws[i].text) : '';
     }
     if (REPARSERS.has(cmd0)) return true;

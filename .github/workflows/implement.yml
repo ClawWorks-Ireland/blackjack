@@ -312,8 +312,8 @@ jobs:
     runs-on: ubuntu-latest   # holds an App key and runs no model or repo code beyond the gate scripts on main
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-        with: { persist-credentials: false }
+      - uses: actions/checkout@v4   # main, whatever ref the run was dispatched on: lib.js runs next to the A0 key (A7 sec-1 on blackjack#42)
+        with: { ref: main, persist-credentials: false }
       - id: app   # the ladder is the orchestrator's process: it comments and dispatches as the orchestrator (REQ-ID-1, template#12)
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
