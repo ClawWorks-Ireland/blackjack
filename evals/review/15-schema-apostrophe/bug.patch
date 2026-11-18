@@ -1,0 +1,15 @@
+diff --git a/.agents/schemas/hunter.json b/.agents/schemas/hunter.json
+index e425d6e..46e59b7 100644
+--- a/.agents/schemas/hunter.json
++++ b/.agents/schemas/hunter.json
+@@ -24,6 +24,10 @@
+      "failing_input": {
+       "type": "string"
+      },
++     "check": {
++      "type": "string",
++      "description": "Optional. A Node program that exits 0 when the code behaves correctly and non-zero when this defect is present. Use \"\" if the defect can't be shown by running code."
++     },
+      "suggested_severity": {
+       "enum": [
+        "Important",
