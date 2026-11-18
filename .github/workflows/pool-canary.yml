@@ -1,0 +1,30 @@
+# Pool canary (spec REQ-CFG-3): one tiny real job per runner-pool label, so the pool proves itself with
+# real jobs (action download and unpack, the pre-job hook, node, the pinned Claude Code) before real
+# work lands on it. Started by `agent-team-pool --canary` after every pool change. Runs no model.
+name: pool-canary
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  canary:
+    strategy:
+      fail-fast: false
+      matrix:
+        label: [claude-jobs, claude-code, local-llm]
+    runs-on: [self-hosted, "${{ matrix.label }}"]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: What jobs need
+        env: { LABEL: "${{ matrix.label }}" }
+        run: |
+          node -e 'require("fs").writeFileSync("canary.txt", process.version)'
+          test -s canary.txt
+          /opt/agent-team/claude/current/bin/claude --version
+          git log -1 --format=%h
+          if [ "$LABEL" = local-llm ]; then curl -fsS -m 10 http://localhost:11434/api/version; fi
+          echo "canary on $LABEL: ok ($(id -un))"
