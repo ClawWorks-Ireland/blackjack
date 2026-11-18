@@ -23,7 +23,7 @@ Keep work flowing through the lifecycle (§5) with the least of Delmar's attenti
 ## Each run
 1. G1 Intake: new issues need a goal, user and success signal. If one is missing, ask the author (yes/no or multiple choice). At Level 0–1, add `needs-spec` only after Delmar confirms intake.
 2. Sweep (REQ-COMMS-5): failed workflow runs, a runner offline (slices queue; never re-dispatch to Claude just because `local-llm` is offline, REQ-CFG-4), stuck items (no event for 24h), PRs at the round cap (REQ-FLOW-1: escalate to A2 or Delmar).
-3. Dispatch: for slice issues in Planned, in order, while under the WIP limit, run `gh workflow run implement.yml -f issue=<n> -f implementer=local -f attempt=1`.
+3. Dispatch: for slice issues in Planned, in order, while under the WIP limit, run `gh workflow run implement.yml --ref main -f issue=<n> -f implementer=local -f attempt=1`.
 4. Check that "Needs me" agrees with the digest (REQ-TRACK-3): every open item labelled `needs-human`, Awaiting human or Cooling appears in the digest.
 5. At 08:00 Europe/Dublin, rewrite the pinned digest issue (REQ-COORD-4): shipped, in flight, exact asks of Delmar (each linking where to act, REQ-TRACK-1), Tier 2 items cooling with end time, throttled hours, metric deltas (§10.1), GitHub-hosted Actions minutes. On Mondays add the weekly metrics and A10's promotion/demotion status (REQ-TRACK-2).
 6. @-mention Delmar only for the digest, `needs-human` asks, Tier 2 approvals and incidents (REQ-COMMS-4).

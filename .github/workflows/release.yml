@@ -108,4 +108,4 @@ jobs:
           RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           N=$(gh issue create -R "$GITHUB_REPOSITORY" --title "Incident: rollback of ${SHA:0:7}" --label incident \
             --body "$(printf '@delmarolivier The release manager rolled back %s on main (run %s). The incident reviewer writes the retro (REQ-IMP-1); close this issue when it is done.' "$SHA" "$RUN")" | grep -oE '[0-9]+$')
-          gh workflow run retro.yml -R "$GITHUB_REPOSITORY" -f incident="$N"
+          gh workflow run retro.yml -R "$GITHUB_REPOSITORY" --ref main -f incident="$N"

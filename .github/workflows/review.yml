@@ -253,7 +253,7 @@ jobs:
           IMPL=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
           ISSUE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
           if [ -z "$ISSUE" ]; then gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "AI review found Important issues, but this PR has no \`Closes #n\` slice to send back to an implementer. @delmarolivier please fix by hand."; exit 0; fi
-          gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR"
+          gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR"
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: review-decision, path: "review-decision.json", retention-days: 90 }

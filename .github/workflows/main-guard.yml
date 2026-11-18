@@ -79,4 +79,4 @@ jobs:
           LIST=$(node -e 'console.log(JSON.parse(process.env.V).map(x=>"- "+x.sha.slice(0,7)+": "+x.why).join("\n"))')
           gh issue create -R "$GITHUB_REPOSITORY" --title "Incident: unauthorised change to main" --label incident --label circuit-breaker --label "cb:level-0" --body "$(printf '@delmarolivier main-guard found commits on main outside A9'"'"'s merge path (REQ-GATE-2):\n\n%s\n\nRevert: %s (run %s).\nREQ-CB-5: autonomy drops to **Level 0** while this issue is open. A10 writes the retro; close this issue when the retro is done.\n' "$LIST" "$REVERTED" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")" > issue.txt
           N=$(grep -oE '[0-9]+$' issue.txt); cat issue.txt
-          gh workflow run retro.yml -R "$GITHUB_REPOSITORY" -f incident="$N"   # GITHUB_TOKEN-created issues trigger no workflows
+          gh workflow run retro.yml -R "$GITHUB_REPOSITORY" --ref main -f incident="$N"   # GITHUB_TOKEN-created issues trigger no workflows

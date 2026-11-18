@@ -347,7 +347,7 @@ jobs:
             exit 0
           fi
           if [ "$(field infra)" = true ]; then
-            gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="$(field handoffRun)" -f retry=1
+            gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt="$ATTEMPT" -f pr="$FIX_PR" -f handoff_run="$(field handoffRun)" -f retry=1
             gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: Ladder (A0)   ITEM: #$ISSUE   RESULT: blocked
           WHAT CHANGED: the $IMPL job for attempt $ATTEMPT ended as '$JOB' (runner lost, gaming pause or timeout), not a model failure. Re-running the same attempt once.
           EVIDENCE: $RUN
@@ -359,7 +359,7 @@ jobs:
             WHAT="Ladder exhausted (local ×2, Claude ×2)."; NEXTROLE="A2 Planner: re-slice"
           else
             NI=$(field implementer); NA=$(field attempt); H=$(field handoffRun)
-            gh workflow run implement.yml -R "$GITHUB_REPOSITORY" -f issue="$ISSUE" -f implementer="$NI" -f attempt="$NA" -f pr="$FIX_PR" -f handoff_run="$H"
+            gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$NI" -f attempt="$NA" -f pr="$FIX_PR" -f handoff_run="$H"
             WHAT="Dispatched $NI attempt $NA with this attempt's work in progress as hints."; NEXTROLE="$([ "$NI" = claude ] && echo 'Claude Coder (A3b)' || echo 'Local Coder (A3a)')"
           fi
           ROLE="Orchestrator (A0), ladder for the $([ "$IMPL" = local ] && echo "Local Coder (A3a)" || echo "Claude Coder (A3b)")"
