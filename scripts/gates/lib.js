@@ -404,6 +404,40 @@ function reviewRetryAction(run, status) {
 }
 
 /**
+ * Was this head actually reviewed? True only if github-actions[bot] posted a VERDICT for `context` on it:
+ * success or failure with "Round N: ..." (gate.js decide) or "Carried over from ..." (gate.js carry-over).
+ * Not a pending status (a run can be cancelled after posting it, before its round is recorded), not the
+ * round-cap failure (a capped head had no review), not an error. A7 sec-2 on blackjack#81, rounds 1 and 2.
+ */
+function reviewedHead(statuses, context) {
+  return (statuses || []).some((x) => x && x.context === context && x.creator && x.creator.login === 'github-actions[bot]'
+    && (x.state === 'success' || x.state === 'failure')
+    && /^(Round [1-9][0-9]*: |Carried over from )/.test(x.description || ''));
+}
+
+/**
+ * Does a branch update keep the current review round (REQ-FLOW-1)? `u` is gate.js pureUpdate's result for
+ * the head ({ pure, why, prev }); `prevStatuses` are the statuses on u.prev. Pure only if the head merely
+ * merged the base branch into a previous head that was actually reviewed (reviewedHead).
+ */
+function roundKeepsPure(u, prevStatuses) {
+  if (!u || !u.pure) return { pure: false, why: (u && u.why) || 'not a pure branch update' };
+  if (!reviewedHead(prevStatuses, 'ai-review')) return { pure: false, why: `the previous head ${String(u.prev).slice(0, 7)} has no review verdict` };
+  return { pure: true, why: '' };
+}
+
+/**
+ * The AI review round for a PR head (REQ-FLOW-1): rounds count the coder's changes, not branch updates.
+ * `last` is the highest round:N label so far; `pure` is true when the head only merged the base branch
+ * into the previous head (gate.js pure-update). A pure update is re-reviewed in the same round, so
+ * branch updates alone never reach the cap (team v2.3; blackjack#62). The first review is round 1.
+ */
+function reviewRound(last, pure) {
+  const n = Number.isInteger(last) && last > 0 ? last : 0;
+  return pure && n > 0 ? n : n + 1;
+}
+
+/**
  * The tier the spec writer declared for a spec: a line `TIER: <0|1|2>` (the RISK.md tier of the paths
  * the work will change; spec-writer role). The orchestrator may approve only a declared Tier 0 or 1
  * spec (A7 sec-2 on blackjack#68). Fails closed: with several TIER lines (a quoted example, a template,
@@ -511,5 +545,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, reviewRound, reviewedHead, roundKeepsPure, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };
