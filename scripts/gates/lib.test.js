@@ -340,3 +340,32 @@ test('carry-over refuses when main changed policy since the review (A7 sec-1 on 
   }
   assert.equal(G.carryOverRefusal([]), null);
 });
+
+test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'pending'), 'rerun');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 2 }, 'pending'), 'mark-error');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'failure'), 'none', 'a blocking verdict is not an infra failure');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'success'), 'none');
+  assert.equal(G.reviewRetryAction({ conclusion: 'success', attempt: 1 }, 'pending'), 'none');
+  assert.equal(G.reviewRetryAction({ conclusion: 'cancelled', attempt: 1 }, 'pending'), 'none', 'a cancelled run was superseded by a newer push');
+  assert.equal(G.reviewRetryAction(null, 'pending'), 'none');
+});
+
+test('declaredSpecTier: only a declared Tier 0/1 spec can be approved by the orchestrator (A7 sec-2 on blackjack#68)', () => {
+  assert.equal(G.declaredSpecTier('## Spec\n...\nTIER: 1\n'), 1);
+  assert.equal(G.declaredSpecTier('**TIER: 2**'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 0'), 0);
+  assert.equal(G.declaredSpecTier('Tier estimate: Tier 1 (prose, not the line)'), null);
+  assert.equal(G.declaredSpecTier(''), null);
+  // several TIER lines: the highest counts, wherever it is (A7 and AI review on blackjack#68)
+  assert.equal(G.declaredSpecTier('## Spec\nTIER: 0\n...\nTIER: 2\n'), 2);
+  assert.equal(G.declaredSpecTier('## Spec\nAC: the writer emits a line\n  TIER: 1\n...\nTIER: 2\n'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 2\nlater: TIER: 0 quoted\n  TIER: 0'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 1\nTIER: 0'), 1);
+  // any format counts (AI review round 3 on blackjack#68)
+  assert.equal(G.declaredSpecTier('TIER: 0 (draft)\n- TIER: 2'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 0\n> TIER: 2'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 1\nthe spec is `TIER: 2`'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 1\n**TIER: 2**'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 7'), null);
+});
