@@ -67,5 +67,7 @@ test('AC5: sw.js never touches /api/ and falls back to lobby.html for navigation
 });
 
 test('AC7: the cache name changed', () => {
-  assert.doesNotMatch(read('sw.js'), /const CACHE = 'blackjack-v9'/);
+  const m = read('sw.js').match(/const CACHE = 'blackjack-v(\d+)'/);
+  assert.ok(m, 'sw.js must define CACHE as blackjack-v<N>');
+  assert.ok(Number(m[1]) > 9, `cache version must be above v9, got v${m[1]}`);
 });

@@ -8,12 +8,13 @@
 
   // Offline support and install (PWA). Service workers need http(s), so
   // opening a page straight from disk just skips this.
-  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  if (typeof navigator !== 'undefined' && typeof location !== 'undefined' &&
+      'serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
     navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode unavailable */ });
   }
 
   const $ = (sel) => document.querySelector(sel);
-  const el =(tag, props = {}, ...kids) => {
+  const el = (tag, props = {}, ...kids) => {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(props)) {
       if (k === 'class') n.className = v;
