@@ -404,6 +404,17 @@ function reviewRetryAction(run, status) {
 }
 
 /**
+ * The AI review round for a PR head (REQ-FLOW-1): rounds count the coder's changes, not branch updates.
+ * `last` is the highest round:N label so far; `pure` is true when the head only merged the base branch
+ * into the previous head (gate.js pure-update). A pure update is re-reviewed in the same round, so
+ * branch updates alone never reach the cap (team v2.3; blackjack#62). The first review is round 1.
+ */
+function reviewRound(last, pure) {
+  const n = Number.isInteger(last) && last > 0 ? last : 0;
+  return pure && n > 0 ? n : n + 1;
+}
+
+/**
  * The tier the spec writer declared for a spec: a line `TIER: <0|1|2>` (the RISK.md tier of the paths
  * the work will change; spec-writer role). The orchestrator may approve only a declared Tier 0 or 1
  * spec (A7 sec-2 on blackjack#68). Fails closed: with several TIER lines (a quoted example, a template,
@@ -511,5 +522,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, reviewRound, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

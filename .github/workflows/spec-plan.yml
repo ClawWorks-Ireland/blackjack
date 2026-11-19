@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   route:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm-sandbox]
     timeout-minutes: 5
     outputs:
       role: ${{ steps.r.outputs.role }}
