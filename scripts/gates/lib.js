@@ -392,17 +392,6 @@ function carryOverRefusal(mainChangedPaths) {
   return hit ? `main changed policy since the review (${hit})` : null;
 }
 
-/**
- * A review run that ended without a verdict (its status on the head is still pending) failed on
- * infrastructure, not on findings: retry its failed jobs once; if the retry fails too, mark the status
- * as an error so the digest shows it instead of a pending that never ends (team v2.1).
- *   run: { conclusion, attempt }   status: the context's latest state on the head ('pending', ...)
- */
-function reviewRetryAction(run, status) {
-  if (!run || run.conclusion !== 'failure' || status !== 'pending') return 'none';
-  return Number(run.attempt || 1) < 2 ? 'rerun' : 'mark-error';
-}
-
 /** The coder Apps that open slice PRs (spec §8.5). */
 const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
 /**
@@ -497,5 +486,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

@@ -141,6 +141,17 @@
     refreshPoker();
     setInterval(refreshPoker, 3000);
 
+    $('#new-poker').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      try {
+        await api('POST', '/api/poker/tables', pokerTableBody({ name: f.get('name'), bigBlind: f.get('bigBlind'), bots: f.get('bots'), turnSeconds: f.get('turnSeconds') }));
+        $('#poker-msg').textContent = '';
+        e.target.reset();
+        refreshPoker();
+      } catch (err) { $('#poker-msg').textContent = err.message; }
+    });
+
     $('#new').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -152,6 +163,12 @@
     });
     refresh();
     setInterval(refresh, 3000);
+  }
+
+  /** The POST body for a new poker table; form values arrive as strings. */
+  function pokerTableBody({ name, bigBlind, bots, turnSeconds }) {
+    const bb = Number(bigBlind);
+    return { name, smallBlind: Math.floor(bb / 2), bigBlind: bb, bots: Number(bots), turnSeconds: Number(turnSeconds) };
   }
 
   // --- Table ---
@@ -353,5 +370,5 @@
     setInterval(refresh, 10000);
   }
 
-  root.Live = { lobby, table, players, util: { el, api, badge, card, back, money, store } };
+  root.Live = { lobby, table, players, util: { pokerTableBody, el, api, badge, card, back, money, store } };
 })(window);
