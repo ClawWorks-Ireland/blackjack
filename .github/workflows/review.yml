@@ -32,6 +32,10 @@ jobs:
         with: { persist-credentials: false }
       - id: p
         run: |
+          # A pure branch update from main keeps the previous verdict (same changes; gate.js carry-over).
+          if [ "$(node scripts/gates/gate.js carry-over --pr "$PR" --sha "$SHA" --context ai-review)" = carried=true ]; then
+            { echo "capped=carried"; echo 'lenses=["logic"]'; echo "round=0"; } >> "$GITHUB_OUTPUT"; exit 0
+          fi
           node scripts/gates/gate.js status --sha "$SHA" --context ai-review --state pending --description "AI review running"
           TIER=$(node scripts/gates/gate.js floor --pr "$PR" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tier))')
           if [ "$TIER" = "2" ]; then L='["logic","state","contract","performance","rules"]'; else L='["logic","state","contract"]'; fi
@@ -82,11 +86,17 @@ jobs:
           permission-contents: read   # claude-code-action fetches the base branch (PR #25)
           permission-pull-requests: read
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
-        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+        run: |
+          cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+          # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
+          # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
+          n=$(find "$HOME" -maxdepth 2 -path "$HOME/actions-runner*/.runner" | wc -l)
+          if [ "$n" -gt 1 ]; then echo "::error::$n runners are registered under $(id -un): one runner per user (REQ-CFG-3; size the pool with agent-team-pool (scripts/pc/runner-pool.sh in the template))"; exit 1; fi
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: /opt/agent-team/claude/current/bin/claude   # the pool's pinned install: no per-job installs (REQ-CFG-3)
           settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ steps.app.outputs.token }}
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
@@ -145,12 +155,18 @@ jobs:
           permission-contents: read   # claude-code-action fetches the base branch (PR #25)
           permission-pull-requests: read
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
-        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+        run: |
+          cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+          # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
+          # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
+          n=$(find "$HOME" -maxdepth 2 -path "$HOME/actions-runner*/.runner" | wc -l)
+          if [ "$n" -gt 1 ]; then echo "::error::$n runners are registered under $(id -un): one runner per user (REQ-CFG-3; size the pool with agent-team-pool (scripts/pc/runner-pool.sh in the template))"; exit 1; fi
       - id: claude
         if: steps.s.outputs.n != '0'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: /opt/agent-team/claude/current/bin/claude   # the pool's pinned install: no per-job installs (REQ-CFG-3)
           settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ steps.app.outputs.token }}
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)

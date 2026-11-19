@@ -31,10 +31,14 @@ jobs:
         with: { ref: "${{ github.event.pull_request.head.sha }}", path: pr-head, persist-credentials: false }
       - id: s
         run: |
+          if [ "$(node scripts/gates/gate.js carry-over --pr "$PR" --sha "$SHA" --context security)" = carried=true ]; then
+            echo "carried=true" >> "$GITHUB_OUTPUT"; exit 0   # same changes as the reviewed head; only main moved
+          fi
           node scripts/gates/gate.js status --sha "$SHA" --context security --state pending --description "A7 security review running"
           gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/security.json")).replace(/\x27/g, "\\u0027")')" >> "$GITHUB_OUTPUT"   # no single quote can reach the '...' argument (blackjack#46)
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
+        if: steps.s.outputs.carried != 'true'
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned (A7 sec-3 on #23)
         with:
           app-id: ${{ secrets.A7_APP_ID }}
@@ -45,11 +49,19 @@ jobs:
           permission-contents: read   # claude-code-action fetches the base branch (PR #25)
           permission-pull-requests: read
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
-        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+        if: steps.s.outputs.carried != 'true'
+        run: |
+          cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+          # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
+          # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
+          n=$(find "$HOME" -maxdepth 2 -path "$HOME/actions-runner*/.runner" | wc -l)
+          if [ "$n" -gt 1 ]; then echo "::error::$n runners are registered under $(id -un): one runner per user (REQ-CFG-3; size the pool with agent-team-pool (scripts/pc/runner-pool.sh in the template))"; exit 1; fi
       - id: claude
+        if: steps.s.outputs.carried != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: /opt/agent-team/claude/current/bin/claude   # the pool's pinned install: no per-job installs (REQ-CFG-3)
           settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ steps.app.outputs.token }}
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)
@@ -61,6 +73,7 @@ jobs:
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
       - name: Blocking status
+        if: steps.s.outputs.carried != 'true'
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
         run: |
           printf '%s' "$OUT" > a7.json

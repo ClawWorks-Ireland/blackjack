@@ -63,11 +63,17 @@ jobs:
           # exactly what this job needs (A7 sec-2 on #23; App grants in scripts/github-apps/roles.json)
           permission-issues: write
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
-        run: cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+        run: |
+          cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+          # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
+          # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
+          n=$(find "$HOME" -maxdepth 2 -path "$HOME/actions-runner*/.runner" | wc -l)
+          if [ "$n" -gt 1 ]; then echo "::error::$n runners are registered under $(id -un): one runner per user (REQ-CFG-3; size the pool with agent-team-pool (scripts/pc/runner-pool.sh in the template))"; exit 1; fi
       - id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: /opt/agent-team/claude/current/bin/claude   # the pool's pinned install: no per-job installs (REQ-CFG-3)
           settings: '{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Grep|Glob","hooks":[{"type":"command","command":"GUARD_MODE=job node \"$RUNNER_TEMP/job-guard.js\""}]}]}}'   # credential reads, gh file flags (REQ-CFG-3)
           github_token: ${{ steps.app.outputs.token }}
           allowed_bots: "github-actions,clawworks-orchestrator,clawworks-spec-writer,clawworks-planner,clawworks-local-coder,clawworks-claude-coder,clawworks-self-checker,clawworks-bug-hunter,clawworks-finding-checker,clawworks-security-reviewer,clawworks-risk-classifier,clawworks-release-manager,clawworks-incident-reviewer,clawworks-console"   # our own automation only (REQ-COMMS-3)

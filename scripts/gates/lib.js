@@ -381,6 +381,28 @@ const changedPaths = (git, base, head = 'HEAD') =>
   [...new Set(git('diff', '--name-only', '--no-renames', base, head).split('\n').map((x) => x.trim()).filter(Boolean))];
 const policyViolations = (paths, re = POLICY_RE) => paths.filter((f) => re.test(f));
 
+/**
+ * Carry-over (gate.js carry-over) keeps an old verdict only if main didn't change the rules it was
+ * judged by: any policy path (REVIEW.md, RISK.md, the agents, the gates, the workflows) changed on
+ * main since the reviewed head's merge base means a fresh review (A7 sec-1 on blackjack#63).
+ * Returns the refusal reason, or null if carrying over is allowed.
+ */
+function carryOverRefusal(mainChangedPaths) {
+  const hit = (mainChangedPaths || []).find((f) => POLICY_RE.test(f));
+  return hit ? `main changed policy since the review (${hit})` : null;
+}
+
+/**
+ * A review run that ended without a verdict (its status on the head is still pending) failed on
+ * infrastructure, not on findings: retry its failed jobs once; if the retry fails too, mark the status
+ * as an error so the digest shows it instead of a pending that never ends (team v2.1).
+ *   run: { conclusion, attempt }   status: the context's latest state on the head ('pending', ...)
+ */
+function reviewRetryAction(run, status) {
+  if (!run || run.conclusion !== 'failure' || status !== 'pending') return 'none';
+  return Number(run.attempt || 1) < 2 ? 'rerun' : 'mark-error';
+}
+
 /** The coder Apps that open slice PRs (spec §8.5). */
 const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
 /**
@@ -475,5 +497,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };
