@@ -392,6 +392,31 @@ function carryOverRefusal(mainChangedPaths) {
   return hit ? `main changed policy since the review (${hit})` : null;
 }
 
+/**
+ * A review run that ended without a verdict (its status on the head is still pending) failed on
+ * infrastructure, not on findings: retry its failed jobs once; if the retry fails too, mark the status
+ * as an error so the digest shows it instead of a pending that never ends (team v2.1).
+ *   run: { conclusion, attempt }   status: the context's latest state on the head ('pending', ...)
+ */
+function reviewRetryAction(run, status) {
+  if (!run || run.conclusion !== 'failure' || status !== 'pending') return 'none';
+  return Number(run.attempt || 1) < 2 ? 'rerun' : 'mark-error';
+}
+
+/**
+ * The tier the spec writer declared for a spec: a line `TIER: <0|1|2>` (the RISK.md tier of the paths
+ * the work will change; spec-writer role). The orchestrator may approve only a declared Tier 0 or 1
+ * spec (A7 sec-2 on blackjack#68). Fails closed: with several TIER lines (a quoted example, a template,
+ * an earlier draft) the HIGHEST counts, so no earlier line can mask a Tier 2 declaration.
+ * Returns the number, or null if there is no such line.
+ */
+function declaredSpecTier(specText) {
+  // Any `TIER: n` anywhere (in a list item, a quote, backticks, mid-line): no format can hide a Tier 2.
+  const all = [...String(specText || '').matchAll(/TIER:\s*\**\s*([0-9])/g)].map((m) => Number(m[1]));
+  if (all.some((t) => t > 2)) return null;   // not a tier: fail closed
+  return all.length ? Math.max(...all) : null;
+}
+
 /** The coder Apps that open slice PRs (spec §8.5). */
 const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
 /**
@@ -486,5 +511,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

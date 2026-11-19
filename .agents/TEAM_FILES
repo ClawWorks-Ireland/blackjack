@@ -33,6 +33,7 @@
 .github/workflows/pool-canary.yml
 .github/workflows/release.yml
 .github/workflows/retro.yml
+.github/workflows/review-retry.yml
 .github/workflows/review-submitted.yml
 .github/workflows/review.yml
 .github/workflows/security.yml
