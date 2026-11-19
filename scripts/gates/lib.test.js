@@ -340,3 +340,13 @@ test('carry-over refuses when main changed policy since the review (A7 sec-1 on 
   }
   assert.equal(G.carryOverRefusal([]), null);
 });
+
+test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'pending'), 'rerun');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 2 }, 'pending'), 'mark-error');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'failure'), 'none', 'a blocking verdict is not an infra failure');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'success'), 'none');
+  assert.equal(G.reviewRetryAction({ conclusion: 'success', attempt: 1 }, 'pending'), 'none');
+  assert.equal(G.reviewRetryAction({ conclusion: 'cancelled', attempt: 1 }, 'pending'), 'none', 'a cancelled run was superseded by a newer push');
+  assert.equal(G.reviewRetryAction(null, 'pending'), 'none');
+});
