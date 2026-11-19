@@ -299,14 +299,17 @@ commands['carry-over'] = async () => {
 // make it a visible error. Decided by lib.js reviewRetryAction (only github-actions statuses count).
 commands['review-retry'] = async () => {
   const run = await gh('GET', repo(`/actions/runs/${args.run}`));
-  const st = (await all(repo(`/commits/${run.head_sha}/statuses`)))
+  // For these pull_request_target runs, run.head_sha is the PR head (checked on blackjack#62's run:
+  // head_sha c52b4a5 = the PR head). Prefer the linked PR's head anyway, so this holds either way.
+  const head = (run.pull_requests && run.pull_requests[0] && run.pull_requests[0].head.sha) || run.head_sha;
+  const st = (await all(repo(`/commits/${head}/statuses`)))
     .filter((x) => x.context === args.context && x.creator && x.creator.login === 'github-actions[bot]')
     .sort((x, y) => (y.updated_at > x.updated_at ? 1 : -1))[0];
   const action = G.reviewRetryAction({ conclusion: run.conclusion, attempt: run.run_attempt }, st ? st.state : '');
   console.log(`review-retry: run ${args.run} (${run.name}, attempt ${run.run_attempt}, ${run.conclusion}), ${args.context}=${st ? st.state : 'none'}: ${action}`);
   if (args.dry || action === 'none') return;
   if (action === 'rerun') { await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {}); return; }
-  await setStatus(run.head_sha, args.context, 'error', `${run.name} failed twice on infrastructure (no verdict): see the run`, run.html_url);
+  await setStatus(head, args.context, 'error', `${run.name} failed twice on infrastructure (no verdict): see the run`, run.html_url);
 };
 
 commands['repro-run'] = async () => {
