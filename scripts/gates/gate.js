@@ -16,9 +16,10 @@
  *   gate.js guard-revert --sha S              revert S on main with a Main-guard-revert trailer (App token step)
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
+ *   gate.js pure-update --pr N --sha S               pure=true if the head only merged the base branch in
  *   gate.js review-retry --run ID --context C [--dry]   retry a review that failed on infrastructure, once
  *   gate.js spec-check --issue N   may the orchestrator approve this spec (declared TIER 0/1, no needs-human)
- *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; hosted VM)
+ *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; sandbox VM)
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
  *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
@@ -254,14 +255,48 @@ function isExactRevert(sha, target) {
 // for this context posted by github-actions[bot], and the PR's own diff is identical (same files,
 // same patches), carry the verdict over instead of re-reviewing. CI still runs on the new head.
 // Prints carried=true|false (team v2; slow re-review loop on blackjack#47/#53).
+// Is `sha` a pure branch update of the PR: a merge of the base branch into the previous head that
+// leaves the PR's own changes identical (same files, patches, and tree entries)? Returns
+// { pure, why, prev, mainParent, pr }. Used by carry-over and by review rounds (team v2.3).
+async function pureUpdate(prNumber, sha) {
+  const no = (why, extra) => ({ pure: false, why, ...extra });
+  const head = await gh('GET', repo(`/commits/${sha}`));
+  if ((head.parents || []).length !== 2) return no('not a merge commit');
+  const [prev, mainParent] = head.parents.map((x) => x.sha);
+  const pr = await gh('GET', repo(`/pulls/${prNumber}`));
+  const onMain = await gh('GET', repo(`/compare/${pr.base.ref}...${mainParent}`));
+  if (!['identical', 'behind'].includes(onMain.status)) return no('second parent is not on the base branch');
+  const diffOf = async (h) => {
+    const c = await gh('GET', repo(`/compare/${mainParent}...${h}`));
+    const files = c.files || [];
+    if (files.length >= 300 || files.some((f) => typeof f.patch !== 'string')) return null;   // truncated or binary: can't compare
+    return JSON.stringify(files.map((f) => [f.filename, f.status, f.previous_filename || '', f.patch]).sort());
+  };
+  const [a, b] = [await diffOf(prev), await diffOf(sha)];
+  if (!a || a !== b) return no('the PR\'s own changes differ');
+  // Patch text doesn't show a mode or type change (e.g. a file turned into a symlink): compare the
+  // tree entries (mode, type, blob) of every changed path too.
+  const paths = JSON.parse(b).map((f) => f[0]);
+  const tree = async (c) => {
+    const t = await gh('GET', repo(`/git/trees/${c}?recursive=1`));
+    if (t.truncated) return null;
+    return new Map(t.tree.map((e) => [e.path, `${e.mode} ${e.type} ${e.sha}`]));
+  };
+  const [tp, th] = [await tree(prev), await tree(sha)];
+  if (!tp || !th || paths.some((x) => tp.get(x) !== th.get(x))) return no('a changed file differs in mode, type or content');
+  return { pure: true, why: '', prev, mainParent, pr };
+}
+
+// A branch update from main (the release manager's "update branch") doesn't change what a PR changes.
+// If the new head is a pure branch update (pureUpdate), the previous head has a green verdict for this
+// context posted by github-actions[bot], and main's changes since don't touch policy, carry the verdict
+// over instead of re-reviewing. CI still runs on the new head.
+// Prints carried=true|false (team v2; slow re-review loop on blackjack#47/#53).
 commands['carry-over'] = async () => {
   const say = (v, why) => { console.log(`carried=${v}`); if (why) console.error(`carry-over: ${why}`); };
-  const head = await gh('GET', repo(`/commits/${args.sha}`));
-  if ((head.parents || []).length !== 2) return say(false, 'not a merge commit');
-  const [prev, mainParent] = head.parents.map((x) => x.sha);
-  const pr = await gh('GET', repo(`/pulls/${args.pr}`));
-  const onMain = await gh('GET', repo(`/compare/${pr.base.ref}...${mainParent}`));
-  if (!['identical', 'behind'].includes(onMain.status)) return say(false, 'second parent is not on the base branch');
+  const u = await pureUpdate(args.pr, args.sha);
+  if (!u.pure) return say(false, u.why);
+  const { prev, mainParent, pr } = u;
   const st = (await all(repo(`/commits/${prev}/statuses`)))
     .filter((x) => x.context === args.context && x.creator && x.creator.login === 'github-actions[bot]')
     .sort((x, y) => (y.updated_at > x.updated_at ? 1 : -1))[0];
@@ -273,27 +308,18 @@ commands['carry-over'] = async () => {
   if ((since.files || []).length >= 300) return say(false, 'too many changes on main to check');
   const refusal = G.carryOverRefusal((since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)));
   if (refusal) return say(false, refusal);
-  const diffOf = async (h) => {
-    const c = await gh('GET', repo(`/compare/${mainParent}...${h}`));
-    const files = c.files || [];
-    if (files.length >= 300 || files.some((f) => typeof f.patch !== 'string')) return null;   // truncated or binary: can't compare
-    return JSON.stringify(files.map((f) => [f.filename, f.status, f.previous_filename || '', f.patch]).sort());
-  };
-  const [a, b] = [await diffOf(prev), await diffOf(args.sha)];
-  if (!a || a !== b) return say(false, 'the PR\'s own changes differ');
-  // Patch text doesn't show a mode or type change (e.g. a file turned into a symlink): compare the
-  // tree entries (mode, type, blob) of every changed path too.
-  const paths = JSON.parse(b).map((f) => f[0]);
-  const tree = async (c) => {
-    const t = await gh('GET', repo(`/git/trees/${c}?recursive=1`));
-    if (t.truncated) return null;
-    return new Map(t.tree.map((e) => [e.path, `${e.mode} ${e.type} ${e.sha}`]));
-  };
-  const [tp, th] = [await tree(prev), await tree(args.sha)];
-  if (!tp || !th || paths.some((x) => tp.get(x) !== th.get(x))) return say(false, 'a changed file differs in mode, type or content');
   if (args.dry) return say(true, `dry run: would carry ${args.context} over from ${prev.slice(0, 7)}`);
   await setStatus(args.sha, args.context, 'success', `Carried over from ${prev.slice(0, 7)}: same changes, only ${pr.base.ref} moved`, st.target_url || RUN_URL);
   return say(true);
+};
+
+// Review rounds (REQ-FLOW-1) count the coder's changes, not branch updates: prints pure=true|false
+// for the PR head, so review.yml re-reviews a pure branch update in the same round (team v2.3;
+// blackjack#62 hit the 3-round cap through branch updates alone).
+commands['pure-update'] = async () => {
+  const u = await pureUpdate(args.pr, args.sha);
+  console.log(`pure=${u.pure}`);
+  if (u.why) console.error(`pure-update: ${u.why}`);
 };
 
 // A review or security run that failed before giving a verdict (team v2.1): retry it once, then
@@ -331,7 +357,7 @@ commands['spec-check'] = async () => {
 };
 
 commands['repro-run'] = async () => {
-  // Hunters' checks (template#12, REQ-ROLE-3a). Runs on a GitHub-hosted VM (review.yml repro job).
+  // Hunters' checks (template#12, REQ-ROLE-3a). Runs on a sandbox VM (review.yml repro job).
   // --head/--base are root-owned copies made by a SEPARATE install account; every check runs as --user
   // in a FRESH copy, in its own PID and network namespace, with a 10 s limit and an empty
   // environment. This process (another user) owns the gate script and the results, so PR code
