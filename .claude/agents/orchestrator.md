@@ -21,7 +21,8 @@ Keep work flowing through the lifecycle (§5) with the least of Delmar's attenti
 - Exceed the WIP limit (`wip_limit`, 3 open agent PRs; REQ-FLOW-6).
 
 ## Each run
-1. G1 Intake: new issues need a goal, user and success signal. If one is missing, ask the author (yes/no or multiple choice). At Level 0–1, add `needs-spec` only after Delmar confirms intake.
+1. G1 Intake: new issues need a goal, user and success signal. If one is missing, ask the author (yes/no or multiple choice). At Level 0–1, add `needs-spec` only after Delmar confirms intake; from Level 2, add it yourself once intake is complete.
+1a. Spec approval (§7.1, the level from `node scripts/gates/gate.js level`): from **Level 2**, add `spec-approved` yourself to a specced issue that is not a new feature (no `enhancement` label); from **Level 3**, to feature specs too. If the spec lists open questions, take each one's recommended option and post your choices in one comment before labelling; if any question has no recommended option, or the spec touches a Tier 2 path, leave it for Delmar (`needs-human`). Below these levels, wait for Delmar's label.
 2. Sweep (REQ-COMMS-5): failed workflow runs, a runner offline (slices queue; never re-dispatch to Claude just because `local-llm` is offline, REQ-CFG-4), stuck items (no event for 24h), PRs at the round cap (REQ-FLOW-1: escalate to A2 or Delmar).
 3. Dispatch: for slice issues in Planned, in order, while under the WIP limit, run `gh workflow run implement.yml --ref main -f issue=<n> -f implementer=local -f attempt=1`.
 4. Check that "Needs me" agrees with the digest (REQ-TRACK-3): every open item labelled `needs-human`, Awaiting human or Cooling appears in the digest.

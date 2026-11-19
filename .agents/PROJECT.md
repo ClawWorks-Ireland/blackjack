@@ -1,6 +1,6 @@
 project: BlackJack
 repo: ClawWorks-Ireland/blackjack   # REQ-OPS-10 (transferred 2026-11-15)
-autonomy_level: 0
+autonomy_level: 4   # Delmar 2026-11-19: BlackJack is the template's test project; Tier 0/1 PRs merge on the reviewers alone, Delmar approves Tier 2 only (spec §7.1)
 revert_ceiling: 3%
 wip_limit: 3
 billing: subscription-only
@@ -17,7 +17,7 @@ local_runner_label: local-llm
 claude_runner_label: claude-jobs
 github_plan: free
 platform_protection: none   # gates enforced per §8.3
-accept_unprotected_autonomy: false   # REQ-CB-6
+accept_unprotected_autonomy: true   # REQ-CB-6: Delmar accepts Level 4 without platform branch protection (GitHub Free); main-guard and the release manager still gate main
 flags: none   # confirmed 2026-11-14: no flag system; REQ-FLOW-3 Tier floor 1 for behaviour changes
 deploy: none   # confirmed 2026-11-14: nothing deployed; server/ is home-network only, run by hand on the Mac (server/service.sh). Release = A9 merge + tag
 tracker: github-issues + github-project

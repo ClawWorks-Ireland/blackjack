@@ -23,6 +23,8 @@ test('BlackJack RISK.md: a PR touching REVIEW.md is floored at Tier 2 (T5)', () 
   assert.equal(G.riskFloor(['REVIEW.md', 'docs/notes.md'], rules).floor, 2);
 });
 
-test('BlackJack runs at autonomy Level 0 (raising it needs a deliberate, visible test change; A7 sec-1 on #32)', () => {
-  assert.equal(G.parseAutonomyLevel(fs.readFileSync(path.join(__dirname, '../../.agents/PROJECT.md'), 'utf8')), 0);
+test('BlackJack runs at autonomy Level 4 with unprotected autonomy accepted (Delmar 2026-11-19; changing it needs a deliberate, visible test change)', () => {
+  const md = fs.readFileSync(path.join(__dirname, '../../.agents/PROJECT.md'), 'utf8');
+  assert.equal(G.parseAutonomyLevel(md), 4);
+  assert.match(md, /^accept_unprotected_autonomy:\s*true/m);
 });

@@ -41,7 +41,8 @@ jobs:
             needs-spec)   ROLE=spec ;;
             needs-replan) ROLE=plan ;;
             spec-approved)
-              if [ "$SENDER" = delmarolivier ] || { [ "$LEVEL" -ge 2 ] && [ "$IS_FEATURE" != true ] && [ "$SENDER" = 'clawworks-orchestrator[bot]' ]; }; then ROLE=plan
+              # §7.1: the orchestrator may approve specs from Level 2 (not new features) and from Level 3 (all).
+              if [ "$SENDER" = delmarolivier ] || { [ "$SENDER" = 'clawworks-orchestrator[bot]' ] && { [ "$LEVEL" -ge 3 ] || { [ "$LEVEL" -ge 2 ] && [ "$IS_FEATURE" != true ]; }; }; }; then ROLE=plan
               else echo "spec-approved by $SENDER doesn't count at Level $LEVEL"; ROLE=""; fi ;;
           esac
           echo "role=$ROLE" >> "$GITHUB_OUTPUT"; echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
