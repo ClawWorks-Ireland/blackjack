@@ -15,9 +15,6 @@ jobs:
     runs-on: [self-hosted, "${{ matrix.label }}"]
     timeout-minutes: 10
     steps:
-      - name: Tools jobs use without a setup step (as on GitHub's hosted image)
-        if: matrix.label == 'vm-sandbox'
-        run: for t in node npm git gh jq curl python3 zip unzip sha256sum; do command -v "$t" >/dev/null || { echo "::error::$t missing"; exit 1; }; done
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
       - uses: actions/setup-node@v4
