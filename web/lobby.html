@@ -49,6 +49,18 @@
       <button type="submit">Create</button>
     </form>
   </section>
+
+  <section class="panel" aria-labelledby="new-poker-h">
+    <h2 id="new-poker-h">New poker table</h2>
+    <form id="new-poker" class="row">
+      <label>Name <input name="name" type="text" maxlength="24" placeholder="Friday heads-up"></label>
+      <label>Big blind <input name="bigBlind" type="number" min="2" step="1" value="10" style="width:6em"></label>
+      <label>Bots <select name="bots"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+      <label>Seconds per move <input name="turnSeconds" type="number" min="5" max="120" value="30" style="width:5em"></label>
+      <button type="submit">Create</button>
+    </form>
+    <p id="poker-msg" class="status" role="status"></p>
+  </section>
 </main>
 <script src="live.js"></script>
 <script>
