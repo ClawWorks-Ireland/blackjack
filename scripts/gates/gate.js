@@ -16,6 +16,7 @@
  *   gate.js guard-revert --sha S              revert S on main with a Main-guard-revert trailer (App token step)
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
+ *   gate.js review-retry --run ID --context C [--dry]   retry a review that failed on infrastructure, once
  *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; hosted VM)
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
@@ -292,6 +293,20 @@ commands['carry-over'] = async () => {
   if (args.dry) return say(true, `dry run: would carry ${args.context} over from ${prev.slice(0, 7)}`);
   await setStatus(args.sha, args.context, 'success', `Carried over from ${prev.slice(0, 7)}: same changes, only ${pr.base.ref} moved`, st.target_url || RUN_URL);
   return say(true);
+};
+
+// A review or security run that failed before giving a verdict (team v2.1): retry it once, then
+// make it a visible error. Decided by lib.js reviewRetryAction (only github-actions statuses count).
+commands['review-retry'] = async () => {
+  const run = await gh('GET', repo(`/actions/runs/${args.run}`));
+  const st = (await all(repo(`/commits/${run.head_sha}/statuses`)))
+    .filter((x) => x.context === args.context && x.creator && x.creator.login === 'github-actions[bot]')
+    .sort((x, y) => (y.updated_at > x.updated_at ? 1 : -1))[0];
+  const action = G.reviewRetryAction({ conclusion: run.conclusion, attempt: run.run_attempt }, st ? st.state : '');
+  console.log(`review-retry: run ${args.run} (${run.name}, attempt ${run.run_attempt}, ${run.conclusion}), ${args.context}=${st ? st.state : 'none'}: ${action}`);
+  if (args.dry || action === 'none') return;
+  if (action === 'rerun') { await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {}); return; }
+  await setStatus(run.head_sha, args.context, 'error', `${run.name} failed twice on infrastructure (no verdict): see the run`, run.html_url);
 };
 
 commands['repro-run'] = async () => {
