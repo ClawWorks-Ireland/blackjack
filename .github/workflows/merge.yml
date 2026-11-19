@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   plan:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 10
     outputs:
       action: ${{ steps.p.outputs.action }}

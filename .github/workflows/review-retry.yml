@@ -13,7 +13,7 @@ permissions:
 jobs:
   retry:
     if: github.event.workflow_run.conclusion == 'failure'
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

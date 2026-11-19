@@ -316,16 +316,13 @@ commands['carry-over'] = async () => {
 // Review rounds (REQ-FLOW-1) count the coder's changes, not branch updates: prints pure=true|false
 // for the PR head, so review.yml re-reviews a pure branch update in the same round (team v2.3;
 // blackjack#62 hit the 3-round cap through branch updates alone).
-// The previous head must be one the pipeline reviewed (an ai-review status from github-actions[bot]),
-// or a coder could commit a change, merge main into it and push only the merge (A7 sec-2 on blackjack#81).
+// The previous head must carry a review verdict (lib.js roundKeepsPure), or a coder could commit a change,
+// merge main into it and push only the merge (A7 sec-2 on blackjack#81).
 commands['pure-update'] = async () => {
   const u = await pureUpdate(args.pr, args.sha);
-  let pure = u.pure, why = u.why;
-  if (pure && !G.reviewedHead(await all(repo(`/commits/${u.prev}/statuses`)), 'ai-review')) {
-    pure = false; why = `the previous head ${u.prev.slice(0, 7)} was never reviewed`;
-  }
-  console.log(`pure=${pure}`);
-  if (why) console.error(`pure-update: ${why}`);
+  const r = G.roundKeepsPure(u, u.pure ? await all(repo(`/commits/${u.prev}/statuses`)) : []);
+  console.log(`pure=${r.pure}`);
+  if (r.why) console.error(`pure-update: ${r.why}`);
 };
 
 // A review or security run that failed before giving a verdict (team v2.1): retry it once, then

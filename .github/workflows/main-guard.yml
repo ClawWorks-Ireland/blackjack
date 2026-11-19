@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 15
     outputs:
       violations: ${{ steps.g.outputs.violations }}

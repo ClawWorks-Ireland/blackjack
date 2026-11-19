@@ -404,13 +404,26 @@ function reviewRetryAction(run, status) {
 }
 
 /**
- * Did the review pipeline already look at this head? True if github-actions[bot] posted any status for
- * `context` on it (success, failure, error or pending: a review started there). A branch update keeps the
- * round number only when its previous head passes this, so a coder can't commit a new change, merge main
- * into it and push only the merge to skip a round (A7 sec-2 on blackjack#81).
+ * Was this head actually reviewed? True only if github-actions[bot] posted a VERDICT for `context` on it:
+ * success or failure with "Round N: ..." (gate.js decide) or "Carried over from ..." (gate.js carry-over).
+ * Not a pending status (a run can be cancelled after posting it, before its round is recorded), not the
+ * round-cap failure (a capped head had no review), not an error. A7 sec-2 on blackjack#81, rounds 1 and 2.
  */
 function reviewedHead(statuses, context) {
-  return (statuses || []).some((x) => x && x.context === context && x.creator && x.creator.login === 'github-actions[bot]');
+  return (statuses || []).some((x) => x && x.context === context && x.creator && x.creator.login === 'github-actions[bot]'
+    && (x.state === 'success' || x.state === 'failure')
+    && /^(Round [1-9][0-9]*: |Carried over from )/.test(x.description || ''));
+}
+
+/**
+ * Does a branch update keep the current review round (REQ-FLOW-1)? `u` is gate.js pureUpdate's result for
+ * the head ({ pure, why, prev }); `prevStatuses` are the statuses on u.prev. Pure only if the head merely
+ * merged the base branch into a previous head that was actually reviewed (reviewedHead).
+ */
+function roundKeepsPure(u, prevStatuses) {
+  if (!u || !u.pure) return { pure: false, why: (u && u.why) || 'not a pure branch update' };
+  if (!reviewedHead(prevStatuses, 'ai-review')) return { pure: false, why: `the previous head ${String(u.prev).slice(0, 7)} has no review verdict` };
+  return { pure: true, why: '' };
 }
 
 /**
@@ -532,5 +545,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, reviewRound, reviewedHead, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, reviewRound, reviewedHead, roundKeepsPure, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

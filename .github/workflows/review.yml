@@ -20,7 +20,7 @@ env:
 jobs:
   prep:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     outputs:
       lenses: ${{ steps.p.outputs.lenses }}
@@ -245,7 +245,7 @@ jobs:
     needs: [prep, hunt, verify, repro]
     # The checks can only weaken a finding, so a failed repro job means "no change", never a skipped review.
     if: ${{ !cancelled() && needs.prep.outputs.capped == 'false' && needs.hunt.result == 'success' && needs.verify.result == 'success' }}
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     env: { GITHUB_TOKEN: "${{ github.token }}" }
     steps:

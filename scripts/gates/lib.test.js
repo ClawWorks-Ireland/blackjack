@@ -350,14 +350,26 @@ test('review rounds: a pure branch update is re-reviewed in the same round (team
   assert.equal(G.reviewRound(NaN, true), 1);
 });
 
-test('review rounds: only a previous head the pipeline reviewed counts (A7 sec-2 on blackjack#81)', () => {
+test('review rounds: only a previous head with a review verdict counts (A7 sec-2 on blackjack#81)', () => {
   const bot = { login: 'github-actions[bot]' };
-  assert.equal(G.reviewedHead([{ context: 'ai-review', state: 'failure', creator: bot }], 'ai-review'), true);
-  assert.equal(G.reviewedHead([{ context: 'ai-review', state: 'pending', creator: bot }], 'ai-review'), true);
+  const st = (state, description, creator = bot, context = 'ai-review') => [{ context, state, description, creator }];
+  assert.equal(G.reviewedHead(st('failure', 'Round 3: 2 Important finding(s)'), 'ai-review'), true);
+  assert.equal(G.reviewedHead(st('success', 'Round 1: no Important findings'), 'ai-review'), true);
+  assert.equal(G.reviewedHead(st('success', 'Carried over from abc1234: same changes, only main moved'), 'ai-review'), true);
+  assert.equal(G.reviewedHead(st('pending', 'AI review running'), 'ai-review'), false, 'a run cancelled before its round was recorded');
+  assert.equal(G.reviewedHead(st('failure', 'Round cap (3) reached: escalated (REQ-FLOW-1)'), 'ai-review'), false, 'a capped head had no review');
+  assert.equal(G.reviewedHead(st('error', 'Round 2: review failed twice'), 'ai-review'), false);
   assert.equal(G.reviewedHead([], 'ai-review'), false, 'an unreviewed first parent: a coder commit merged with main');
-  assert.equal(G.reviewedHead([{ context: 'ai-review', state: 'success', creator: { login: 'someone' } }], 'ai-review'), false, 'only the workflow\'s own statuses count');
-  assert.equal(G.reviewedHead([{ context: 'security', state: 'success', creator: bot }], 'ai-review'), false);
+  assert.equal(G.reviewedHead(st('success', 'Round 1: no Important findings', { login: 'someone' }), 'ai-review'), false, 'only the workflow\'s own statuses count');
+  assert.equal(G.reviewedHead(st('success', 'Round 1: x', bot, 'security'), 'ai-review'), false);
   assert.equal(G.reviewedHead(null, 'ai-review'), false);
+  // The whole pure-update decision: a pure merge of main keeps the round only on a reviewed previous head.
+  const u = { pure: true, why: '', prev: 'abcdef1234' };
+  assert.deepEqual(G.roundKeepsPure(u, st('failure', 'Round 2: 1 Important finding(s)')), { pure: true, why: '' });
+  assert.equal(G.roundKeepsPure(u, st('pending', 'AI review running')).pure, false);
+  assert.equal(G.roundKeepsPure(u, []).pure, false, 'dropping the review check would make this true');
+  assert.equal(G.roundKeepsPure({ pure: false, why: 'not a merge commit' }, st('success', 'Round 1: x')).pure, false);
+  assert.equal(G.roundKeepsPure(null, []).pure, false);
 });
 
 test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {

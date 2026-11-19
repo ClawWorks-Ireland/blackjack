@@ -29,7 +29,7 @@ env:
   RETRY: ${{ inputs.retry }}
 jobs:
   gate:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     outputs:
       go: ${{ steps.g.outputs.go }}

@@ -15,7 +15,7 @@ permissions:
   actions: read
 jobs:
   route:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     outputs:
       mode: ${{ steps.r.outputs.mode }}

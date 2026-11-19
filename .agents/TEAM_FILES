@@ -52,4 +52,5 @@ scripts/gates/guard-commits.test.js
 scripts/gates/lib.js
 scripts/gates/lib.test.js
 scripts/gates/package.json
+scripts/gates/runners.test.js
 scripts/rollback
