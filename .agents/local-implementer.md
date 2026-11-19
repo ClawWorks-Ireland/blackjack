@@ -5,7 +5,7 @@ Spec: §4 (A3a), §5 G4, REQ-FLOW-2, REQ-FLOW-7, REQ-CFG-2, REQ-CFG-4/4a–e, RE
 ## Harness (D9, REQ-CFG-4e)
 | Item | Value |
 |---|---|
-| Runner | self-hosted GitHub Actions runner labelled `local-llm`, inside WSL2 on the Windows PC, as Linux user `gh-llm` (no sudo, no GitHub or Claude credentials) |
+| Runner | self-hosted GitHub Actions runner labelled `local-llm`, inside WSL2 on the Windows PC, as the `local-llm` pool slot user (`gh-local-llm-1`) (no sudo, no GitHub or Claude credentials) |
 | Model | `qwen3.5:9b` on Ollama (Windows, GPU), reached at `http://localhost:11434` via WSL mirrored networking. D12 (spec v0.12): `qwen2.5-coder:14b` failed P1 because it never returns native tool calls through Ollama |
 | Context | 32k (`OLLAMA_CONTEXT_LENGTH=32768`, set on the Windows Ollama service) |
 | Harness | Claude Code (`claude -p`) with `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, every model tier mapped to `qwen3.5:9b`: `.agents/local-harness/settings.json` |

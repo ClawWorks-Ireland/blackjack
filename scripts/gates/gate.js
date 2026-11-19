@@ -15,6 +15,7 @@
  *   gate.js guard --before B --after A | --sweep   check commits on main; JSON list of violations
  *   gate.js guard-revert --sha S              revert S on main with a Main-guard-revert trailer (App token step)
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
+ *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
  *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; hosted VM)
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
@@ -245,6 +246,53 @@ function isExactRevert(sha, target) {
     try { git('worktree', 'remove', '--force', dir); } catch { /* ignore */ }
   }
 }
+
+// A branch update from main (the release manager's "update branch") doesn't change what a PR changes.
+// If the new head is a merge of main into the previous head, the previous head has a green verdict
+// for this context posted by github-actions[bot], and the PR's own diff is identical (same files,
+// same patches), carry the verdict over instead of re-reviewing. CI still runs on the new head.
+// Prints carried=true|false (team v2; slow re-review loop on blackjack#47/#53).
+commands['carry-over'] = async () => {
+  const say = (v, why) => { console.log(`carried=${v}`); if (why) console.error(`carry-over: ${why}`); };
+  const head = await gh('GET', repo(`/commits/${args.sha}`));
+  if ((head.parents || []).length !== 2) return say(false, 'not a merge commit');
+  const [prev, mainParent] = head.parents.map((x) => x.sha);
+  const pr = await gh('GET', repo(`/pulls/${args.pr}`));
+  const onMain = await gh('GET', repo(`/compare/${pr.base.ref}...${mainParent}`));
+  if (!['identical', 'behind'].includes(onMain.status)) return say(false, 'second parent is not on the base branch');
+  const st = (await all(repo(`/commits/${prev}/statuses`)))
+    .filter((x) => x.context === args.context && x.creator && x.creator.login === 'github-actions[bot]')
+    .sort((x, y) => (y.updated_at > x.updated_at ? 1 : -1))[0];
+  if (!st || st.state !== 'success') return say(false, `no green ${args.context} on ${prev.slice(0, 7)}`);
+  if (/^Waived by/.test(st.description || '')) return say(false, 'a waiver applies to the reviewed head only');
+  // The rules the verdict was judged by must not have changed on main (A7 sec-1 on blackjack#63).
+  const base = await gh('GET', repo(`/compare/${pr.base.ref}...${prev}`));
+  const since = await gh('GET', repo(`/compare/${base.merge_base_commit.sha}...${mainParent}`));
+  if ((since.files || []).length >= 300) return say(false, 'too many changes on main to check');
+  const refusal = G.carryOverRefusal((since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)));
+  if (refusal) return say(false, refusal);
+  const diffOf = async (h) => {
+    const c = await gh('GET', repo(`/compare/${mainParent}...${h}`));
+    const files = c.files || [];
+    if (files.length >= 300 || files.some((f) => typeof f.patch !== 'string')) return null;   // truncated or binary: can't compare
+    return JSON.stringify(files.map((f) => [f.filename, f.status, f.previous_filename || '', f.patch]).sort());
+  };
+  const [a, b] = [await diffOf(prev), await diffOf(args.sha)];
+  if (!a || a !== b) return say(false, 'the PR\'s own changes differ');
+  // Patch text doesn't show a mode or type change (e.g. a file turned into a symlink): compare the
+  // tree entries (mode, type, blob) of every changed path too.
+  const paths = JSON.parse(b).map((f) => f[0]);
+  const tree = async (c) => {
+    const t = await gh('GET', repo(`/git/trees/${c}?recursive=1`));
+    if (t.truncated) return null;
+    return new Map(t.tree.map((e) => [e.path, `${e.mode} ${e.type} ${e.sha}`]));
+  };
+  const [tp, th] = [await tree(prev), await tree(args.sha)];
+  if (!tp || !th || paths.some((x) => tp.get(x) !== th.get(x))) return say(false, 'a changed file differs in mode, type or content');
+  if (args.dry) return say(true, `dry run: would carry ${args.context} over from ${prev.slice(0, 7)}`);
+  await setStatus(args.sha, args.context, 'success', `Carried over from ${prev.slice(0, 7)}: same changes, only ${pr.base.ref} moved`, st.target_url || RUN_URL);
+  return say(true);
+};
 
 commands['repro-run'] = async () => {
   // Hunters' checks (template#12, REQ-ROLE-3a). Runs on a GitHub-hosted VM (review.yml repro job).

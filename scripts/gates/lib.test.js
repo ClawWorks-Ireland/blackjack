@@ -331,3 +331,12 @@ test('applyRepro: a check that passes on the PR downgrades an Important finding;
   assert.equal(out[4].repro, undefined, 'no check: unchanged');
   assert.deepEqual(G.applyRepro(kept), kept);
 });
+
+test('carry-over refuses when main changed policy since the review (A7 sec-1 on blackjack#63)', () => {
+  assert.equal(G.carryOverRefusal(['engine/blackjack.js', 'README.md']), null);
+  for (const p of ['REVIEW.md', 'RISK.md', 'CLAUDE.md', '.claude/agents/security-reviewer.md', '.github/workflows/review.yml',
+    'scripts/gates/lib.js', 'scripts/agents/policy-guard.js', 'scripts/rollback', '.agents/PROJECT.md']) {
+    assert.match(G.carryOverRefusal(['web/app.js', p]), /main changed policy/, p);
+  }
+  assert.equal(G.carryOverRefusal([]), null);
+});
