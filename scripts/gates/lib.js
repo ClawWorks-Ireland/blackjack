@@ -404,6 +404,16 @@ function reviewRetryAction(run, status) {
 }
 
 /**
+ * Did the review pipeline already look at this head? True if github-actions[bot] posted any status for
+ * `context` on it (success, failure, error or pending: a review started there). A branch update keeps the
+ * round number only when its previous head passes this, so a coder can't commit a new change, merge main
+ * into it and push only the merge to skip a round (A7 sec-2 on blackjack#81).
+ */
+function reviewedHead(statuses, context) {
+  return (statuses || []).some((x) => x && x.context === context && x.creator && x.creator.login === 'github-actions[bot]');
+}
+
+/**
  * The AI review round for a PR head (REQ-FLOW-1): rounds count the coder's changes, not branch updates.
  * `last` is the highest round:N label so far; `pure` is true when the head only merged the base branch
  * into the previous head (gate.js pure-update). A pure update is re-reviewed in the same round, so
@@ -522,5 +532,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, reviewRound, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, reviewRound, reviewedHead, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

@@ -41,7 +41,7 @@ jobs:
   revert:
     needs: check
     if: needs.check.outputs.violations != '[]' && needs.check.outputs.violations != ''
-    runs-on: [self-hosted, vm-sandbox]   # holds an App key and runs no model: a sandbox VM reverted to its clean snapshot per job (A7 on #23)
+    runs-on: [self-hosted, vm-keyed]   # holds an App key and runs no model: a key VM (never runs PR or repo code), reverted to its clean snapshot per job (A7 on #23)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

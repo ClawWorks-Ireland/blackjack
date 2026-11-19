@@ -350,6 +350,16 @@ test('review rounds: a pure branch update is re-reviewed in the same round (team
   assert.equal(G.reviewRound(NaN, true), 1);
 });
 
+test('review rounds: only a previous head the pipeline reviewed counts (A7 sec-2 on blackjack#81)', () => {
+  const bot = { login: 'github-actions[bot]' };
+  assert.equal(G.reviewedHead([{ context: 'ai-review', state: 'failure', creator: bot }], 'ai-review'), true);
+  assert.equal(G.reviewedHead([{ context: 'ai-review', state: 'pending', creator: bot }], 'ai-review'), true);
+  assert.equal(G.reviewedHead([], 'ai-review'), false, 'an unreviewed first parent: a coder commit merged with main');
+  assert.equal(G.reviewedHead([{ context: 'ai-review', state: 'success', creator: { login: 'someone' } }], 'ai-review'), false, 'only the workflow\'s own statuses count');
+  assert.equal(G.reviewedHead([{ context: 'security', state: 'success', creator: bot }], 'ai-review'), false);
+  assert.equal(G.reviewedHead(null, 'ai-review'), false);
+});
+
 test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'pending'), 'rerun');
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 2 }, 'pending'), 'mark-error');

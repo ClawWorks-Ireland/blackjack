@@ -6,6 +6,7 @@ self-hosted-runner:
     - claude-code
     - local-llm
     - vm-sandbox
+    - vm-keyed
 paths:
   .github/workflows/**/*.yml:
     ignore:

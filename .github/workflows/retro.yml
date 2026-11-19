@@ -90,7 +90,7 @@ jobs:
   a10-publish:
     needs: [route, a10]
     if: always() && needs.route.outputs.mode != '' && needs.a10.result != 'skipped'
-    runs-on: [self-hosted, vm-sandbox]   # holds an App key and runs no model: a sandbox VM reverted to its clean snapshot per job (A7 on #23)
+    runs-on: [self-hosted, vm-keyed]   # holds an App key and runs no model: a key VM (never runs PR or repo code), reverted to its clean snapshot per job (A7 on #23)
     timeout-minutes: 10
     permissions: { contents: read, issues: write }
     steps:
@@ -119,7 +119,7 @@ jobs:
   throttle:   # REQ-CB-4, model-free: the only job here with issues: write (A7 on #23)
     needs: [a10]
     if: always() && (needs.a10.result == 'failure')
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     permissions: { contents: read, issues: write }
     steps:

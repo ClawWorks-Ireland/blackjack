@@ -32,7 +32,7 @@ jobs:
   tag:
     needs: verify
     permissions: { contents: write }   # tag push only; runs no repo code
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +68,7 @@ jobs:
   rollback:
     needs: rollback-test
     if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, vm-sandbox]   # holds an App key and runs no model: a sandbox VM reverted to its clean snapshot per job (A7 on #23)
+    runs-on: [self-hosted, vm-keyed]   # holds an App key and runs no model: a key VM (never runs PR or repo code), reverted to its clean snapshot per job (A7 on #23)
     timeout-minutes: 15
     permissions: { contents: read, issues: write, actions: write }   # the incident issue and the retro dispatch
     steps:
