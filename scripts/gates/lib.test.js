@@ -357,4 +357,9 @@ test('declaredSpecTier: only a declared Tier 0/1 spec can be approved by the orc
   assert.equal(G.declaredSpecTier('TIER: 0'), 0);
   assert.equal(G.declaredSpecTier('Tier estimate: Tier 1 (prose, not the line)'), null);
   assert.equal(G.declaredSpecTier(''), null);
+  // several TIER lines: the highest counts, wherever it is (A7 and AI review on blackjack#68)
+  assert.equal(G.declaredSpecTier('## Spec\nTIER: 0\n...\nTIER: 2\n'), 2);
+  assert.equal(G.declaredSpecTier('## Spec\nAC: the writer emits a line\n  TIER: 1\n...\nTIER: 2\n'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 2\nlater: TIER: 0 quoted\n  TIER: 0'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 1\nTIER: 0'), 1);
 });

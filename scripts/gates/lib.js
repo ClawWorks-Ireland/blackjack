@@ -406,11 +406,13 @@ function reviewRetryAction(run, status) {
 /**
  * The tier the spec writer declared for a spec: a line `TIER: <0|1|2>` (the RISK.md tier of the paths
  * the work will change; spec-writer role). The orchestrator may approve only a declared Tier 0 or 1
- * spec (A7 sec-2 on blackjack#68). Returns the number, or null if there is no such line.
+ * spec (A7 sec-2 on blackjack#68). Fails closed: with several TIER lines (a quoted example, a template,
+ * an earlier draft) the HIGHEST counts, so no earlier line can mask a Tier 2 declaration.
+ * Returns the number, or null if there is no such line.
  */
 function declaredSpecTier(specText) {
-  const m = /^\s*\**TIER:\s*([012])\b/m.exec(String(specText || ''));
-  return m ? Number(m[1]) : null;
+  const all = [...String(specText || '').matchAll(/^\s*\**TIER:\s*([012])\b/gm)].map((m) => Number(m[1]));
+  return all.length ? Math.max(...all) : null;
 }
 
 /** The coder Apps that open slice PRs (spec §8.5). */
