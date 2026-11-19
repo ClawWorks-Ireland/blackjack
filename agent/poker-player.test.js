@@ -96,3 +96,32 @@ test('poker player with feedback: keeps a ledger, states facts, and stops bluffi
   assert.equal(plain.name, 'llm');
   assert.equal(brain.name, 'llm-feedback');
 });
+
+test('brain.lastHand: main move, its equity, guardrail flag', async () => {
+  const brain = makeBrain({
+    feedback: true,
+    ask: async (llm, sys, instr, prompt) => {
+      const line = prompt.split('\n').find((x) => /<- default/.test(x));
+      return { ok: true, text: line ? line[0] : 'A' };
+    },
+  });
+  assert.equal(brain.lastHand, null);
+  const seen = [];
+  await match(brain, { ...POLICIES['calling-station'], name: 'calling-station' }, {
+    hands: 60, seed: 'lasthand',
+    onHand: () => { seen.push({ ...brain.lastHand, guarded: brain.stats.guarded, sizedUp: brain.stats.sizedUp }); },
+  });
+  assert.equal(seen.length, 120);
+  let prev = 0;
+  let fired = 0;
+  for (const s of seen) {
+    assert.ok([null, 'bluff', 'thin', 'value', 'call', 'fold'].includes(s.mainMove), String(s.mainMove));
+    if (s.mainMove === null) assert.equal(s.equityAtMainMove, null);
+    else assert.ok(s.equityAtMainMove >= 0 && s.equityAtMainMove <= 1);
+    const total = s.guarded + s.sizedUp;
+    assert.equal(s.guardrailFired, total > prev, 'the flag is true exactly on hands where a guardrail counter went up');
+    if (s.guardrailFired) fired++;
+    prev = total;
+  }
+  assert.ok(fired > 0, 'a guardrail fired at least once');
+});

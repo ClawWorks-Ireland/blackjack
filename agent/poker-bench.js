@@ -22,8 +22,8 @@ const { Profiles } = require('./poker-profile.js');
 const BB = 10;
 const STACK = 100 * BB;
 
-/** Play one hand at a fresh table; `players[0]` sits in seat 0 (the button). Returns each seat's net in chips. */
-async function playHand(seed, players, profiles, rngs) {
+/** Play one hand at a fresh table; `players[0]` sits in seat 0 (the button). Returns each seat's net in chips. If `info` is an object it is filled with what the hand looked like: {deal, streetReached, showdown, seats: [{facedRiverBet, riverCall}]}. */
+async function playHand(seed, players, profiles, rngs, info = null) {
   const t = new PokerTable({ seed, smallBlind: BB / 2, bigBlind: BB, seats: 2 });
   players.forEach((p, i) => t.sit({ id: p.name, name: p.name, kind: 'bot' }, STACK, i));
   t.startHand();
@@ -38,6 +38,19 @@ async function playHand(seed, players, profiles, rngs) {
   const names = players.map((p) => p.name);
   profiles.addHand(names, t.log, t.lastHand);
   for (let i = 0; i < players.length; i++) if (players[i].onHandEnd) await players[i].onHandEnd(t.view(i), names);
+  if (info) {
+    const streets = ['preflop', 'flop', 'turn', 'river'];
+    const river = t.log.filter((e) => e.street === 'river');
+    info.deal = seed;
+    info.streetReached = streets[Math.max(0, t.lastHand.board.length - 2)] || 'preflop';
+    info.showdown = !!t.lastHand.showdown;
+    info.seats = players.map((_, i) => {
+      // Facing a river bet: another seat bet or raised before this seat's next river action.
+      const bet = river.findIndex((e) => e.seat !== i && (e.action === 'bet' || e.action === 'raise'));
+      const facedRiverBet = bet !== -1 && river.some((e, k) => k > bet && e.seat === i);
+      return { facedRiverBet, riverCall: bet !== -1 && river.some((e, k) => k > bet && e.seat === i && e.action === 'call') };
+    });
+  }
   return t.lastHand.net;
 }
 
@@ -47,7 +60,7 @@ async function playHand(seed, players, profiles, rngs) {
  * player draws its randomness from its own stream, seeded by the deal, so
  * different heroes meet the same cards and the same villain tendencies.
  */
-async function match(hero, villainPolicy, { hands = 1000, seed = 'bench', log = () => {}, onPair = null } = {}) {
+async function match(hero, villainPolicy, { hands = 1000, seed = 'bench', log = () => {}, onPair = null, onHand = null } = {}) {
   const profiles = new Profiles();
   const style = villainPolicy.name;
   const villain = { ...villainPolicy, name: 'Opponent' };
@@ -59,8 +72,12 @@ async function match(hero, villainPolicy, { hands = 1000, seed = 'bench', log = 
     const deal = `${seed}-${i}`;
     const hr = (k) => rngFor(`${deal}:hero:${k}`);
     const vr = (k) => rngFor(`${deal}:${style}:${k}`);
-    const a = await playHand(deal, [hero2, villain], profiles, [hr(0), vr(0)]); // hero on the button
-    const b = await playHand(deal, [villain, hero2], profiles, [vr(1), hr(1)]); // same cards, seats swapped
+    const ia = onHand ? {} : null;
+    const ib = onHand ? {} : null;
+    const a = await playHand(deal, [hero2, villain], profiles, [hr(0), vr(0)], ia); // hero on the button
+    if (onHand) await onHand({ deal, pair: i, seat: 0, handIndex: 2 * i, bb: a[0] / BB, streetReached: ia.streetReached, showdown: ia.showdown, ...ia.seats[0] });
+    const b = await playHand(deal, [villain, hero2], profiles, [vr(1), hr(1)], ib); // same cards, seats swapped
+    if (onHand) await onHand({ deal, pair: i, seat: 1, handIndex: 2 * i + 1, bb: b[1] / BB, streetReached: ib.streetReached, showdown: ib.showdown, ...ib.seats[1] });
     const pair = (a[0] + b[1]) / BB; // the hero's result over the pair, in big blinds
     if (onPair) await onPair(i, pair);
     n++;
