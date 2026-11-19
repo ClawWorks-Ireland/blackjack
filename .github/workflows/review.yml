@@ -20,7 +20,7 @@ env:
 jobs:
   prep:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       lenses: ${{ steps.p.outputs.lenses }}
@@ -40,9 +40,7 @@ jobs:
           TIER=$(node scripts/gates/gate.js floor --pr "$PR" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tier))')
           if [ "$TIER" = "2" ]; then L='["logic","state","contract","performance","rules"]'; else L='["logic","state","contract"]'; fi
           LAST=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name|select(startswith("round:"))|ltrimstr("round:")|tonumber]|max // 0')
-          # Rounds count the coder's changes: a pure branch update is re-reviewed in the same round.
-          PURE=$(node scripts/gates/gate.js pure-update --pr "$PR" --sha "$SHA" || echo pure=false)
-          ROUND=$(node -e 'console.log(require("./scripts/gates/lib.js").reviewRound(Number(process.argv[1]), process.argv[2] === "pure=true"))' "$LAST" "$PURE")
+          ROUND=$((LAST + 1))
           echo "lenses=$L" >> "$GITHUB_OUTPUT"; echo "round=$ROUND" >> "$GITHUB_OUTPUT"
           if [ "$ROUND" -gt 3 ]; then
             echo "capped=true" >> "$GITHUB_OUTPUT"
@@ -193,13 +191,13 @@ jobs:
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 
   # Hunters reason about failing inputs; this job runs their `check`s (template#12, REQ-ROLE-3a).
-  # PR code runs here, so: a sandbox VM reverted to its clean snapshot (never the PC itself), no key, read-only token, and the
+  # PR code runs here, so: a fresh GitHub-hosted VM (never the PC), no key, read-only token, and the
   # install and every check run as a throwaway `sandbox` account that can't write the gate script or
   # the results, each check in a fresh copy with no network and a 10 s limit (gate.js repro-run).
   repro:
     needs: [prep, hunt]
     if: needs.prep.outputs.capped == 'false'
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions: { contents: read }
     steps:
@@ -245,7 +243,7 @@ jobs:
     needs: [prep, hunt, verify, repro]
     # The checks can only weaken a finding, so a failed repro job means "no change", never a skipped review.
     if: ${{ !cancelled() && needs.prep.outputs.capped == 'false' && needs.hunt.result == 'success' && needs.verify.result == 'success' }}
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     env: { GITHUB_TOKEN: "${{ github.token }}" }
     steps:

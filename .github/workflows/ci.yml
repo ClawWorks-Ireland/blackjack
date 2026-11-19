@@ -1,4 +1,4 @@
-# G8 CI (REQ-CFG-1). Runs PR code, so it gets no secrets and runs on a sandbox VM (REQ-CFG-3), never on the PC itself.
+# G8 CI (REQ-CFG-1). Runs PR code, so it gets no secrets and runs on a GitHub-hosted runner.
 name: ci
 on:
   pull_request:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   ci:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
 
   # Lints .github/workflows/ (not a required gate; informs reviewers and A7).
   actionlint:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

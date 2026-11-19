@@ -29,7 +29,7 @@ env:
   RETRY: ${{ inputs.retry }}
 jobs:
   gate:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       go: ${{ steps.g.outputs.go }}
@@ -289,7 +289,7 @@ jobs:
   publish:
     needs: [gate, verify]
     if: always() && needs.verify.outputs.pass == 'true'
-    runs-on: [self-hosted, vm-sandbox]   # holds an App key and runs no model: a sandbox VM reverted to its clean snapshot per job (A7 on #23)
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     permissions:   # read-only GITHUB_TOKEN for gate.js reads; writes use the App token
       contents: read
@@ -321,7 +321,7 @@ jobs:
   ladder:
     needs: [gate, local, claude, verify, publish]
     if: always() && needs.gate.outputs.go == 'true' && needs.publish.result != 'success'
-    runs-on: [self-hosted, vm-sandbox]   # holds an App key and runs no model or repo code beyond the gate scripts on main
+    runs-on: ubuntu-latest   # holds an App key and runs no model or repo code beyond the gate scripts on main
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4   # main, whatever ref the run was dispatched on: lib.js runs next to the A0 key (A7 sec-1 on blackjack#42)
@@ -380,7 +380,7 @@ jobs:
   throttle:   # REQ-CB-4, model-free: the only job here with issues: write (A7 on #23)
     needs: [claude, verify]
     if: always() && (needs.claude.result == 'failure' || needs.verify.result == 'failure')
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: { contents: read, issues: write }
     steps:

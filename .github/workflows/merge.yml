@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   plan:
-    runs-on: [self-hosted, vm-sandbox]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       action: ${{ steps.p.outputs.action }}
@@ -43,7 +43,7 @@ jobs:
   act:
     needs: plan
     if: needs.plan.outputs.action == 'merge' || needs.plan.outputs.action == 'update'
-    runs-on: [self-hosted, vm-sandbox]   # holds an App key and runs no model: a sandbox VM reverted to its clean snapshot per job (A7 on #23)
+    runs-on: ubuntu-latest   # holds an App key and runs no model: a fresh GitHub-hosted VM per job (A7 on #23)
     timeout-minutes: 15
     permissions:   # read-only GITHUB_TOKEN for gate.js reads; writes use the App token
       contents: read
@@ -86,7 +86,7 @@ jobs:
   notes:
     needs: [plan, act]
     if: needs.plan.outputs.action == 'merge'
-    runs-on: [self-hosted, vm-sandbox]   # holds an App key and runs no model or repo code beyond the gate scripts on main
+    runs-on: ubuntu-latest   # holds an App key and runs no model or repo code beyond the gate scripts on main
     timeout-minutes: 5
     env: { PR: "${{ needs.plan.outputs.pr }}" }
     steps:

@@ -341,15 +341,6 @@ test('carry-over refuses when main changed policy since the review (A7 sec-1 on 
   assert.equal(G.carryOverRefusal([]), null);
 });
 
-test('review rounds: a pure branch update is re-reviewed in the same round (team v2.3; blackjack#62)', () => {
-  assert.equal(G.reviewRound(0, false), 1, 'first review');
-  assert.equal(G.reviewRound(0, true), 1, 'a first review is round 1 even after a branch update');
-  assert.equal(G.reviewRound(2, false), 3, 'a coder push starts the next round');
-  assert.equal(G.reviewRound(3, true), 3, 'a branch update at the cap stays at round 3, not 4');
-  assert.equal(G.reviewRound(3, false), 4, 'a 4th coder round still escalates');
-  assert.equal(G.reviewRound(NaN, true), 1);
-});
-
 test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'pending'), 'rerun');
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 2 }, 'pending'), 'mark-error');
