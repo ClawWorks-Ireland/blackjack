@@ -30,6 +30,7 @@
 .github/workflows/main-guard.yml
 .github/workflows/merge.yml
 .github/workflows/orchestrator.yml
+.github/workflows/pool-canary.yml
 .github/workflows/release.yml
 .github/workflows/retro.yml
 .github/workflows/review-submitted.yml
