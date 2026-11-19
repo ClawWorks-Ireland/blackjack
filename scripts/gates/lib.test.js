@@ -340,3 +340,63 @@ test('carry-over refuses when main changed policy since the review (A7 sec-1 on 
   }
   assert.equal(G.carryOverRefusal([]), null);
 });
+
+test('review rounds: a pure branch update is re-reviewed in the same round (team v2.3; blackjack#62)', () => {
+  assert.equal(G.reviewRound(0, false), 1, 'first review');
+  assert.equal(G.reviewRound(0, true), 1, 'a first review is round 1 even after a branch update');
+  assert.equal(G.reviewRound(2, false), 3, 'a coder push starts the next round');
+  assert.equal(G.reviewRound(3, true), 3, 'a branch update at the cap stays at round 3, not 4');
+  assert.equal(G.reviewRound(3, false), 4, 'a 4th coder round still escalates');
+  assert.equal(G.reviewRound(NaN, true), 1);
+});
+
+test('review rounds: only a previous head with a review verdict counts (A7 sec-2 on blackjack#81)', () => {
+  const bot = { login: 'github-actions[bot]' };
+  const st = (state, description, creator = bot, context = 'ai-review') => [{ context, state, description, creator }];
+  assert.equal(G.reviewedHead(st('failure', 'Round 3: 2 Important finding(s)'), 'ai-review'), true);
+  assert.equal(G.reviewedHead(st('success', 'Round 1: no Important findings'), 'ai-review'), true);
+  assert.equal(G.reviewedHead(st('success', 'Carried over from abc1234: same changes, only main moved'), 'ai-review'), true);
+  assert.equal(G.reviewedHead(st('pending', 'AI review running'), 'ai-review'), false, 'a run cancelled before its round was recorded');
+  assert.equal(G.reviewedHead(st('failure', 'Round cap (3) reached: escalated (REQ-FLOW-1)'), 'ai-review'), false, 'a capped head had no review');
+  assert.equal(G.reviewedHead(st('error', 'Round 2: review failed twice'), 'ai-review'), false);
+  assert.equal(G.reviewedHead([], 'ai-review'), false, 'an unreviewed first parent: a coder commit merged with main');
+  assert.equal(G.reviewedHead(st('success', 'Round 1: no Important findings', { login: 'someone' }), 'ai-review'), false, 'only the workflow\'s own statuses count');
+  assert.equal(G.reviewedHead(st('success', 'Round 1: x', bot, 'security'), 'ai-review'), false);
+  assert.equal(G.reviewedHead(null, 'ai-review'), false);
+  // The whole pure-update decision: a pure merge of main keeps the round only on a reviewed previous head.
+  const u = { pure: true, why: '', prev: 'abcdef1234' };
+  assert.deepEqual(G.roundKeepsPure(u, st('failure', 'Round 2: 1 Important finding(s)')), { pure: true, why: '' });
+  assert.equal(G.roundKeepsPure(u, st('pending', 'AI review running')).pure, false);
+  assert.equal(G.roundKeepsPure(u, []).pure, false, 'dropping the review check would make this true');
+  assert.equal(G.roundKeepsPure({ pure: false, why: 'not a merge commit' }, st('success', 'Round 1: x')).pure, false);
+  assert.equal(G.roundKeepsPure(null, []).pure, false);
+});
+
+test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'pending'), 'rerun');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 2 }, 'pending'), 'mark-error');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'failure'), 'none', 'a blocking verdict is not an infra failure');
+  assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'success'), 'none');
+  assert.equal(G.reviewRetryAction({ conclusion: 'success', attempt: 1 }, 'pending'), 'none');
+  assert.equal(G.reviewRetryAction({ conclusion: 'cancelled', attempt: 1 }, 'pending'), 'none', 'a cancelled run was superseded by a newer push');
+  assert.equal(G.reviewRetryAction(null, 'pending'), 'none');
+});
+
+test('declaredSpecTier: only a declared Tier 0/1 spec can be approved by the orchestrator (A7 sec-2 on blackjack#68)', () => {
+  assert.equal(G.declaredSpecTier('## Spec\n...\nTIER: 1\n'), 1);
+  assert.equal(G.declaredSpecTier('**TIER: 2**'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 0'), 0);
+  assert.equal(G.declaredSpecTier('Tier estimate: Tier 1 (prose, not the line)'), null);
+  assert.equal(G.declaredSpecTier(''), null);
+  // several TIER lines: the highest counts, wherever it is (A7 and AI review on blackjack#68)
+  assert.equal(G.declaredSpecTier('## Spec\nTIER: 0\n...\nTIER: 2\n'), 2);
+  assert.equal(G.declaredSpecTier('## Spec\nAC: the writer emits a line\n  TIER: 1\n...\nTIER: 2\n'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 2\nlater: TIER: 0 quoted\n  TIER: 0'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 1\nTIER: 0'), 1);
+  // any format counts (AI review round 3 on blackjack#68)
+  assert.equal(G.declaredSpecTier('TIER: 0 (draft)\n- TIER: 2'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 0\n> TIER: 2'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 1\nthe spec is `TIER: 2`'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 1\n**TIER: 2**'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 7'), null);
+});
