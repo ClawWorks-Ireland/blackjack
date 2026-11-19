@@ -350,3 +350,11 @@ test('review retry: infra failures retry once, then become a visible error; verd
   assert.equal(G.reviewRetryAction({ conclusion: 'cancelled', attempt: 1 }, 'pending'), 'none', 'a cancelled run was superseded by a newer push');
   assert.equal(G.reviewRetryAction(null, 'pending'), 'none');
 });
+
+test('declaredSpecTier: only a declared Tier 0/1 spec can be approved by the orchestrator (A7 sec-2 on blackjack#68)', () => {
+  assert.equal(G.declaredSpecTier('## Spec\n...\nTIER: 1\n'), 1);
+  assert.equal(G.declaredSpecTier('**TIER: 2**'), 2);
+  assert.equal(G.declaredSpecTier('TIER: 0'), 0);
+  assert.equal(G.declaredSpecTier('Tier estimate: Tier 1 (prose, not the line)'), null);
+  assert.equal(G.declaredSpecTier(''), null);
+});

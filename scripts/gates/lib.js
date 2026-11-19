@@ -403,6 +403,16 @@ function reviewRetryAction(run, status) {
   return Number(run.attempt || 1) < 2 ? 'rerun' : 'mark-error';
 }
 
+/**
+ * The tier the spec writer declared for a spec: a line `TIER: <0|1|2>` (the RISK.md tier of the paths
+ * the work will change; spec-writer role). The orchestrator may approve only a declared Tier 0 or 1
+ * spec (A7 sec-2 on blackjack#68). Returns the number, or null if there is no such line.
+ */
+function declaredSpecTier(specText) {
+  const m = /^\s*\**TIER:\s*([012])\b/m.exec(String(specText || ''));
+  return m ? Number(m[1]) : null;
+}
+
 /** The coder Apps that open slice PRs (spec §8.5). */
 const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
 /**
@@ -497,5 +507,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

@@ -28,6 +28,9 @@ Tier estimate (RISK.md paths it will touch) and which `area:*` label applies, if
 ```
 Domain behaviour must match the project's documented rules and REVIEW.md invariants. If it would change them, say so as an open question.
 
+## Declared tier (required)
+End every spec with one line on its own: `TIER: <0|1|2>`, the highest RISK.md tier of the paths the work will **change** (not paths you only mention as context). The orchestrator may approve a spec only when it declares `TIER: 0` or `TIER: 1`; a `TIER: 2` spec, or one without the line, waits for Delmar. When in doubt, declare the higher tier.
+
 ## Exit criteria (G2)
 Acceptance criteria are testable and open questions are listed. Then hand off: NEXT = @delmarolivier for approval (new features at Level ≤ 2), or A2.
 

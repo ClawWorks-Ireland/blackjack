@@ -17,6 +17,7 @@
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
  *   gate.js review-retry --run ID --context C [--dry]   retry a review that failed on infrastructure, once
+ *   gate.js spec-check --issue N   may the orchestrator approve this spec (declared TIER 0/1, no needs-human)
  *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; hosted VM)
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
@@ -310,6 +311,23 @@ commands['review-retry'] = async () => {
   if (args.dry || action === 'none') return;
   if (action === 'rerun') { await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {}); return; }
   await setStatus(head, args.context, 'error', `${run.name} failed twice on infrastructure (no verdict): see the run`, run.html_url);
+};
+
+// May the orchestrator approve this spec? Only if the issue doesn't need Delmar, isn't labelled Tier 2,
+// and the spec writer's latest spec declares `TIER: 0` or `TIER: 1` (A7 sec-2 on blackjack#68).
+// Only the spec writer's own comments count. Prints ok=true|false; the reason goes to stderr.
+commands['spec-check'] = async () => {
+  const no = (why) => { console.log('ok=false'); console.error(`spec-check: ${why}`); };
+  const issue = await gh('GET', repo(`/issues/${args.issue}`));
+  const labels = issue.labels.map((l) => l.name);
+  if (labels.includes('needs-human')) return no('the issue needs Delmar');
+  if (labels.includes('tier:2')) return no('the issue is Tier 2');
+  const specs = (await all(repo(`/issues/${args.issue}/comments`)))
+    .filter((c) => c.user && c.user.login === 'clawworks-spec-writer[bot]' && /^\s*#*\s*Spec\b/m.test(c.body || ''));
+  const tier = specs.length ? G.declaredSpecTier(specs[specs.length - 1].body) : null;
+  if (tier === null) return no('the spec declares no TIER line');
+  if (tier >= 2) return no('the spec is Tier 2');
+  console.log('ok=true');
 };
 
 commands['repro-run'] = async () => {
