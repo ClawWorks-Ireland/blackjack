@@ -1,0 +1,28 @@
+# Review retry (team v2.1): a review or security run that fails before giving a verdict (its status
+# is still pending) is an infrastructure failure. Retry its failed jobs once; if it fails again, set
+# the status to error so the digest shows it. No model; reads gate.js from main.
+name: review-retry
+on:
+  workflow_run:
+    workflows: [review, security]
+    types: [completed]
+permissions:
+  contents: read
+  actions: write     # re-run failed jobs
+  statuses: write    # mark a twice-failed review as an error
+jobs:
+  retry:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: [self-hosted, vm-keyed]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, persist-credentials: false }
+      - name: Retry once, or mark as an error
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN: ${{ github.event.workflow_run.id }}
+          WF: ${{ github.event.workflow_run.name }}
+        run: |
+          case "$WF" in review) C=ai-review ;; security) C=security ;; *) echo "not a review workflow: $WF"; exit 0 ;; esac
+          node scripts/gates/gate.js review-retry --run "$RUN" --context "$C"

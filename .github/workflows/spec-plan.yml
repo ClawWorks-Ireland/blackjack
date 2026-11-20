@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   route:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     outputs:
       role: ${{ steps.r.outputs.role }}
@@ -41,8 +41,14 @@ jobs:
             needs-spec)   ROLE=spec ;;
             needs-replan) ROLE=plan ;;
             spec-approved)
-              if [ "$SENDER" = delmarolivier ] || { [ "$LEVEL" -ge 2 ] && [ "$IS_FEATURE" != true ] && [ "$SENDER" = 'clawworks-orchestrator[bot]' ]; }; then ROLE=plan
-              else echo "spec-approved by $SENDER doesn't count at Level $LEVEL"; ROLE=""; fi ;;
+              # §7.1: the orchestrator may approve specs from Level 2 (not new features) and from Level 3 (all).
+              # The exceptions are enforced here, not just in the prompt (A7 sec-2 on blackjack#68): the
+              # orchestrator's approval counts only for a spec the spec writer declared TIER: 0/1 and an
+              # issue that doesn't need Delmar (gate.js spec-check).
+              if [ "$SENDER" = delmarolivier ]; then ROLE=plan
+              elif [ "$SENDER" = 'clawworks-orchestrator[bot]' ] && { [ "$LEVEL" -ge 3 ] || { [ "$LEVEL" -ge 2 ] && [ "$IS_FEATURE" != true ]; }; } \
+                   && [ "$(node scripts/gates/gate.js spec-check --issue "$ISSUE")" = ok=true ]; then ROLE=plan
+              else echo "spec-approved by $SENDER doesn't count here (Level $LEVEL; see spec-check)"; ROLE=""; fi ;;
           esac
           echo "role=$ROLE" >> "$GITHUB_OUTPUT"; echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
   agent:

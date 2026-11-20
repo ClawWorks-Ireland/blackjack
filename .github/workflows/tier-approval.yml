@@ -14,7 +14,7 @@ permissions:
   statuses: write
 jobs:
   tier-approval:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4   # base branch: RISK.md and PROJECT.md (REQ-CFG-3)

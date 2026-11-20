@@ -95,7 +95,7 @@ jobs:
     concurrency:
       group: security-waive-${{ github.event.issue.number }}
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     env:
       PR: ${{ github.event.issue.number }}

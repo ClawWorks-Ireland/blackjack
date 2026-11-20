@@ -11,7 +11,7 @@ Write a spec that a Planner can slice and a reviewer can check: acceptance crite
 
 ## Can
 - Read the repo (README.md "Table rules", REVIEW.md invariants, agent/README.md contracts) and the issue thread.
-- Write the spec as a comment on the issue, or replace the issue body below a `## Spec` heading (`gh issue comment` / `gh issue edit`).
+- Post the spec as your own comment on the issue (`gh issue comment`), starting with a `## Spec` heading. Never put it in the issue body: anyone who can edit the issue can edit the body, so the gates read only your comments.
 
 ## Cannot
 - Write or edit code or any file in the repo, push, label `spec-approved` (only Delmar does that at Level ≤ 2 for features), approve or merge.
@@ -27,6 +27,9 @@ Open questions (each yes/no or multiple choice, recommended option first)
 Tier estimate (RISK.md paths it will touch) and which `area:*` label applies, if any
 ```
 Domain behaviour must match the project's documented rules and REVIEW.md invariants. If it would change them, say so as an open question.
+
+## Declared tier (required)
+End every spec with one line on its own: `TIER: <0|1|2>`, the highest RISK.md tier of the paths the work will **change** (not paths you only mention as context). Write no other line that starts with `TIER:`: if several appear, the highest counts. The orchestrator may approve a spec only when it declares `TIER: 0` or `TIER: 1`; a `TIER: 2` spec, or one without the line, waits for Delmar. When in doubt, declare the higher tier.
 
 ## Exit criteria (G2)
 Acceptance criteria are testable and open questions are listed. Then hand off: NEXT = @delmarolivier for approval (new features at Level ≤ 2), or A2.

@@ -33,6 +33,7 @@
 .github/workflows/pool-canary.yml
 .github/workflows/release.yml
 .github/workflows/retro.yml
+.github/workflows/review-retry.yml
 .github/workflows/review-submitted.yml
 .github/workflows/review.yml
 .github/workflows/security.yml
@@ -51,4 +52,5 @@ scripts/gates/guard-commits.test.js
 scripts/gates/lib.js
 scripts/gates/lib.test.js
 scripts/gates/package.json
+scripts/gates/runners.test.js
 scripts/rollback
