@@ -16,6 +16,8 @@
  *   gate.js guard-revert --sha S              revert S on main with a Main-guard-revert trailer (App token step)
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
+ *   gate.js qa-report --sha S --result pass|fail|error --dir D   QA status and PR comment (qa.yml)
+ *   gate.js ci-retry --run R                     re-run a CI run whose jobs never started, once
  *   gate.js pure-update --pr N --sha S               pure=true if the head only merged the base branch in
  *   gate.js review-retry --run ID --context C [--dry]   retry a review that failed on infrastructure, once
  *   gate.js spec-check --issue N   may the orchestrator approve this spec (declared TIER 0/1, no needs-human)
@@ -105,7 +107,7 @@ async function setStatus(sha, context, state, description, url = RUN_URL) {
   return gh('POST', repo(`/statuses/${sha}`), { state, context, description: description.slice(0, 140), target_url: url });
 }
 
-async function verdictFor(n, lvl, behindCheck = true) {
+async function verdictFor(n, lvl, behindCheck = true, refresh = false) {
   const f = await prFacts(n);
   const head = f.pr.head.sha;
   const statuses = await all(repo(`/commits/${head}/statuses`));
@@ -117,6 +119,12 @@ async function verdictFor(n, lvl, behindCheck = true) {
   }
   const v = G.mergeVerdict({ pr: f.pr, statuses, checkRuns, reviews: f.reviews, tier: f.tier, level: lvl,
     coolingHours: overlayNumber('tier2_cooling_hours', 24), behindBy });
+  // Keep the visible tier-approval status in step with the live one (it goes stale when the level changes).
+  if (refresh) {
+    const live = G.tierApprovalStatus({ tier: f.tier, level: lvl, reviews: f.reviews, headSha: head });
+    const stored = G.trustedStatuses(statuses)['tier-approval'];
+    if (!stored || stored.state !== live.state) await setStatus(head, 'tier-approval', live.state, live.description);
+  }
   return { ...v, number: n, sha: head, tier: f.tier, created: f.pr.created_at };
 }
 
@@ -148,7 +156,7 @@ const commands = {
     const lvl = await level();
     const prs = (await all(repo('/pulls?state=open&base=main'))).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     const results = [];
-    for (const p of prs) results.push(await verdictFor(p.number, lvl));
+    for (const p of prs) results.push(await verdictFor(p.number, lvl, true, true));
     const next = results.find((r) => r.ok) || results.find((r) => r.behind);
     console.log(JSON.stringify({ level: lvl, action: next ? (next.ok ? 'merge' : 'update') : 'none',
       pr: next ? next.number : null, sha: next ? next.sha : null, results }, null, 2));
@@ -324,6 +332,36 @@ commands['pure-update'] = async () => {
   const r = G.roundKeepsPure(u, u.pure ? await all(repo(`/commits/${u.prev}/statuses`)) : []);
   console.log(`pure=${r.pure}`);
   if (r.why) console.error(`pure-update: ${r.why}`);
+};
+
+// Browser QA round result (qa.yml, team v2.8): a `qa` status on the commit and a comment on the PR merged
+// there. The output is the project's QA command's own summary; it is printed, never executed.
+commands['qa-report'] = async () => {
+  if (!/^(pass|fail|error)$/.test(args.result || '')) throw new Error('qa-report needs --result pass|fail|error');
+  const c = await gh('GET', repo(`/commits/${args.sha}`));
+  const sha = c.sha;
+  const dir = args.dir || 'qa-out';
+  const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } };
+  const out = read('qa-output.txt').split('\n').filter((l) => l.trim()).slice(-40).join('\n');
+  const state = args.result === 'pass' ? 'success' : args.result === 'fail' ? 'failure' : 'error';
+  const words = { pass: 'QA round passed', fail: 'QA round found failures', error: 'QA round could not run' }[args.result];
+  await setStatus(sha, 'qa', state, `${words} on ${sha.slice(0, 7)}`);
+  const pr = ((await gh('GET', repo(`/commits/${sha}/pulls`))) || []).find((p) => p.merge_commit_sha === sha);
+  const body = `ROLE: QA (qa.yml)   ITEM: ${pr ? `#${pr.number}` : sha.slice(0, 7)}   RESULT: ${args.result}\n` +
+    `WHAT CHANGED: nothing; a QA round ran on the merged commit ${sha.slice(0, 7)} with headless Chrome on a sandbox VM.\n` +
+    `EVIDENCE: ${RUN_URL || 'the qa run'} (artifact \`qa-${args.sha}\` has the full report)\n\n\`\`\`\n${out.slice(0, 6000) || '(no output)'}\n\`\`\`\n` +
+    `NEXT: ${args.result === 'pass' ? 'acceptance checks that this round covers are verified (G12).' : 'the orchestrator files the failures as issues (REQ-FLOW-5).'}`;
+  if (pr) await gh('POST', repo(`/issues/${pr.number}/comments`), { body });
+  console.log(`qa-report: ${args.result} on ${sha.slice(0, 7)}${pr ? ` (PR #${pr.number})` : ''}`);
+};
+
+// CI that failed on infrastructure (jobs that never started): re-run its failed jobs once (lib.js ciRetryAction).
+commands['ci-retry'] = async () => {
+  const run = await gh('GET', repo(`/actions/runs/${args.run}`));
+  const jobs = (await gh('GET', repo(`/actions/runs/${args.run}/attempts/${run.run_attempt}/jobs`))).jobs || [];
+  const action = G.ciRetryAction({ conclusion: run.conclusion, attempt: run.run_attempt }, jobs);
+  console.log(`ci-retry: run ${args.run} (attempt ${run.run_attempt}, ${run.conclusion}): ${action}`);
+  if (!args.dry && action === 'rerun') await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {});
 };
 
 // A review or security run that failed before giving a verdict (team v2.1): retry it once, then

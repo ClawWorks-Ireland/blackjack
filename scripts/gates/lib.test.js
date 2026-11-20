@@ -107,6 +107,28 @@ test('merge verdict: all gates green + H approval on head → merge', () => {
   assert.equal(v.ok, true);
 });
 
+test('merge verdict: a stale stored tier-approval does not block when the live level needs no approval (blackjack#74)', () => {
+  const p = readyPr({ tier: 1, level: 4 });
+  p.reviews = [];
+  p.statuses = p.statuses.map((x) => (x.context === 'tier-approval' ? status('tier-approval', 'pending') : x));
+  const v = G.mergeVerdict(p);
+  assert.deepEqual(v.reasons, []);
+  assert.equal(v.ok, true);
+  const q = readyPr({ tier: 1, level: 0 });   // and the other way round: a stale green never replaces a live approval
+  q.reviews = [];
+  assert.equal(G.mergeVerdict(q).ok, false);
+});
+
+test('CI retry: only jobs that never started are re-run, once (team v2.8)', () => {
+  const never = { conclusion: 'failure', steps: [] };
+  const ran = { conclusion: 'failure', steps: [{ name: 'npm test' }] };
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [never]), 'rerun');
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 2 }, [never]), 'none', 'once only');
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [ran]), 'none', 'a real test failure is not retried');
+  assert.equal(G.ciRetryAction({ conclusion: 'success', attempt: 1 }, [never]), 'none');
+  assert.equal(G.ciRetryAction(null, [never]), 'none');
+});
+
 test('T16 missing approval: all checks green but no H approval (or only a bot approval) → refused', () => {
   const p = readyPr();
   p.reviews = [review(BOT, 'APPROVED', p.pr.head.sha, '2026-11-14T10:00:00Z')];

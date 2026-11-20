@@ -184,7 +184,9 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
   if (pr.base.ref !== 'main') reasons.push(`base is ${pr.base.ref}, not main`);
   const head = pr.head.sha;
   const st = trustedStatuses(statuses);
-  for (const ctx of REQUIRED_STATUSES) {
+  // tier-approval is judged live below (tierApprovalStatus: the current level and reviews), not from its stored
+  // status, which goes stale when the level changes after it was posted (blackjack#74/#78 on 2026-11-20).
+  for (const ctx of REQUIRED_STATUSES.filter((c) => c !== 'tier-approval')) {
     const s = st[ctx];
     if (!s) reasons.push(`no trusted "${ctx}" status`);
     else if (s.state !== 'success') reasons.push(`"${ctx}" is ${s.state}: ${s.description || ''}`.trim());
@@ -404,6 +406,16 @@ function reviewRetryAction(run, status) {
 }
 
 /**
+ * CI that failed on infrastructure (team v2.8): a job that failed with no steps never started (no runner,
+ * billing, a lost runner). Re-run the failed jobs once; a second failure stays red for the orchestrator.
+ *   run: { conclusion, attempt }   jobs: the run's jobs ({ conclusion, steps })
+ */
+function ciRetryAction(run, jobs) {
+  if (!run || run.conclusion !== 'failure' || Number(run.attempt || 1) >= 2) return 'none';
+  return (jobs || []).some((j) => j && j.conclusion === 'failure' && (!j.steps || j.steps.length === 0)) ? 'rerun' : 'none';
+}
+
+/**
  * Was this head actually reviewed? True only if github-actions[bot] posted a VERDICT for `context` on it:
  * success or failure with "Round N: ..." (gate.js decide) or "Carried over from ..." (gate.js carry-over).
  * Not a pending status (a run can be cancelled after posting it, before its round is recorded), not the
@@ -573,5 +585,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

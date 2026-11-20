@@ -9,6 +9,7 @@
     "agent": "node agent/cli.js",
     "mcp": "node agent/mcp.js",
     "qa": "node qa/run-round.js",
+    "qa:ci": "npm --prefix qa ci && node qa/run-round.js",
     "tables": "node server/server.js"
   }
 }
