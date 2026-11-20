@@ -339,6 +339,18 @@ function isUsageLimited(text) {
 }
 
 /**
+ * The model never ran (team v2.10.2): the Claude result is an error with no model usage, no cost and at most
+ * one turn. That is a refusal before any work (a usage limit with no message, an auth or API failure), so
+ * it must not count as a ladder attempt (blackjack#57 lost its last attempt this way on 2026-11-20).
+ */
+function modelNeverRan(text) {
+  const r = finalResult(text);
+  if (!r || r.is_error !== true) return false;
+  const usage = r.modelUsage && typeof r.modelUsage === 'object' ? Object.keys(r.modelUsage).length : 0;
+  return usage === 0 && Number(r.total_cost_usd || 0) === 0 && Number(r.num_turns || 0) <= 1;
+}
+
+/**
  * REQ-FLOW-2 / FLOW-7: what the ladder does after an attempt that didn't publish.
  *   ctx.job        the implementer job's result: success | failure | cancelled
  *   ctx.retry      infra retries of this rung so far (0 or 1)
@@ -355,6 +367,11 @@ function nextRung(implementer, attempt, ctx = {}) {
   // A4 passed but publishing failed: that's infrastructure (e.g. no git credentials), not the
   // model's attempt. Don't advance the ladder; ask Delmar (slice #24).
   if (ctx.verified && (ctx.publish === 'failure' || ctx.publish === 'cancelled')) return { publishFailed: true };
+  // A usage limit (an open `throttled` issue) or a model that never ran: pause this exact attempt, consuming
+  // neither the attempt nor its infra retry. A0 resumes it once the limits reset (team v2.10.2).
+  if ((ctx.job === 'failure' || ctx.job === 'cancelled') && (ctx.throttled || ctx.neverRan)) {
+    return { paused: true, implementer, attempt, handoffRun: (ctx.hasArtifact && ctx.run ? String(ctx.run) : '') || String(ctx.handoffRun || ''), retry: Number(ctx.retry || 0) };
+  }
   const run = ctx.run ? String(ctx.run) : '';
   const inherited = ctx.handoffRun ? String(ctx.handoffRun) : '';
   if ((ctx.job === 'failure' || ctx.job === 'cancelled') && Number(ctx.retry || 0) === 0) {
@@ -585,5 +602,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

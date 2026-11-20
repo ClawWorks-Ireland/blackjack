@@ -417,6 +417,12 @@ commands['repro-run'] = async () => {
   const candidates = fs.existsSync(args.candidates) ? JSON.parse(fs.readFileSync(args.candidates, 'utf8')) : [];
   const sudo = (...a) => spawnSync('sudo', ['-n', ...a], { encoding: 'utf8', maxBuffer: 1 << 22, timeout: 120000 });
   const node = process.execPath;
+  // The project's language decides the interpreter for hunters' checks (team v2.10; overlay `language`). A Python
+  // project whose install step made a .venv runs checks with that venv's python (it finds its packages from its
+  // own location, so the copy in the run dir works); otherwise the system python3 (team v2.10.1).
+  const checkCmd = (src, dir) => ('node' === 'python'
+    ? [fs.existsSync(path.join(path.resolve(src), '.venv/bin/python')) ? path.join(dir, '.venv/bin/python') : '/usr/bin/python3', '-I', '-c']
+    : [node, '-e']);
   const gid = String(spawnSync('id', ['-g', user], { encoding: 'utf8' }).stdout || '').trim();   // the account's own group (nobody's is nogroup)
   if (!/^\d+$/.test(gid)) throw new Error(`no such account: ${user}`);
   // Run dirs: random names in a root-owned 0711 folder (no guessable paths, no /tmp races).
@@ -430,7 +436,7 @@ commands['repro-run'] = async () => {
     const r = spawnSync('sudo', ['-n', 'unshare', '-n', '-p', '-f', '--kill-child', '--mount-proc', '--wd', dir,
       'setpriv', `--reuid=${user}`, `--regid=${gid}`, '--clear-groups', '--no-new-privs', '--inh-caps=-all', '--bounding-set=-all',
       'env', '-i', `PATH=${path.dirname(node)}:/usr/bin:/bin`, `HOME=${dir}`, 'LANG=C.UTF-8',
-      'timeout', '-s', 'KILL', '10', node, '-e', code], { encoding: 'utf8', maxBuffer: 1 << 20, timeout: 30000 });
+      'timeout', '-s', 'KILL', '10', ...checkCmd(src, dir), code], { encoding: 'utf8', maxBuffer: 1 << 20, timeout: 30000 });
     sudo('rm', '-rf', dir);
     if (r.error && r.error.code !== 'ETIMEDOUT') return 'error';
     if (r.status === 124 || r.status === 137 || r.signal || (r.error && r.error.code === 'ETIMEDOUT')) return 'timeout';   // 124: GNU timeout fired
