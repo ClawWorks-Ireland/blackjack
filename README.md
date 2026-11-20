@@ -222,7 +222,7 @@ opponent plays a regular while the scout watches from the rail, then the LLM
 player with feedback plays it in duplicate, from the report and cold, on the
 same deals.
 
-First run (24 Oct 2026; 300 hands watched, 200 played per player and style),
+First run (CLA-131, 24 Oct 2026; 300 hands watched, 200 played per player and style),
 bb/100 ± 95%:
 
 | Opponent | Cold | Scouted | Scouted − cold |
@@ -241,6 +241,33 @@ edge from scouting lasts only those first hands, while 200 hands with an LLM
 choosing every move is far too few to see it. A fair test needs many short
 sessions, each with a fresh player, and opponents whose leaks take longer to
 spot.
+
+#### Session benchmark
+
+`agent/poker-scout-sessions.js` is that fairer test: many short sessions, each
+with a fresh player, cold or scouted from one frozen report per style.
+
+```bash
+node agent/poker-scout-sessions.js run --sessions 40 --hands 30   # resumes where it stopped
+node agent/poker-scout-sessions.js report                         # the numbers below, per style
+node agent/poker-scout-sessions.js report --diagnose maniac       # why: moves, call-downs, showdowns
+```
+
+Only complete sessions count. `report` prints, per style:
+
+- cold and scouted bb/100 ± 95%, over all hands;
+- **scouted − cold, per session**: each session's scouted bb/100 minus its cold
+  bb/100 (same deals), then the mean ± 1.96 × sd / √n over the n sessions. This
+  is the number to trust, since hands within a session are not independent;
+- the same difference for hands 1-10, 11-20 and 21-30, to show whether an edge
+  fades as the cold player learns;
+- what the scout read (style, confidence) and the opponent's measured VPIP,
+  PFR, aggression and fold-to-bet.
+
+`--diagnose STYLE` shows, for each player, the count, bb total and bb per move
+for each kind of main move (bluff, thin, value, call, fold), overall and in the
+first 10 hands; the call-down rate (river calls ÷ river bets faced); and how
+often a river call that reached showdown won.
 
 ## Test it
 
