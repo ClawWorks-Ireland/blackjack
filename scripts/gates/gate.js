@@ -73,6 +73,12 @@ async function all(url) {
   return out;
 }
 const repo = (p) => `/repos/${REPO}${p}`;
+// Calls the API with another token (A10's issues-only token for the template). Same error handling as gh().
+async function ghWith(token, method, url, body) {
+  const r = await fetch(`https://api.github.com${url}`, { method, headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'agent-team-gates' }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error(`${method} ${url}: ${r.status} ${(await r.text()).slice(0, 300)}`);
+  return r.status === 204 ? {} : r.json();
+}
 const args = (() => {
   const a = process.argv.slice(3); const o = {};
   for (let i = 0; i < a.length; i++) if (a[i].startsWith('--')) o[a[i].slice(2)] = a[i + 1] && !a[i + 1].startsWith('--') ? a[++i] : true;
@@ -541,9 +547,11 @@ commands['a10-publish'] = async () => {
     git('config', 'user.name', 'clawworks-incident-reviewer[bot]');
     git('config', 'user.email', 'clawworks-incident-reviewer[bot]@users.noreply.github.com');
     gitNet('fetch', 'origin', 'main'); git('checkout', '-B', 'a10-proposal', 'origin/main');
+    // The routing manifest and version come from the base, never from A10's own commits (A7 sec-2 on blackjack#84).
+    const teamFiles = new Set(git('show', 'origin/main:.agents/TEAM_FILES').split('\n').map((x) => x.trim()).filter(Boolean));
+    const teamVersion = git('show', 'origin/main:.agents/TEAM_VERSION').trim();
     git('am', '--3way', mbox);
     const proposed = git('rev-parse', 'HEAD');
-    const teamFiles = new Set(fs.readFileSync('.agents/TEAM_FILES', 'utf8').split('\n').map((x) => x.trim()).filter(Boolean));
     const split = G.splitProposal(G.changedPaths(git, 'origin/main'), teamFiles);
     const diffOf = (files) => execFileSync('git', ['diff', '--binary', 'origin/main', proposed, '--', ...files], { encoding: 'utf8', maxBuffer: 1 << 26 });
     const note = (m) => (target ? gh('POST', repo(`/issues/${target}/comments`), { body: m }) : Promise.resolve());
@@ -562,36 +570,17 @@ commands['a10-publish'] = async () => {
       const opened = await gh('POST', repo('/pulls'), { title, head: branch, base: 'main', body });
       done.push(`PR #${opened.number} from ${branch} (${projectFiles.length} files)`);
     }
-    // 3b. team files: a PR in the template, with paths mapped to the template (team/<path>; the spec as is).
-    //     A workflow change, or a patch that doesn't apply there (a line the renderer filled in), becomes a
-    //     template issue carrying the patch, for the console or H to apply.
+    // 3b. team files: a `team-proposal` issue in the template carrying the patch (paths mapped to team/...).
+    //     A10 can only open issues there (REQ-OPS-10 exception, A7 sec-1 on blackjack#84); the health watcher,
+    //     running as the console, turns an issue whose patch applies into a template PR for H.
     if (split.team.length) {
+      const tplToken = process.env.TEMPLATE_ISSUES_TOKEN;
+      if (!tplToken) throw new Error('no TEMPLATE_ISSUES_TOKEN: team-file proposal not sent to the template');
       const patch = G.retargetPatch(diffOf(split.team), G.templatePathFor);
-      const from = `From ${REPO}${target ? `#${target}` : ''} (A10, run ${process.env.GITHUB_RUN_ID || 'local'}). Team v${fs.readFileSync('.agents/TEAM_VERSION', 'utf8').trim()}.`;
-      const issue = async (why) => {
-        const r = await gh('POST', `/repos/${TEMPLATE}/issues`, { title: `A10 team proposal: ${title}`.slice(0, 200), labels: ['team-proposal'],
-          body: `${from}\n\n**Not opened as a PR:** ${why}\n\n${body}\n\n<details><summary>Patch (template paths)</summary>\n\n\`\`\`diff\n${patch.slice(0, 30000)}\n\`\`\`\n</details>` });
-        done.push(`template issue ${TEMPLATE}#${r.number}`);
-      };
-      if (split.team.some((f) => f.startsWith('.github/'))) await issue('it changes a workflow, which no agent may push (REQ-GATE-4)');
-      else {
-        const tdir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'tpl-'));
-        gitNet('clone', '--depth', '1', `https://github.com/${TEMPLATE}.git`, tdir);
-        let applied = true;
-        try { execFileSync('git', ['-C', tdir, 'apply', '--index'], { input: patch, stdio: ['pipe', 'ignore', 'ignore'] }); } catch { applied = false; }
-        if (!applied) await issue('the patch does not apply to the template as is (it likely touches a line the renderer fills in)');
-        else {
-          const tg = (...a) => execFileSync('git', ['-C', tdir, ...a], { encoding: 'utf8' }).trim();
-          tg('config', 'user.name', 'clawworks-incident-reviewer[bot]');
-          tg('config', 'user.email', 'clawworks-incident-reviewer[bot]@users.noreply.github.com');
-          tg('checkout', '-b', branch); tg('commit', '-m', title);
-          const auth = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
-          tg('-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`, 'push', 'origin', `HEAD:refs/heads/${branch}`);
-          const opened = await gh('POST', `/repos/${TEMPLATE}/pulls`, { title, head: branch, base: 'main',
-            body: `${from}\n\nTier 2 (team files): needs H's merge, a spec version bump and a Changelog line (CLAUDE.md), then a re-render of each project.\n\n${body}` });
-          done.push(`template PR ${TEMPLATE}#${opened.number} (${split.team.length} team files)`);
-        }
-      }
+      const from = `From ${REPO}${target ? `#${target}` : ''} (A10, run ${process.env.GITHUB_RUN_ID || 'local'}). Team v${teamVersion}.`;
+      const issueBody = `${from}\n\n${body}\n\n<!-- a10-patch -->\n\`\`\`diff\n${patch.slice(0, 50000)}\n\`\`\`\n`;
+      const r = await ghWith(tplToken, 'POST', `/repos/${TEMPLATE}/issues`, { title: `A10 team proposal: ${title}`.slice(0, 200), labels: ['team-proposal'], body: issueBody.slice(0, 64000) });
+      done.push(`template issue ${TEMPLATE}#${r.number} (${split.team.length} team files)`);
     }
   }
   console.log(done.length ? `published: ${done.join('; ')}` : 'nothing to publish');
