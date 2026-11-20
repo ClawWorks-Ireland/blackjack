@@ -12,6 +12,7 @@ on:
       pr: { description: 'PR number for a review fix round (optional)', required: false, default: '' }
       handoff_run: { description: 'Run id of the failed attempt whose output and diff to hand over', required: false, default: '' }
       retry: { description: 'Infra retries of this rung so far (runner lost, gaming pause, timeout)', required: false, default: '0' }
+      pauses: { description: 'Pauses of this attempt where the model never ran (team v2.10.3)', required: false, default: '0' }
 permissions:
   contents: read
   issues: write
@@ -27,6 +28,7 @@ env:
   FIX_PR: ${{ inputs.pr }}
   HANDOFF_RUN: ${{ inputs.handoff_run }}
   RETRY: ${{ inputs.retry }}
+  PAUSES: ${{ inputs.pauses || '0' }}
 jobs:
   gate:
     runs-on: [self-hosted, vm-keyed]
@@ -46,11 +48,19 @@ jobs:
           [[ -z "$FIX_PR" || "$FIX_PR" =~ ^[0-9]+$ ]] || { echo "bad pr"; exit 1; }
           [[ -z "$HANDOFF_RUN" || "$HANDOFF_RUN" =~ ^[0-9]+$ ]] || { echo "bad handoff_run"; exit 1; }
           [[ "$RETRY" =~ ^[01]$ ]] || { echo "bad retry"; exit 1; }
+          [[ "$PAUSES" =~ ^[0-9]{1,2}$ ]] || { echo "bad pauses"; exit 1; }
       - id: g
         run: |
           T=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length)
           if [ "$T" != "0" ] && [ "$ATTEMPT" = "1" ] && [ -z "$FIX_PR" ] && [ "$IMPL" = local ]; then
             echo "Throttled (REQ-CB-4a): not starting new slice #$ISSUE; A0 re-dispatches after limits reset."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$T" != "0" ]; then   # a ladder attempt during a usage limit would only burn the attempt (team v2.10.2)
+            gh label create ladder-paused -R "$GITHUB_REPOSITORY" --color d4c5f9 --description "Ladder attempt paused by a usage limit; A0 resumes it" 2>/dev/null || true
+            gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label ladder-paused || true
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "<!-- ladder-resume: implementer=$IMPL attempt=$ATTEMPT handoff_run=$HANDOFF_RUN retry=$RETRY pr=$FIX_PR pauses=$PAUSES -->
+          Throttled (REQ-CB-4a): $IMPL attempt $ATTEMPT not started while Claude's usage limit is in force. A0 resumes it once no \`throttled\` issue is open." || true
+            echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           BASE=main
           if [ -n "$FIX_PR" ]; then
@@ -335,6 +345,9 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-issues: write
           permission-actions: write
+      - uses: actions/download-artifact@v4   # the Claude result: did the model run at all? (team v2.10.2)
+        continue-on-error: true
+        with: { name: claude-exec-claude, path: exec }
       - name: Next rung (REQ-FLOW-2) + handoff comment (REQ-FLOW-7)
         env:
           GITHUB_TOKEN: ${{ steps.app.outputs.token }}
@@ -348,7 +361,11 @@ jobs:
           HAS_ART=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -q '[.artifacts[]|select(.name=="attempt")]|length' 2>/dev/null || echo 0)
           export HAS_ART
           export VERIFIED="${{ needs.verify.outputs.pass }}" PUBLISH="${{ needs.publish.result }}"
-          NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF, hasArtifact: Number(e.HAS_ART) > 0, verified: e.VERIFIED === "true", publish: e.PUBLISH })))')
+          # A usage limit or a model that never ran pauses the attempt instead of using it up (team v2.10.2).
+          THROTTLED=$(gh issue list -R "$GITHUB_REPOSITORY" --label throttled --state open --json number -q length 2>/dev/null || echo 0)
+          NEVER_RAN=$( [ -f exec/claude-exec.json ] && node -e 'console.log(require("./scripts/gates/lib.js").modelNeverRan(require("fs").readFileSync("exec/claude-exec.json","utf8")))' || echo false)
+          export THROTTLED NEVER_RAN
+          NEXT=$(node -e 'const e=process.env; console.log(JSON.stringify(require("./scripts/gates/lib.js").nextRung(e.IMPL, Number(e.ATTEMPT), { job: e.JOB, retry: Number(e.RETRY || 0), run: e.GITHUB_RUN_ID, handoffRun: e.HANDOFF, hasArtifact: Number(e.HAS_ART) > 0, verified: e.VERIFIED === "true", publish: e.PUBLISH, throttled: Number(e.THROTTLED) > 0, neverRan: e.NEVER_RAN === "true", pauses: Number(e.PAUSES || 0) })))')
           field() { node -p "String(JSON.parse(process.argv[1]).$1 ?? '')" "$NEXT"; }
           if [ "$(field publishFailed)" = true ]; then
             gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label needs-human --add-label status:blocked
@@ -356,6 +373,24 @@ jobs:
           WHAT CHANGED: attempt $ATTEMPT ($IMPL) passed A4 but the publish job failed. That's infrastructure, not the model, so the ladder stops here instead of advancing.
           EVIDENCE: $RUN (artifact \`attempt\` holds the verified commits.mbox)
           NEXT: @delmarolivier re-run the failed publish job (recommended) or dispatch the same attempt again."
+            exit 0
+          fi
+          if [ "$(field stuck)" = true ]; then
+            gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --remove-label ladder-paused --add-label needs-human --add-label status:blocked || true
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "ROLE: Ladder (A0)   ITEM: #$ISSUE   RESULT: needs-human
+          WHAT CHANGED: the $IMPL job for attempt $ATTEMPT failed again before the model ran, with no usage limit open. Not resumed again: this looks permanent (expired or revoked Claude credentials, a broken key, an API outage).
+          EVIDENCE: $RUN
+          NEXT: @delmarolivier check Claude's credentials on the repo (CLAUDE_CODE_OAUTH_TOKEN) and usage, then reply \`resume\` (A0 re-dispatches attempt $ATTEMPT) or \`re-slice\`."
+            exit 0
+          fi
+          if [ "$(field paused)" = true ]; then
+            gh label create ladder-paused -R "$GITHUB_REPOSITORY" --color d4c5f9 --description "Ladder attempt paused by a usage limit; A0 resumes it" 2>/dev/null || true
+            gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --add-label ladder-paused
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "<!-- ladder-resume: implementer=$(field implementer) attempt=$(field attempt) handoff_run=$(field handoffRun) retry=$(field retry) pr=$FIX_PR pauses=$(field pauses) -->
+          ROLE: Ladder (A0)   ITEM: #$ISSUE   RESULT: blocked
+          WHAT CHANGED: the $IMPL job for attempt $ATTEMPT failed while Claude's usage limit was in force, or before the model ran at all. That isn't a model failure, so this attempt is paused, not used up.
+          EVIDENCE: $RUN
+          NEXT: A0 re-dispatches this exact attempt (the marker above) once no \`throttled\` issue is open."
             exit 0
           fi
           if [ "$(field infra)" = true ]; then

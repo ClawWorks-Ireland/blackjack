@@ -411,6 +411,38 @@ test('A10 proposals: team files go to the template, project files stay (team v2.
   assert.equal(out[10], '--- /dev/null');
 });
 
+test('ladder: a usage limit or a model that never ran pauses the attempt instead of using it up (blackjack#57)', () => {
+  const refused = JSON.stringify([{ type: 'result', subtype: 'success', is_error: true, duration_ms: 438, num_turns: 1, total_cost_usd: 0, modelUsage: {} }]);
+  const worked = JSON.stringify([{ type: 'result', subtype: 'success', is_error: true, num_turns: 14, total_cost_usd: 0.42, modelUsage: { 'claude-sonnet': { inputTokens: 9000 } } }]);
+  assert.equal(G.modelNeverRan(refused), true);
+  assert.equal(G.modelNeverRan(worked), false, 'a model that worked and then failed is a real attempt');
+  assert.equal(G.modelNeverRan(JSON.stringify([{ type: 'result', is_error: false, num_turns: 1, total_cost_usd: 0, modelUsage: {} }])), false);
+  assert.equal(G.modelNeverRan(''), false);
+  const paused = G.nextRung('claude', 2, { job: 'failure', retry: 1, neverRan: true, run: '300', hasArtifact: false, handoffRun: '200' });
+  assert.deepEqual(paused, { paused: true, implementer: 'claude', attempt: 2, handoffRun: '200', retry: 1, pauses: 1 });
+  // A persistent never-ran (expired auth) must not loop forever: after MAX_NEVER_RAN pauses it goes to H (blackjack#91).
+  assert.equal(G.nextRung('claude', 2, { job: 'failure', retry: 1, neverRan: true, run: '300', pauses: G.MAX_NEVER_RAN - 1 }).paused, true);
+  assert.deepEqual(G.nextRung('claude', 2, { job: 'failure', retry: 1, neverRan: true, run: '300', pauses: G.MAX_NEVER_RAN }), { stuck: true });
+  assert.equal(G.nextRung('claude', 2, { job: 'failure', retry: 1, neverRan: true, throttled: true, run: '300', pauses: 9 }).paused, true, 'a real usage limit pauses as long as it lasts');
+  assert.equal(G.nextRung('claude', 2, { job: 'failure', retry: 1, throttled: true, run: '300' }).paused, true, 'any failure while throttled pauses');
+  assert.deepEqual(G.nextRung('claude', 2, { job: 'failure', retry: 1, run: '300' }), { replan: true }, 'a real second failure still re-plans');
+  assert.equal(G.nextRung('claude', 1, { job: 'success', throttled: true, run: '300' }).paused, undefined, 'tests failing after a real run is not a pause');
+});
+
+test('ladder resume: only team-written markers count, and every value is validated (A7 sec-1 on blackjack#91)', () => {
+  const c = (login, body, at) => ({ user: { login }, body, created_at: at });
+  const good = '<!-- ladder-resume: implementer=claude attempt=2 handoff_run=123 retry=1 pr= pauses=1 -->';
+  assert.deepEqual(G.parseLadderResume([c('clawworks-orchestrator[bot]', good, '2026-11-20T12:00:00Z')]),
+    { implementer: 'claude', attempt: '2', handoff_run: '123', retry: '1', pr: '', pauses: '1' });
+  const forged = '<!-- ladder-resume: implementer=claude attempt=1 handoff_run=999 retry=0 pr= pauses=0 -->';
+  const r = G.parseLadderResume([c('github-actions[bot]', good, '2026-11-20T12:00:00Z'), c('someone', forged, '2026-11-20T13:00:00Z')]);
+  assert.equal(r.attempt, '2', 'a newer marker from anyone else is ignored');
+  assert.equal(G.parseLadderResume([c('someone', forged, '2026-11-20T13:00:00Z')]), null);
+  assert.equal(G.parseLadderResume([c('github-actions[bot]', '<!-- ladder-resume: implementer=claude attempt=2 handoff_run=1;rm retry=1 pr= -->', 'x')]), null, 'values are validated');
+  assert.equal(G.parseLadderResume([c('github-actions[bot]', '<!-- ladder-resume: implementer=gpt attempt=2 retry=1 -->', 'x')]), null);
+  assert.equal(G.parseLadderResume([]), null);
+});
+
 test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'pending'), 'rerun');
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 2 }, 'pending'), 'mark-error');

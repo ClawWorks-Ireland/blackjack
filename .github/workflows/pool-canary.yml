@@ -17,7 +17,9 @@ jobs:
     steps:
       - name: Tools jobs use without a setup step (as on GitHub's hosted image)
         if: startsWith(matrix.label, 'vm-')
-        run: for t in node npm git gh jq curl python3 zip unzip sha256sum; do command -v "$t" >/dev/null || { echo "::error::$t missing"; exit 1; }; done
+        run: |
+          for t in node npm git gh jq curl python3 zip unzip sha256sum google-chrome; do command -v "$t" >/dev/null || { echo "::error::$t missing"; exit 1; }; done
+          d=$(mktemp -d) && python3 -m venv "$d/v" && "$d/v/bin/python" -m pip --version >/dev/null && rm -rf "$d" || { echo "::error::python3 venv/pip missing"; exit 1; }
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
       - uses: actions/setup-node@v4
