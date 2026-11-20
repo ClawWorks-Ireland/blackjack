@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { PokerTable } = require('./poker.js');
-const { POLICIES, rngFor } = require('./poker-bots.js');
+const { POLICIES, STYLES, rngFor } = require('./poker-bots.js');
 
 const BB = 10;
 const STACK = 100 * BB;
@@ -44,6 +44,16 @@ const GOLDEN = {
   'calling-station': { hash: 'ec1d646d69230d1df748d899255ff469003c98af2114f437f845b4ae9ee66c66', draws: 1632345 },
   maniac: { hash: '3cb9f79cd02bb7a0ad4b1ac5f43b2a8256984e7c3db70fa5ba90623dbfdc7c0d', draws: 1357267 },
 };
+
+test('styles use numeric params only', () => {
+  for (const [name, st] of Object.entries(STYLES)) {
+    for (const [k, v] of Object.entries(st.params)) {
+      assert.ok(typeof v === 'number' && Number.isFinite(v), `${name}.${k} is a finite number`);
+    }
+  }
+  assert.strictEqual(STYLES.maniac.params.maniacRate, 0.75);
+  assert.strictEqual(STYLES['calling-station'].params.stationCalls, 1);
+});
 
 for (const style of Object.keys(GOLDEN)) {
   test(`poker bots golden: ${style} v default, ${HANDS} hands`, () => {

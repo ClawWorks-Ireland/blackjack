@@ -7,11 +7,12 @@
  */
 'use strict';
 
-const CACHE = 'blackjack-v9';
+const CACHE = 'blackjack-v10';
 const FILES = [
   './', './index.html', './style.css', './manifest.webmanifest',
   '../engine/format.js', './prefs.js', './a11y.js', '../engine/betting.js', '../engine/sidebets.js', '../engine/blackjack.js',
   '../engine/stats.js', './sound.js', '../engine/strategy.js', '../engine/counting.js', '../engine/chart.js', '../engine/drill.js', '../engine/ev-data.js', '../engine/ev.js', '../engine/rules.js', '../engine/bankroll.js', '../engine/report.js', '../engine/replay.js', './sim-worker.js', './app.js',
+  './lobby.html', './table.html', './poker.html', './players.html', './live.css', './live.js', './poker.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
 ];
 
@@ -40,5 +41,5 @@ self.addEventListener('fetch', (event) => {
       return res;
     })
     .catch(() => caches.match(req, { ignoreSearch: true })
-      .then((hit) => hit || caches.match('./index.html'))));
+      .then((hit) => hit || (req.mode === 'navigate' ? caches.match('./lobby.html') : hit))));
 });

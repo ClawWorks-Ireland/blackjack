@@ -10,6 +10,9 @@
  * - loose-aggressive: many hands, raises and bluffs a lot.
  * - calling-station: calls almost anything, rarely raises or folds.
  * - maniac: bets and raises nearly every chance.
+ *
+ * Style switches are rates: maniacRate (chance to bet or raise outright) and
+ * stationCalls (chance to play as a calling station); 0 is never, 1 is always.
  */
 (function (root) {
   'use strict';
@@ -91,16 +94,17 @@
   /** The equity a hand needs to be worth playing against n opponents, times a looseness factor. */
   const fair = (n) => 1 / (n + 1);
 
-  function makePolicy({ playMult, raiseMult, bluff, callMargin, aggression, sizeFrac, stationCalls = false, maniac = false, foldToRaise = 0 }) {
+  function makePolicy({ playMult, raiseMult, bluff, callMargin, aggression, sizeFrac, stationCalls = 0, maniacRate = 0, foldToRaise = 0 }) {
     return function decide(view, rng = Math.random) {
       const s = situation(view, rng);
       const f = fair(s.opponents);
-      if (maniac && rng() < 0.75) return sized(s, 0.8 + rng() * 0.6) || call(s);
+      if (maniacRate > 0 && rng() < maniacRate) return sized(s, 0.8 + rng() * 0.6) || call(s);
+      const station = stationCalls >= 1 || (stationCalls > 0 && rng() < stationCalls);
       if (s.street === 'preflop') {
         if (s.eq >= f * raiseMult && rng() < aggression) return sized(s, sizeFrac) || call(s);
-        if (s.eq >= f * playMult || stationCalls) {
+        if (s.eq >= f * playMult || station) {
           if (!s.facingBet) return s.legal.check ? (rng() < aggression * 0.5 ? (sized(s, sizeFrac) || check(s)) : check(s)) : call(s);
-          if (stationCalls || s.toCall <= s.bb * 4 || s.eq > f * raiseMult * 0.9) {
+          if (station || s.toCall <= s.bb * 4 || s.eq > f * raiseMult * 0.9) {
             if (foldToRaise && s.toCall > s.bb * 3 && rng() < foldToRaise && s.eq < f * raiseMult) return { action: 'fold' };
             return call(s);
           }
@@ -114,7 +118,7 @@
         if (rng() < bluff) return sized(s, sizeFrac) || check(s);
         return check(s);
       }
-      if (stationCalls && s.eq > 0.12) return call(s);
+      if (station && s.eq > 0.12) return call(s);
       if (foldToRaise && rng() < foldToRaise && !strong) return { action: 'fold' };
       if (s.eq >= s.potOdds + callMargin) return call(s);
       return { action: 'fold' };
@@ -125,8 +129,8 @@
     default: { description: 'Sound play from equity and pot odds: plays decent hands, raises strong ones, bets for value, bluffs a little.', params: { playMult: 1.0, raiseMult: 1.45, bluff: 0.1, callMargin: 0.02, aggression: 0.75, sizeFrac: 0.66 } },
     'tight-passive': { description: 'Plays few hands, rarely raises, calls when it plays, and gives up to aggression.', params: { playMult: 1.15, raiseMult: 1.5, bluff: 0.02, callMargin: 0.08, aggression: 0.25, sizeFrac: 0.5, foldToRaise: 0.6 } },
     'loose-aggressive': { description: 'Plays many hands, raises and bluffs a lot, bets big.', params: { playMult: 0.7, raiseMult: 1.1, bluff: 0.35, callMargin: -0.02, aggression: 0.9, sizeFrac: 0.9 } },
-    'calling-station': { description: 'Calls almost anything, rarely raises or folds.', params: { playMult: 0.5, raiseMult: 2.6, bluff: 0.0, callMargin: -0.2, aggression: 0.15, sizeFrac: 0.5, stationCalls: true } },
-    maniac: { description: 'Bets and raises nearly every chance, whatever it holds.', params: { playMult: 0.3, raiseMult: 0.9, bluff: 0.6, callMargin: -0.1, aggression: 0.95, sizeFrac: 1.0, maniac: true } },
+    'calling-station': { description: 'Calls almost anything, rarely raises or folds.', params: { playMult: 0.5, raiseMult: 2.6, bluff: 0.0, callMargin: -0.2, aggression: 0.15, sizeFrac: 0.5, stationCalls: 1 } },
+    maniac: { description: 'Bets and raises nearly every chance, whatever it holds.', params: { playMult: 0.3, raiseMult: 0.9, bluff: 0.6, callMargin: -0.1, aggression: 0.95, sizeFrac: 1.0, maniacRate: 0.75 } },
   };
 
   const POLICIES = Object.fromEntries(Object.entries(STYLES).map(([name, s]) => [name, { name, description: s.description, decide: makePolicy(s.params) }]));
