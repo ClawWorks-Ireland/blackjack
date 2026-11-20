@@ -76,9 +76,7 @@ function run(cmd, argv, cwd) {
 // report most checks print ({checks: {name: {pass}}, errors: [...]}).
 function judge(name, { code, text }) {
   if (name === 'unit tests') {
-    const pass = Number((text.match(/ℹ pass (\d+)/) || [])[1] || 0);
-    const fail = Number((text.match(/ℹ fail (\d+)/) || [])[1] || 0);
-    return { ok: code === 0 && fail === 0, detail: `${pass} pass, ${fail} fail` };
+    return require('./lib/judge').judgeUnitTests({ code, text });
   }
   let json = null;
   const start = text.indexOf('{');
@@ -115,7 +113,7 @@ function judge(name, { code, text }) {
       const started = Date.now();
       const res = script
         ? await run(process.execPath, [path.join(QA, script), ...argv], QA)
-        : await run(process.execPath, ['--test'], snap); // finds engine/, web/ and agent/ tests too
+        : await run(process.execPath, ['--test', '--test-reporter=tap'], snap); // finds engine/, web/ and agent/ tests too
       fs.writeFileSync(path.join(out, `${script ? path.basename(script, '.js') : 'unit_tests'}.out`), res.text);
       const verdict = judge(name, res);
       results.push({ name, ...verdict, seconds: Math.round((Date.now() - started) / 1000) });
