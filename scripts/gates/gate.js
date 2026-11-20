@@ -17,6 +17,7 @@
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
  *   gate.js qa-report --sha S --result pass|fail|error --dir D   QA status and PR comment (qa.yml)
+ *   gate.js ladder-resume --issue N              resume a paused ladder attempt from the team's own marker
  *   gate.js ci-retry --run R                     re-run a CI run whose jobs never started, once
  *   gate.js pure-update --pr N --sha S               pure=true if the head only merged the base branch in
  *   gate.js review-retry --run ID --context C [--dry]   retry a review that failed on infrastructure, once
@@ -361,6 +362,24 @@ commands['qa-report'] = async () => {
   console.log(`qa-report: ${args.result} on ${sha.slice(0, 7)}${pr ? ` (PR #${pr.number})` : ''}`);
 };
 
+// Resume a paused ladder attempt (team v2.10.3; A7 sec-1 on blackjack#91). Deterministic, so a comment can't
+// steer it: only when no `throttled` issue is open and the issue is labelled `ladder-paused`, from the newest
+// marker written by the team (lib.js parseLadderResume validates author and values), then dispatch and unlabel.
+commands['ladder-resume'] = async () => {
+  const n = Number(args.issue);
+  if (!Number.isInteger(n) || n <= 0) throw new Error('ladder-resume needs --issue N');
+  if ((await all(repo('/issues?state=open&labels=throttled'))).length) { console.log(`#${n}: still throttled, not resuming`); return; }
+  const issue = await gh('GET', repo(`/issues/${n}`));
+  if (issue.state !== 'open' || !(issue.labels || []).some((l) => l.name === 'ladder-paused')) { console.log(`#${n}: not a paused ladder attempt`); return; }
+  const r = G.parseLadderResume(await all(repo(`/issues/${n}/comments`)));
+  if (!r) { console.log(`#${n}: no valid resume marker from the team; leaving it for H`); return; }
+  console.log(`#${n}: resuming ${r.implementer} attempt ${r.attempt} (retry ${r.retry}, pauses ${r.pauses}, hand-off ${r.handoff_run || 'none'})`);
+  if (args.dry) return;
+  await gh('POST', repo('/actions/workflows/implement.yml/dispatches'), { ref: 'main',
+    inputs: { issue: String(n), implementer: r.implementer, attempt: r.attempt, pr: r.pr, handoff_run: r.handoff_run, retry: r.retry, pauses: r.pauses } });
+  await gh('DELETE', repo(`/issues/${n}/labels/ladder-paused`));
+};
+
 // CI that failed on infrastructure (jobs that never started): re-run its failed jobs once (lib.js ciRetryAction).
 commands['ci-retry'] = async () => {
   const run = await gh('GET', repo(`/actions/runs/${args.run}`));
@@ -417,6 +436,12 @@ commands['repro-run'] = async () => {
   const candidates = fs.existsSync(args.candidates) ? JSON.parse(fs.readFileSync(args.candidates, 'utf8')) : [];
   const sudo = (...a) => spawnSync('sudo', ['-n', ...a], { encoding: 'utf8', maxBuffer: 1 << 22, timeout: 120000 });
   const node = process.execPath;
+  // The project's language decides the interpreter for hunters' checks (team v2.10; overlay `language`). A Python
+  // project whose install step made a .venv runs checks with that venv's python (it finds its packages from its
+  // own location, so the copy in the run dir works); otherwise the system python3 (team v2.10.1).
+  const checkCmd = (src, dir) => ('node' === 'python'
+    ? [fs.existsSync(path.join(path.resolve(src), '.venv/bin/python')) ? path.join(dir, '.venv/bin/python') : '/usr/bin/python3', '-I', '-c']
+    : [node, '-e']);
   const gid = String(spawnSync('id', ['-g', user], { encoding: 'utf8' }).stdout || '').trim();   // the account's own group (nobody's is nogroup)
   if (!/^\d+$/.test(gid)) throw new Error(`no such account: ${user}`);
   // Run dirs: random names in a root-owned 0711 folder (no guessable paths, no /tmp races).
@@ -430,7 +455,7 @@ commands['repro-run'] = async () => {
     const r = spawnSync('sudo', ['-n', 'unshare', '-n', '-p', '-f', '--kill-child', '--mount-proc', '--wd', dir,
       'setpriv', `--reuid=${user}`, `--regid=${gid}`, '--clear-groups', '--no-new-privs', '--inh-caps=-all', '--bounding-set=-all',
       'env', '-i', `PATH=${path.dirname(node)}:/usr/bin:/bin`, `HOME=${dir}`, 'LANG=C.UTF-8',
-      'timeout', '-s', 'KILL', '10', node, '-e', code], { encoding: 'utf8', maxBuffer: 1 << 20, timeout: 30000 });
+      'timeout', '-s', 'KILL', '10', ...checkCmd(src, dir), code], { encoding: 'utf8', maxBuffer: 1 << 20, timeout: 30000 });
     sudo('rm', '-rf', dir);
     if (r.error && r.error.code !== 'ETIMEDOUT') return 'error';
     if (r.status === 124 || r.status === 137 || r.signal || (r.error && r.error.code === 'ETIMEDOUT')) return 'timeout';   // 124: GNU timeout fired
