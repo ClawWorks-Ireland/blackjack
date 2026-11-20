@@ -1,0 +1,29 @@
+diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js
+index 58b8159..30efef1 100644
+--- a/scripts/gates/lib.js
++++ b/scripts/gates/lib.js
+@@ -244,6 +244,11 @@ function guardVerdict({ sha, guardActive, pr, headStatuses = [], exactRevertOf =
+   }
+   if (pr) {
+     if (!pr.merged_at) return { allowed: false, why: `PR #${pr.number} is not merged` };
++    // Break-glass (incident #80): when A9's path itself can't run (e.g. the gate workflows on main
++    // need runners that are down), H may merge by hand with a `Break-glass: <reason>` trailer.
++    // The trailer is the audit trail; main-guard still records the commit's status.
++    const breakGlass = !!pr.merged_by && pr.merged_by.login === OWNER && /^Break-glass: \S.*$/m.test(message);
++    if (breakGlass) return { allowed: true, why: `break-glass merge of PR #${pr.number} by ${OWNER}` };
+     if (!pr.merged_by || pr.merged_by.login !== MERGE_BOT) return { allowed: false, why: `PR #${pr.number} merged by ${pr.merged_by ? pr.merged_by.login : 'unknown'}, not A9 (${MERGE_BOT})` };
+     if (pr.merge_commit_sha !== sha) return { allowed: false, why: `PR #${pr.number} merge commit is ${pr.merge_commit_sha}, not ${sha}` };
+     const ev = trustedStatuses(headStatuses)['merge-evidence'];
+diff --git a/scripts/gates/lib.test.js b/scripts/gates/lib.test.js
+index 80a06ee..a08ed1f 100644
+--- a/scripts/gates/lib.test.js
++++ b/scripts/gates/lib.test.js
+@@ -161,6 +161,8 @@ test('T15 main-guard: direct pushes are not allowed; A9 merges and exact reverts
+   assert.equal(G.guardVerdict({ sha, guardActive: true, pr, headStatuses: [status('merge-evidence', 'success')] }).allowed, true);
+   assert.equal(G.guardVerdict({ sha, guardActive: true, pr, headStatuses: [status('merge-evidence', 'success', BOT)] }).allowed, false);
+   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: { ...pr, merged_by: { login: 'delmarolivier' } }, headStatuses: [status('merge-evidence', 'success')] }).allowed, false);
++  assert.equal(G.guardVerdict({ sha, guardActive: true, pr: { ...pr, merged_by: { login: 'delmarolivier' } }, message: 'Team v2.4.0 (#79)\n\nBreak-glass: hosted runners down' }).allowed, true);
++  assert.equal(G.guardVerdict({ sha, guardActive: true, pr: { ...pr, merged_by: { login: 'someone' } }, message: 'x\n\nBreak-glass: y' }).allowed, false);
+   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: null, exactRevertOf: 'abc1234', message: 'Revert x\n\nRollback-of: abc1234' }).allowed, true);
+   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: null, exactRevertOf: null, message: 'Rollback-of: abc1234' }).allowed, false);
+ });
