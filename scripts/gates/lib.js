@@ -13,6 +13,7 @@
 const OWNER = 'delmarolivier';
 const GATE_BOT = 'github-actions[bot]';
 const MERGE_BOT = 'clawworks-release-manager[bot]';   // spec §8.5: A9's own App
+const ORCH_BOT = 'clawworks-orchestrator[bot]';   // A0's own App: the ladder comments and dispatches as A0
 const REQUIRED_STATUSES = ['ai-review', 'security', 'tier-approval'];
 const REQUIRED_CHECK = 'ci';
 
@@ -350,6 +351,26 @@ function modelNeverRan(text) {
   return usage === 0 && Number(r.total_cost_usd || 0) === 0 && Number(r.num_turns || 0) <= 1;
 }
 
+const MAX_NEVER_RAN = 2;
+/**
+ * The resume marker of a paused ladder attempt (team v2.10.3; A7 sec-1 on blackjack#91). Only markers written
+ * by the team (the gate step as github-actions[bot], the ladder as A0's App) count: anyone else's comment is
+ * data (REQ-COMMS-3). Returns the validated dispatch inputs of the newest team marker, or null.
+ */
+const RESUME_AUTHORS = [GATE_BOT, ORCH_BOT];
+function parseLadderResume(comments) {
+  const mine = (comments || []).filter((c) => c && c.user && RESUME_AUTHORS.includes(c.user.login) && /<!-- ladder-resume: /.test(c.body || ''))
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  const last = mine[mine.length - 1];
+  if (!last) return null;
+  const m = /<!-- ladder-resume: ([^>]*) -->/.exec(last.body);
+  const kv = Object.fromEntries(m[1].trim().split(/\s+/).map((x) => { const i = x.indexOf('='); return [x.slice(0, i), x.slice(i + 1)]; }));
+  const out = { implementer: kv.implementer, attempt: kv.attempt, handoff_run: kv.handoff_run || '', retry: kv.retry || '0', pr: kv.pr || '', pauses: kv.pauses || '0' };
+  if (!/^(local|claude)$/.test(out.implementer) || !/^[12]$/.test(out.attempt) || !/^[01]$/.test(out.retry)
+    || !/^\d*$/.test(out.handoff_run) || !/^\d*$/.test(out.pr) || !/^\d{1,2}$/.test(out.pauses)) return null;
+  return out;
+}
+
 /**
  * REQ-FLOW-2 / FLOW-7: what the ladder does after an attempt that didn't publish.
  *   ctx.job        the implementer job's result: success | failure | cancelled
@@ -368,9 +389,13 @@ function nextRung(implementer, attempt, ctx = {}) {
   // model's attempt. Don't advance the ladder; ask Delmar (slice #24).
   if (ctx.verified && (ctx.publish === 'failure' || ctx.publish === 'cancelled')) return { publishFailed: true };
   // A usage limit (an open `throttled` issue) or a model that never ran: pause this exact attempt, consuming
-  // neither the attempt nor its infra retry. A0 resumes it once the limits reset (team v2.10.2).
+  // neither the attempt nor its infra retry. A0 resumes it once the limits reset (team v2.10.2). A model that
+  // never ran with no usage limit open may be a permanent failure (expired auth, a broken key): after
+  // MAX_NEVER_RAN pauses in a row it goes to H instead of looping (team v2.10.3).
   if ((ctx.job === 'failure' || ctx.job === 'cancelled') && (ctx.throttled || ctx.neverRan)) {
-    return { paused: true, implementer, attempt, handoffRun: (ctx.hasArtifact && ctx.run ? String(ctx.run) : '') || String(ctx.handoffRun || ''), retry: Number(ctx.retry || 0) };
+    const pauses = ctx.throttled ? Number(ctx.pauses || 0) : Number(ctx.pauses || 0) + 1;
+    if (!ctx.throttled && pauses > MAX_NEVER_RAN) return { stuck: true };
+    return { paused: true, implementer, attempt, handoffRun: (ctx.hasArtifact && ctx.run ? String(ctx.run) : '') || String(ctx.handoffRun || ''), retry: Number(ctx.retry || 0), pauses };
   }
   const run = ctx.run ? String(ctx.run) : '';
   const inherited = ctx.handoffRun ? String(ctx.handoffRun) : '';
@@ -602,5 +627,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };
