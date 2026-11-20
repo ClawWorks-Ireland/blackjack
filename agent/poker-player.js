@@ -115,7 +115,8 @@ function menu(view, def) {
 
 function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, ledger = {}, feedback = false, notesEvery = 30, log = () => {}, ask = askModel } = {}) {
   const stats = { decisions: 0, modelPicks: 0, followedDefault: 0, fallbacks: 0, notes: 0, hands: 0, guarded: 0, sizedUp: 0 };
-  let thisHand = []; // [{kind, opponents}] for the hand in play
+  let thisHand = []; // [{kind, opponents, eq}] for the hand in play
+  let guardFired = false; // a guardrail changed the menu this hand
 
   /** "bluffs 14 tries, -38 bb; value bets 22, +140 bb; ..." */
   const ledgerLine = (name) => {
@@ -126,7 +127,7 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, l
   };
 
   const self = {
-    name: feedback ? 'llm-feedback' : 'llm', stats, profiles, notes, ledger, feedback,
+    name: feedback ? 'llm-feedback' : 'llm', lastHand: null, stats, profiles, notes, ledger, feedback,
     description: 'LLM player: profiles opponents and bends the default to exploit them.',
 
     async decide(view, rng = Math.random) {
@@ -141,6 +142,7 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, l
         const kept = opts.filter((o) => o.action !== 'bet' && o.action !== 'raise');
         if (kept.length < opts.length) {
           stats.guarded++;
+          guardFired = true;
           if (!kept.some((o) => o.isDefault)) {
             const safe = kept.find((o) => o.action === 'check') || kept.find((o) => o.action === 'fold') || kept[0];
             safe.isDefault = true;
@@ -153,6 +155,7 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, l
         const kept = opts.filter((o) => o.size !== 'small' && o.size !== 'medium');
         if (kept.length < opts.length && kept.some((o) => o.size === 'big' || o.size === 'all-in')) {
           stats.sizedUp++;
+          guardFired = true;
           const wasBet = opts.some((o) => o.isDefault && (o.size === 'small' || o.size === 'medium'));
           opts = kept.map((o, i) => ({ ...o, letter: 'ABCDEFGH'[i], isDefault: wasBet ? o.size === 'big' || (o.size === 'all-in' && !kept.some((k) => k.size === 'big')) : o.isDefault }));
         }
@@ -178,7 +181,7 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, l
       let pick = letter && opts.find((o) => o.letter === letter);
       if (!pick) { stats.fallbacks++; pick = fallback; } else { stats.modelPicks++; if (pick.isDefault) stats.followedDefault++; }
       const kind = kindOf(pick.action, s.eq);
-      if (kind) thisHand.push({ kind, opponents: inHand });
+      if (kind) thisHand.push({ kind, opponents: inHand, eq: s.eq });
       return { action: pick.action, amount: pick.amount };
     },
 
@@ -189,10 +192,13 @@ function makeBrain({ llm = DEFAULT_LLM, profiles = new Profiles(), notes = {}, l
       // The ledger: this hand's main move against the opponents it was made against, and the result.
       const moves = thisHand;
       thisHand = [];
+      const fired = guardFired;
+      guardFired = false;
+      const rank = { bluff: 3, value: 3, thin: 3, call: 2, fold: 1 };
+      const main = moves.length ? moves.reduce((a, m) => (rank[m.kind] >= rank[a.kind] ? m : a)) : null;
+      self.lastHand = { mainMove: main ? main.kind : null, equityAtMainMove: main ? main.eq : null, guardrailFired: fired };
       if (view.you && moves.length) {
         const net = view.lastHand.net[view.you.seat];
-        const rank = { bluff: 3, value: 3, thin: 3, call: 2, fold: 1 };
-        const main = moves.reduce((a, m) => (rank[m.kind] >= rank[a.kind] ? m : a));
         const against = main.opponents.length ? main.opponents : [];
         for (const o of against) {
           const l = (ledger[o] = ledger[o] || {});
