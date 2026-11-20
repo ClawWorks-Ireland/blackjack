@@ -32,8 +32,10 @@ macos/scripts/run-app.sh         # macOS app
 not `web/` alone.
 
 Served over http(s), the browser game is an installable app (PWA): your
-browser offers "Install" or "Add to Home Screen", and after one visit it
-works offline. Online it always loads the latest files; offline it uses the
+browser offers "Install" or "Add to Home Screen". The installed app opens on
+the lobby and reaches the solo game and the live blackjack and poker tables.
+After one visit, only solo play works offline; the live tables need the
+table server. Online it always loads the latest files; offline it uses the
 last copy. Opening `web/index.html` straight from disk skips this.
 
 ## Live tables
