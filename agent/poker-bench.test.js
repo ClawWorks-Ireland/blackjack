@@ -43,3 +43,31 @@ test('poker profiles: stats from a hand log', () => {
   assert.equal(p.stats('A').aggression, 1);
   assert.match(p.line('B'), /plays 100% of hands .* folds to a bet 100%/);
 });
+
+test('match: onHand reports every hand for the hero', async () => {
+  const run = async (hook) => {
+    const pairs = [];
+    const hands = [];
+    const r = await match(POLICIES.default, { ...POLICIES.maniac, name: 'maniac' }, { hands: 10, seed: 'onhand', onPair: (i, bb) => pairs.push(bb), onHand: hook ? (h) => hands.push(h) : null });
+    return { r, pairs, hands };
+  };
+  const withHook = await run(true);
+  const without = await run(false);
+  assert.equal(withHook.r.bbPer100, without.r.bbPer100);
+  assert.deepEqual(withHook.pairs, without.pairs);
+  const h = withHook.hands;
+  assert.equal(h.length, 20);
+  h.forEach((x, k) => {
+    assert.equal(x.handIndex, k);
+    assert.equal(x.pair, Math.floor(k / 2));
+    assert.equal(x.seat, k % 2);
+    assert.equal(x.deal, `onhand-${x.pair}`);
+    assert.ok(['preflop', 'flop', 'turn', 'river'].includes(x.streetReached));
+    assert.equal(typeof x.showdown, 'boolean');
+    assert.equal(typeof x.facedRiverBet, 'boolean');
+    assert.equal(typeof x.riverCall, 'boolean');
+    if (x.riverCall) assert.ok(x.facedRiverBet);
+    if (x.facedRiverBet) assert.equal(x.streetReached, 'river');
+  });
+  for (let i = 0; i < 10; i++) assert.ok(Math.abs(h[2 * i].bb + h[2 * i + 1].bb - withHook.pairs[i]) < 1e-9);
+});
