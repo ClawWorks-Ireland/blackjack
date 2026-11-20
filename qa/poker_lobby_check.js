@@ -35,6 +35,7 @@ function startServer(tmp) {
 }
 
 const cardsText = (p, sel) => p.$$eval(`${sel} .table-card`, (els) => els.map((e) => e.textContent.replace(/\s+/g, ' ').trim()));
+const cards = (p, sel) => p.$$eval(`${sel} .table-card`, (els) => els.map((e) => ({ name: e.querySelector('h3').textContent.trim(), text: e.textContent.replace(/\s+/g, ' ').trim() })));
 const val = (p, sel) => p.$eval(sel, (e) => e.value);
 
 (async () => {
@@ -57,9 +58,10 @@ const val = (p, sel) => p.$eval(sel, (e) => e.value);
     try {
       await p.waitForFunction(() => { const t = document.querySelector('#poker-tables').textContent; return t.includes("Hold'em (with bots)") && /blinds \$5\/\$10/.test(t); }, null, { timeout: 5000 });
     } catch (_) { /* judged below */ }
-    const seededCards = await cardsText(p, '#poker-tables');
-    const plain = seededCards.some((t) => t.startsWith("Hold'em ") && !t.startsWith("Hold'em (with") && t.includes('blinds $5/$10'));
-    const bots = seededCards.some((t) => t.startsWith("Hold'em (with bots)") && t.includes('blinds $5/$10'));
+    const seededCards = await cards(p, '#poker-tables');
+    const hasCard = (name) => seededCards.some((c) => c.name === name && c.text.includes('blinds $5/$10'));
+    const plain = hasCard("Hold'em");
+    const bots = hasCard("Hold'em (with bots)");
     put('seeded poker tables listed', plain && bots, seededCards);
 
     // 2. New table appears within 1 s, no reload (AC5)
@@ -80,7 +82,7 @@ const val = (p, sel) => p.$eval(sel, (e) => e.value);
     put('new poker table appears within 1s', appeared && marker === 1 && msg === '' && reset, { appeared, marker, msg, form });
 
     // 3. Joinable
-    const mine = (await cardsText(p, '#poker-tables')).find((t) => t.startsWith('QA heads-up')) || '';
+    const mine = ((await cards(p, '#poker-tables')).find((c) => c.name === 'QA heads-up') || {}).text || '';
     const btnOk = await p.evaluate(() => {
       const c = [...document.querySelectorAll('#poker-tables .table-card')].find((e) => e.querySelector('h3').textContent === 'QA heads-up');
       const b = c && [...c.querySelectorAll('button')].find((x) => x.textContent === 'Sit down (5 free)');
