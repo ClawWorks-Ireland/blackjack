@@ -6,7 +6,7 @@
  */
 'use strict';
 const fs = require('fs'), http = require('http'), path = require('path');
-const { pagePath } = require('./lib/layout');
+const { pagePath, hasFile } = require('./lib/layout');
 const { chromium } = require('./lib/browser');
 const dir = path.resolve(process.argv[2]), out = path.resolve(process.argv[3]);
 fs.mkdirSync(out, { recursive: true });
@@ -16,6 +16,15 @@ const srv = http.createServer((q, r) => {
   if (!f.startsWith(dir)) { r.writeHead(403); r.end(); return; }
   fs.readFile(f, (e, d) => { if (e) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'content-type': T[path.extname(f)] || 'application/octet-stream' }); r.end(d); });
 });
+
+// Stand / decline insurance until the round is over (the deal button is enabled again).
+async function finishRound(page) {
+  for (let i = 0; i < 30 && !(await page.$eval('#deal', (e) => !e.disabled)); i++) {
+    if (await page.$eval('#stand', (e) => !e.disabled)) await page.click('#stand');
+    else if (await page.$eval('#no-insure', (e) => !e.disabled && !e.closest('[hidden]'))) await page.click('#no-insure');
+    await page.waitForTimeout(200);
+  }
+}
 
 srv.listen(0, '127.0.0.1', async () => {
   const url = `http://127.0.0.1:${srv.address().port}${pagePath(dir)}`;
@@ -69,6 +78,49 @@ srv.listen(0, '127.0.0.1', async () => {
     ok('F11 offline: reload loads the game and a round plays', off.title === 'Blackjack' && off.deal && playedOffline, { ...off, bankOnline, playedOffline });
     await ctx.setOffline(false);
     await ctx.close();
+
+    // ---- installed lobby offline (#40 AC9) ----
+    if (hasFile(dir, 'lobby.html')) {
+      const lctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      const lp = await lctx.newPage();
+      const lobbyErrors = [];
+      lp.on('pageerror', (e) => { r.errors.push(e.message); lobbyErrors.push(e.message); });
+      try {
+        const lobbyUrl = url.replace(/index\.html$/, 'lobby.html');
+        await lp.goto(lobbyUrl);
+        await lp.evaluate(() => navigator.serviceWorker.ready);
+        await lp.reload(); await lp.waitForTimeout(800);
+        const lctl = await lp.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller));
+        ok('F11 lobby: service worker controls the lobby', lctl);
+
+        await lctx.setOffline(true);
+        await lp.reload(); await lp.waitForTimeout(800);
+        const lo = await lp.evaluate(() => ({ title: document.title, msg: (document.getElementById('lobby-msg') || {}).textContent || '',
+          css: [...document.styleSheets].some((s) => /live\.css/.test(s.href || '') && s.cssRules.length > 0) }));
+        ok('F11 lobby offline: the shell renders with the no-connection message',
+          /live tables/i.test(lo.title) && lo.msg.includes("Can't reach the table server") && lo.css && lobbyErrors.length === 0, { ...lo, errors: lobbyErrors });
+
+        let soloPlayed = false;
+        try {
+          await lp.click('a[href="index.html"]');
+          await lp.waitForSelector('#deal', { timeout: 5000 });
+          await finishRound(lp);
+          await lp.fill('#bet', '10'); await lp.click('#deal'); await lp.waitForTimeout(1200);
+          await finishRound(lp);
+          soloPlayed = /win|lose|push|bust|blackjack|dealer|surrender/i.test(await lp.textContent('#message'));
+        } catch (e) { r.errors.push('offline lobby solo: ' + e.message.split('\n')[0]); }
+        ok('F11 lobby offline: Play solo opens the game and a round plays', soloPlayed);
+
+        await lctx.setOffline(false);
+        const apiUrls = await lp.evaluate(async () => {
+          const found = [];
+          for (const k of await caches.keys()) for (const q of await (await caches.open(k)).keys()) found.push(new URL(q.url).pathname);
+          return found.filter((p) => p.startsWith('/api/'));
+        });
+        ok('F11 never caches /api/', apiUrls.length === 0, { apiUrls });
+      } catch (e) { r.errors.push('HARNESS lobby ' + e.message.split('\n').slice(0, 3).join(' / ')); }
+      await lctx.close();
+    }
 
     // ---- landscape phone 844x390 ----
     for (const [w, h] of [[844, 390], [932, 430], [667, 375]]) {
