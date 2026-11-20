@@ -1,0 +1,24 @@
+diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js
+index 2169706..e6d8541 100644
+--- a/scripts/gates/lib.js
++++ b/scripts/gates/lib.js
+@@ -244,11 +244,16 @@ function guardVerdict({ sha, guardActive, pr, headStatuses = [], exactRevertOf =
+   }
+   if (pr) {
+     if (!pr.merged_at) return { allowed: false, why: `PR #${pr.number} is not merged` };
+-    if (!pr.merged_by || pr.merged_by.login !== MERGE_BOT) return { allowed: false, why: `PR #${pr.number} merged by ${pr.merged_by ? pr.merged_by.login : 'unknown'}, not A9 (${MERGE_BOT})` };
++    const st = trustedStatuses(headStatuses);
++    // H can always press GitHub's merge button (no branch protection on Free). If every gate on the
++    // head is green and A9 already wrote merge-evidence, H's merge is the same merge A9 would make.
++    const ownerMerge = !!pr.merged_by && pr.merged_by.login === OWNER
++      && REQUIRED_STATUSES.every((c) => st[c] && st[c].state === 'success');
++    if (!ownerMerge && (!pr.merged_by || pr.merged_by.login !== MERGE_BOT)) return { allowed: false, why: `PR #${pr.number} merged by ${pr.merged_by ? pr.merged_by.login : 'unknown'}, not A9 (${MERGE_BOT})` };
+     if (pr.merge_commit_sha !== sha) return { allowed: false, why: `PR #${pr.number} merge commit is ${pr.merge_commit_sha}, not ${sha}` };
+-    const ev = trustedStatuses(headStatuses)['merge-evidence'];
++    const ev = st['merge-evidence'];
+     if (!ev || ev.state !== 'success') return { allowed: false, why: `PR #${pr.number} head has no trusted merge-evidence` };
+-    return { allowed: true, why: `A9 merge of PR #${pr.number}` };
++    return { allowed: true, why: `${ownerMerge ? 'owner' : 'A9'} merge of PR #${pr.number}` };
+   }
+   return { allowed: false, why: 'direct push: not an A9 merge or an exact revert' };
+ }

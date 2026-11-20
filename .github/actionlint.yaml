@@ -1,10 +1,12 @@
 # actionlint config (ci.yml → actionlint job).
 self-hosted-runner:
-  # The two runners on the Windows PC (REQ-CFG-3, REQ-CFG-4).
+  # The PC's runner pool and its sandbox VMs (REQ-CFG-3, REQ-CFG-4).
   labels:
     - claude-jobs
     - claude-code
     - local-llm
+    - vm-sandbox
+    - vm-keyed
 paths:
   .github/workflows/**/*.yml:
     ignore:
