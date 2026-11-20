@@ -11,6 +11,11 @@
  * - calling-station: calls almost anything, rarely raises or folds.
  * - maniac: bets and raises nearly every chance.
  *
+ * Mild styles (MILD_STYLES, MILD_POLICIES): tight-passive-mild, loose-aggressive-mild,
+ * calling-station-mild and maniac-mild, each halfway between default and the full
+ * style. They are NOT in POLICIES: server/poker-hub.js validates live-table styles
+ * against POLICIES, so mild bots stay off live tables.
+ *
  * Style switches are rates: maniacRate (chance to bet or raise outright) and
  * stationCalls (chance to play as a calling station); 0 is never, 1 is always.
  */
@@ -135,10 +140,24 @@
 
   const POLICIES = Object.fromEntries(Object.entries(STYLES).map(([name, s]) => [name, { name, description: s.description, decide: makePolicy(s.params) }]));
 
+  /** Halfway between default and the full style, for every param key (missing = 0). */
+  const mild = (name) => {
+    const base = STYLES.default.params;
+    const full = STYLES[name].params;
+    const params = {};
+    for (const k of new Set([...Object.keys(base), ...Object.keys(full)])) {
+      const a = base[k] || 0;
+      params[k] = a + 0.5 * ((full[k] || 0) - a);
+    }
+    return [name + '-mild', { description: 'A milder ' + name + ': halfway between default and ' + name + '.', params }];
+  };
+  const MILD_STYLES = Object.fromEntries(['tight-passive', 'loose-aggressive', 'calling-station', 'maniac'].map(mild));
+  const MILD_POLICIES = Object.fromEntries(Object.entries(MILD_STYLES).map(([name, s]) => [name, { name, description: s.description, decide: makePolicy(s.params) }]));
+
   /** A seeded generator for a bot, so a benchmark replays. */
   const rngFor = (text) => BJ.seededRng(BJ.hashSeed(String(text)));
 
-  const api = { equity, situation, sized, POLICIES, STYLES, rngFor };
+  const api = { equity, situation, sized, POLICIES, STYLES, MILD_POLICIES, MILD_STYLES, rngFor };
   if (node) module.exports = api;
   else root.PokerBots = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

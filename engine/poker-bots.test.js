@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { PokerTable } = require('./poker.js');
-const { POLICIES, STYLES, rngFor } = require('./poker-bots.js');
+const { POLICIES, STYLES, MILD_POLICIES, MILD_STYLES, rngFor } = require('./poker-bots.js');
 
 const BB = 10;
 const STACK = 100 * BB;
@@ -60,3 +60,50 @@ for (const style of Object.keys(GOLDEN)) {
     assert.deepStrictEqual(play(style), GOLDEN[style]);
   });
 }
+
+const FULL = ['tight-passive', 'loose-aggressive', 'calling-station', 'maniac'];
+
+test('mild styles: every param lies exactly halfway between default and the full style', () => {
+  for (const name of FULL) {
+    const mild = MILD_STYLES[name + '-mild'];
+    assert.ok(mild, name + '-mild exists');
+    const base = STYLES.default.params;
+    const full = STYLES[name].params;
+    for (const k of new Set([...Object.keys(base), ...Object.keys(full)])) {
+      const a = base[k] || 0;
+      const b = full[k] || 0;
+      const m = mild.params[k];
+      if (a === b) assert.strictEqual(m, a, name + '-mild.' + k);
+      else assert.ok(m > Math.min(a, b) && m < Math.max(a, b), name + '-mild.' + k + ' strictly between');
+      assert.ok(Math.abs(m - (a + b) / 2) <= 1e-12, name + '-mild.' + k + ' is the midpoint');
+    }
+  }
+  assert.ok(Math.abs(MILD_STYLES['maniac-mild'].params.maniacRate - 0.375) < 1e-12);
+  assert.ok(Math.abs(MILD_STYLES['calling-station-mild'].params.stationCalls - 0.5) < 1e-12);
+  assert.ok(Math.abs(MILD_STYLES['tight-passive-mild'].params.foldToRaise - 0.3) < 1e-12);
+  assert.strictEqual(MILD_STYLES['maniac-mild'].description, 'A milder maniac: halfway between default and maniac.');
+});
+
+test('mild styles are not live-table styles', () => {
+  assert.deepStrictEqual(Object.keys(POLICIES), ['default', 'tight-passive', 'loose-aggressive', 'calling-station', 'maniac']);
+  assert.deepStrictEqual(Object.keys(MILD_POLICIES), FULL.map((n) => n + '-mild'));
+});
+
+test('mild policies decide legally', () => {
+  for (const [style, policy] of Object.entries(MILD_POLICIES)) {
+    for (let h = 0; h < 50; h++) {
+      const deal = 'mild-' + style + '-' + h;
+      const t = new PokerTable({ seed: deal, smallBlind: BB / 2, bigBlind: BB, seats: 2 });
+      const players = h % 2 ? [['Regular', POLICIES.default], ['Opponent', policy]] : [['Opponent', policy], ['Regular', POLICIES.default]];
+      players.forEach(([name], i) => t.sit({ id: name, name, kind: 'bot' }, STACK, i));
+      const rngs = players.map(([name]) => rngFor(deal + ':' + name));
+      t.startHand();
+      while (t.inPlay) {
+        const s = t.toAct;
+        const d = players[s][1].decide(t.view(s), rngs[s]);
+        assert.ok(d.action === 'allin' || t.legal(s).some((l) => l.action === d.action), style + ': ' + d.action + ' is legal');
+        t.act(s, d.action, d.amount);
+      }
+    }
+  }
+});
