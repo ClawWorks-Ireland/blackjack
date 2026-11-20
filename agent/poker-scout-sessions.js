@@ -121,10 +121,13 @@ const ci = (xs, k = 1) => {
 const readRows = (file) => fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
 /** Complete sessions of one style: {hero: Map(session -> rows sorted by handIndex)}. A triple is complete when it has as many hands as the fullest one. */
-function sessionsOf(rows, style) {
+function sessionsOf(rows, style, seed) {
   const triples = new Map();
-  for (const r of rows) {
-    if (r.style !== style) continue;
+  const mine = rows.filter((r) => r.style === style);
+  // One jsonl can hold several seeds: use the given seed, else the most recent one.
+  const use = seed !== undefined && mine.some((r) => r.seed === seed) ? seed : (mine.length ? mine[mine.length - 1].seed : undefined);
+  for (const r of mine) {
+    if (r.seed !== use) continue;
     const k = `${r.hero}|${r.session}`;
     if (!triples.has(k)) triples.set(k, new Map());
     triples.get(k).set(`${r.pair}:${r.seat}`, r);
@@ -143,7 +146,9 @@ function report(file = ROWS, dataDir = DATA, { bucket = 10, buckets = 3 } = {}) 
   const rows = readRows(file);
   const out = {};
   for (const style of [...new Set(rows.map((r) => r.style))]) {
-    const s = sessionsOf(rows, style);
+    let frozen = null;
+    try { frozen = JSON.parse(fs.readFileSync(path.join(dataDir, `poker-scout-sessions-${style}.json`), 'utf8')); } catch (_) { /* no frozen report */ }
+    const s = sessionsOf(rows, style, frozen && frozen.seed);
     const o = { heroes: {}, diff: null, buckets: [], read: null };
     for (const hero of ['cold', 'scouted']) {
       const all = [...s[hero].values()].flat().map((r) => r.bb);
@@ -160,7 +165,7 @@ function report(file = ROWS, dataDir = DATA, { bucket = 10, buckets = 3 } = {}) 
     o.diff = ci(delta(0, Infinity));
     for (let i = 0; i < buckets; i++) o.buckets.push({ label: `hands ${i * bucket + 1}-${(i + 1) * bucket}`, ...ci(delta(i * bucket, (i + 1) * bucket)) });
     try {
-      const read = JSON.parse(fs.readFileSync(path.join(dataDir, `poker-scout-sessions-${style}.json`), 'utf8')).read;
+      const read = frozen.read;
       o.read = { style: read.style, confidence: read.confidence, vpip: read.stats.vpip, pfr: read.stats.pfr, aggression: read.stats.aggression, foldToBet: read.stats.foldToBet };
     } catch (_) { /* no frozen report */ }
     out[style] = o;
@@ -171,8 +176,10 @@ function report(file = ROWS, dataDir = DATA, { bucket = 10, buckets = 3 } = {}) 
 const KINDS = ['bluff', 'thin', 'value', 'call', 'fold'];
 
 /** Per hero: bb by main-move kind (overall and for the first `early` hands), the call-down rate, and the showdown win rate of river calls. */
-function diagnose(file = ROWS, style, { early = 10 } = {}) {
-  const s = sessionsOf(readRows(file), style);
+function diagnose(file = ROWS, style, { early = 10, dataDir = DATA } = {}) {
+  let seed;
+  try { seed = JSON.parse(fs.readFileSync(path.join(dataDir, `poker-scout-sessions-${style}.json`), 'utf8')).seed; } catch (_) { /* no frozen report */ }
+  const s = sessionsOf(readRows(file), style, seed);
   const out = {};
   for (const hero of ['cold', 'scouted']) {
     const rows = [...s[hero].values()].flat();
@@ -222,6 +229,8 @@ if (require.main === module) {
   const [cmd, ...a] = process.argv.slice(2);
   const flag = (n, d) => { const i = a.indexOf(n); return i === -1 ? d : a[i + 1]; };
   if (cmd === 'report') {
+    if (!fs.existsSync(ROWS)) { console.error('no rows yet: run the "run" command first'); process.exit(1); }
+    if (a.includes('--diagnose') && !flag('--diagnose')) { console.error('usage: report --diagnose STYLE'); process.exit(1); }
     if (flag('--diagnose')) printDiagnose(flag('--diagnose'), diagnose(ROWS, flag('--diagnose')));
     else printReport(report());
     process.exit(0);

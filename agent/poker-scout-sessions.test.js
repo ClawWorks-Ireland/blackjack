@@ -145,3 +145,12 @@ test('diagnose: per-kind counts and bb, call-down and showdown rates', () => {
   assert.deepEqual([d.cold.callDown, d.cold.showdownWin], [0.5, 2 / 3]);
   assert.deepEqual([d.scouted.callDown, d.scouted.showdownWin], [1, 4 / 6]);
 });
+
+test('report and diagnose use one seed: rows of another seed do not mix in', () => {
+  const other = [0, 1].map((i) => JSON.stringify({ seed: 'other', style: 'maniac', hero: 'cold', session: 0, pair: 0, seat: i, handIndex: i, bb: -5, mainMove: 'call', showdown: false, facedRiverBet: false, riverCall: false }));
+  const file = path.join(tmp(), 'rows.jsonl');
+  fs.writeFileSync(file, fs.readFileSync(FIX, 'utf8') + other.join('\n') + '\n');
+  // The frozen report fixture is seed "sessions", so that seed is the one reported.
+  assert.deepEqual(report(file, FIXDIR), report(FIX, FIXDIR));
+  assert.deepEqual(diagnose(file, 'maniac', { dataDir: FIXDIR }), diagnose(FIX, 'maniac', { dataDir: FIXDIR }));
+});
