@@ -22,7 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const { PokerTable } = require('../engine/poker.js');
-const { POLICIES, rngFor } = require('../engine/poker-bots.js');
+const { POLICIES, MILD_POLICIES, rngFor } = require('../engine/poker-bots.js');
 const { fromTable } = require('./poker-history.js');
 const { match, BB, STACK } = require('./poker-bench.js');
 const { makeBrain } = require('./poker-player.js');
@@ -35,10 +35,11 @@ const log = (m) => console.log(`${new Date().toISOString()} ${m}`);
 
 /** The opponent plays a regular for `hands` hands; the store learns them from the rail. */
 function scout(style, hands, seed, store) {
+  const policy = POLICIES[style] || MILD_POLICIES[style];
   for (let h = 0; h < hands; h++) {
     const deal = `${seed}-watch-${style}-${h}`;
     const t = new PokerTable({ seed: deal, smallBlind: BB / 2, bigBlind: BB, seats: 2 });
-    const players = h % 2 ? [['Regular', POLICIES.default], ['Opponent', POLICIES[style]]] : [['Opponent', POLICIES[style]], ['Regular', POLICIES.default]];
+    const players = h % 2 ? [['Regular', POLICIES.default], ['Opponent', policy]] : [['Opponent', policy],['Regular', POLICIES.default]];
     players.forEach(([name], i) => t.sit({ id: name, name, kind: 'bot' }, STACK, i));
     const rngs = players.map(([name]) => rngFor(`${deal}:${name}`));
     t.startHand();
