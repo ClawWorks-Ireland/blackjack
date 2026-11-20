@@ -71,3 +71,22 @@ test('AC7: the cache name changed', () => {
   assert.ok(m, 'sw.js must define CACHE as blackjack-v<N>');
   assert.ok(Number(m[1]) > 9, `cache version must be above v9, got v${m[1]}`);
 });
+
+test('AC6: the solo page links back to the lobby', () => {
+  const html = read('index.html');
+  const a = [...html.matchAll(/<a\b([^>]*)>([^<]*)<\/a>/g)].find((m) => /href="lobby\.html"/.test(m[1]));
+  assert.ok(a, 'index.html has a link to lobby.html');
+  assert.doesNotMatch(a[1], /\btarget=/);
+  assert.ok(a[2].trim().length > 0, 'link has text');
+});
+
+test('AC6: no page opens in-app pages in a new window', () => {
+  for (const p of PAGES) {
+    const html = read(p);
+    const sources = [[p, html], ...localScripts(html).map((s) => [s, read(s)])];
+    for (const [name, src] of sources) {
+      assert.doesNotMatch(src, /target\s*=\s*["']_blank["']/, `${name} target=_blank`);
+      assert.doesNotMatch(src, /window\.open\(/, `${name} window.open`);
+    }
+  }
+});
