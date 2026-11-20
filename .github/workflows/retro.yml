@@ -15,6 +15,8 @@ permissions:
   actions: read
 jobs:
   route:
+    # Only the `incident` label can route here, so other label events need no key-VM runner (blackjack#108).
+    if: github.event_name != 'issues' || github.event.label.name == 'incident'
     runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     outputs:

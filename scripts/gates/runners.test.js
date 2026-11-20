@@ -51,3 +51,21 @@ test('vm-keyed jobs never check out the PR head', () => {
 test('no job runs on a GitHub-hosted runner', () => {
   for (const j of jobs()) assert.ok(!/ubuntu-|windows-|macos-/.test(j.runsOn), `${j.id}: ${j.runsOn.trim()}`);
 });
+
+// blackjack#108: GitHub keeps one pending run per concurrency group, so a label-triggered workflow must
+// not put routing and non-routing label events for one issue in a shared group, and a label event that
+// routes nowhere must not take a vm-keyed runner (every issue label used to queue one per workflow).
+test('label-triggered key-VM route jobs skip labels that route nowhere; spec-plan groups by role (blackjack#108)', () => {
+  const sp = fs.readFileSync(path.join(DIR, 'spec-plan.yml'), 'utf8');
+  const group = /^  group: (.*)$/m.exec(sp)[1];
+  for (const label of ['needs-spec', 'needs-replan', 'spec-approved']) assert.match(group, new RegExp(`'${label}'`));
+  assert.match(group, /inputs\.role/);
+  assert.match(group, /github\.run_id/, 'a label that routes nowhere gets a group of its own');
+  for (const f of fs.readdirSync(DIR).filter((x) => x.endsWith('.yml'))) {
+    const src = fs.readFileSync(path.join(DIR, f), 'utf8');
+    if (!/^  issues:\n    types: \[[^\]]*\blabeled\b/m.test(src)) continue;
+    const route = /^  route:\n((?: {4}.*\n)+)/m.exec(src);
+    if (!route || !/runs-on: \[self-hosted, vm-keyed\]/.test(route[1])) continue;
+    assert.match(route[1], /^    if: /m, `${f}: route job needs an if: on the label`);
+  }
+});
