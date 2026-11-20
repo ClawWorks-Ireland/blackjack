@@ -1,10 +1,11 @@
 # Review retry (team v2.1): a review or security run that fails before giving a verdict (its status
 # is still pending) is an infrastructure failure. Retry its failed jobs once; if it fails again, set
-# the status to error so the digest shows it. No model; reads gate.js from main.
+# the status to error so the digest shows it. CI too (team v2.8): a ci run whose jobs never started is
+# re-run once. No model; reads gate.js from main.
 name: review-retry
 on:
   workflow_run:
-    workflows: [review, security]
+    workflows: [review, security, ci]
     types: [completed]
 permissions:
   contents: read
@@ -24,5 +25,8 @@ jobs:
           RUN: ${{ github.event.workflow_run.id }}
           WF: ${{ github.event.workflow_run.name }}
         run: |
-          case "$WF" in review) C=ai-review ;; security) C=security ;; *) echo "not a review workflow: $WF"; exit 0 ;; esac
+          case "$WF" in
+            ci) node scripts/gates/gate.js ci-retry --run "$RUN"; exit 0 ;;
+            review) C=ai-review ;; security) C=security ;; *) echo "not a retried workflow: $WF"; exit 0 ;;
+          esac
           node scripts/gates/gate.js review-retry --run "$RUN" --context "$C"

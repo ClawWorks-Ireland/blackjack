@@ -108,9 +108,18 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write
+      - id: tpl   # issues only, in the template: team-file proposals (REQ-OPS-10 exception; A7 sec-1 on #84)
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned
+        with:
+          app-id: ${{ secrets.A10_APP_ID }}
+          private-key: ${{ secrets.A10_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agent-team-template
+          permission-issues: write
       - name: Publish A10's output (no model in this step)
         env:
           GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          TEMPLATE_ISSUES_TOKEN: ${{ steps.tpl.outputs.token }}
           IN_INCIDENT: ${{ inputs.incident || github.event.issue.number }}
         run: |
           [[ -z "$IN_INCIDENT" || "$IN_INCIDENT" =~ ^[0-9]+$ ]] || { echo "bad incident"; exit 1; }

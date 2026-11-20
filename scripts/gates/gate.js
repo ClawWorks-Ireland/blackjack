@@ -16,6 +16,8 @@
  *   gate.js guard-revert --sha S              revert S on main with a Main-guard-revert trailer (App token step)
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
+ *   gate.js qa-report --sha S --result pass|fail|error --dir D   QA status and PR comment (qa.yml)
+ *   gate.js ci-retry --run R                     re-run a CI run whose jobs never started, once
  *   gate.js pure-update --pr N --sha S               pure=true if the head only merged the base branch in
  *   gate.js review-retry --run ID --context C [--dry]   retry a review that failed on infrastructure, once
  *   gate.js spec-check --issue N   may the orchestrator approve this spec (declared TIER 0/1, no needs-human)
@@ -34,6 +36,7 @@ const { execFileSync } = require('child_process');
 const G = require('./lib.js');
 
 const REPO = process.env.GITHUB_REPOSITORY || 'ClawWorks-Ireland/blackjack';
+const TEMPLATE = 'ClawWorks-Ireland/agent-team-template';   // the agent-team template this project is rendered from (team fixes go there first)
 const TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 // Reads (statuses, checks, reviews) may use a separate read-only token: the Claude App
 // token can't read commit statuses (403), so A9's re-verification reads with the job's
@@ -70,6 +73,12 @@ async function all(url) {
   return out;
 }
 const repo = (p) => `/repos/${REPO}${p}`;
+// Calls the API with another token (A10's issues-only token for the template). Same error handling as gh().
+async function ghWith(token, method, url, body) {
+  const r = await fetch(`https://api.github.com${url}`, { method, headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'agent-team-gates' }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error(`${method} ${url}: ${r.status} ${(await r.text()).slice(0, 300)}`);
+  return r.status === 204 ? {} : r.json();
+}
 const args = (() => {
   const a = process.argv.slice(3); const o = {};
   for (let i = 0; i < a.length; i++) if (a[i].startsWith('--')) o[a[i].slice(2)] = a[i + 1] && !a[i + 1].startsWith('--') ? a[++i] : true;
@@ -104,7 +113,7 @@ async function setStatus(sha, context, state, description, url = RUN_URL) {
   return gh('POST', repo(`/statuses/${sha}`), { state, context, description: description.slice(0, 140), target_url: url });
 }
 
-async function verdictFor(n, lvl, behindCheck = true) {
+async function verdictFor(n, lvl, behindCheck = true, refresh = false) {
   const f = await prFacts(n);
   const head = f.pr.head.sha;
   const statuses = await all(repo(`/commits/${head}/statuses`));
@@ -116,6 +125,12 @@ async function verdictFor(n, lvl, behindCheck = true) {
   }
   const v = G.mergeVerdict({ pr: f.pr, statuses, checkRuns, reviews: f.reviews, tier: f.tier, level: lvl,
     coolingHours: overlayNumber('tier2_cooling_hours', 24), behindBy });
+  // Keep the visible tier-approval status in step with the live one (it goes stale when the level changes).
+  if (refresh) {
+    const live = G.tierApprovalStatus({ tier: f.tier, level: lvl, reviews: f.reviews, headSha: head });
+    const stored = G.trustedStatuses(statuses)['tier-approval'];
+    if (!stored || stored.state !== live.state) await setStatus(head, 'tier-approval', live.state, live.description);
+  }
   return { ...v, number: n, sha: head, tier: f.tier, created: f.pr.created_at };
 }
 
@@ -147,7 +162,7 @@ const commands = {
     const lvl = await level();
     const prs = (await all(repo('/pulls?state=open&base=main'))).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     const results = [];
-    for (const p of prs) results.push(await verdictFor(p.number, lvl));
+    for (const p of prs) results.push(await verdictFor(p.number, lvl, true, true));
     const next = results.find((r) => r.ok) || results.find((r) => r.behind);
     console.log(JSON.stringify({ level: lvl, action: next ? (next.ok ? 'merge' : 'update') : 'none',
       pr: next ? next.number : null, sha: next ? next.sha : null, results }, null, 2));
@@ -325,6 +340,36 @@ commands['pure-update'] = async () => {
   if (r.why) console.error(`pure-update: ${r.why}`);
 };
 
+// Browser QA round result (qa.yml, team v2.8): a `qa` status on the commit and a comment on the PR merged
+// there. The output is the project's QA command's own summary; it is printed, never executed.
+commands['qa-report'] = async () => {
+  if (!/^(pass|fail|error)$/.test(args.result || '')) throw new Error('qa-report needs --result pass|fail|error');
+  const c = await gh('GET', repo(`/commits/${args.sha}`));
+  const sha = c.sha;
+  const dir = args.dir || 'qa-out';
+  const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } };
+  const out = read('qa-output.txt').split('\n').filter((l) => l.trim()).slice(-40).join('\n');
+  const state = args.result === 'pass' ? 'success' : args.result === 'fail' ? 'failure' : 'error';
+  const words = { pass: 'QA round passed', fail: 'QA round found failures', error: 'QA round could not run' }[args.result];
+  await setStatus(sha, 'qa', state, `${words} on ${sha.slice(0, 7)}`);
+  const pr = ((await gh('GET', repo(`/commits/${sha}/pulls`))) || []).find((p) => p.merge_commit_sha === sha);
+  const body = `ROLE: QA (qa.yml)   ITEM: ${pr ? `#${pr.number}` : sha.slice(0, 7)}   RESULT: ${args.result}\n` +
+    `WHAT CHANGED: nothing; a QA round ran on the merged commit ${sha.slice(0, 7)} with headless Chrome on a sandbox VM.\n` +
+    `EVIDENCE: ${RUN_URL || 'the qa run'} (artifact \`qa-${args.sha}\` has the full report)\n\n\`\`\`\n${out.slice(0, 6000) || '(no output)'}\n\`\`\`\n` +
+    `NEXT: ${args.result === 'pass' ? 'acceptance checks that this round covers are verified (G12).' : 'the orchestrator files the failures as issues (REQ-FLOW-5).'}`;
+  if (pr) await gh('POST', repo(`/issues/${pr.number}/comments`), { body });
+  console.log(`qa-report: ${args.result} on ${sha.slice(0, 7)}${pr ? ` (PR #${pr.number})` : ''}`);
+};
+
+// CI that failed on infrastructure (jobs that never started): re-run its failed jobs once (lib.js ciRetryAction).
+commands['ci-retry'] = async () => {
+  const run = await gh('GET', repo(`/actions/runs/${args.run}`));
+  const jobs = (await gh('GET', repo(`/actions/runs/${args.run}/attempts/${run.run_attempt}/jobs`))).jobs || [];
+  const action = G.ciRetryAction({ conclusion: run.conclusion, attempt: run.run_attempt }, jobs);
+  console.log(`ci-retry: run ${args.run} (attempt ${run.run_attempt}, ${run.conclusion}): ${action}`);
+  if (!args.dry && action === 'rerun') await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {});
+};
+
 // A review or security run that failed before giving a verdict (team v2.1): retry it once, then
 // make it a visible error. Decided by lib.js reviewRetryAction (only github-actions statuses count).
 commands['review-retry'] = async () => {
@@ -491,23 +536,52 @@ commands['a10-publish'] = async () => {
     const r = await gh('POST', repo('/issues'), { title: String(it.title).slice(0, 200), body: String(it.body || '').slice(0, 30000), labels });
     done.push(`issue #${r.number}`);
   }
-  // 3. the proposal: one branch, one PR, never main, never .github/
+  // 3. the proposal. Team files go to the template as their own PR (fixes are template-first, REQ-OPS-11;
+  //    team v2.7); project files go to this repo as one PR. Never main, never a workflow file.
   const mbox = path.join(dir, 'proposal.mbox');
   if (fs.existsSync(mbox) && fs.statSync(mbox).size > 0) {
     let pr = {}; try { pr = JSON.parse(read('pr.json') || '{}'); } catch { pr = {}; }
     const branch = `agent/retro-${new Date().toISOString().slice(0, 10)}-${process.env.GITHUB_RUN_ID || 'local'}`;
+    const title = String(pr.title || `A10 proposal (${branch})`).slice(0, 200);
+    const body = String(pr.body || '').slice(0, 55000);
     git('config', 'user.name', 'clawworks-incident-reviewer[bot]');
     git('config', 'user.email', 'clawworks-incident-reviewer[bot]@users.noreply.github.com');
-    gitNet('fetch', 'origin', 'main'); git('checkout', '-B', branch, 'origin/main');
+    gitNet('fetch', 'origin', 'main'); git('checkout', '-B', 'a10-proposal', 'origin/main');
+    // The routing manifest and version come from the base, never from A10's own commits (A7 sec-2 on blackjack#84).
+    const teamFiles = new Set(git('show', 'origin/main:.agents/TEAM_FILES').split('\n').map((x) => x.trim()).filter(Boolean));
+    const teamVersion = git('show', 'origin/main:.agents/TEAM_VERSION').trim();
     git('am', '--3way', mbox);
-    const files = G.changedPaths(git, 'origin/main');
-    if (files.some((f) => f.startsWith('.github/'))) {
-      if (target) await gh('POST', repo(`/issues/${target}/comments`), { body: 'A10 proposal not opened: it changes `.github/`, which no agent may push (REQ-GATE-4). Put workflow changes in the PR body as a patch for @delmarolivier to apply.' });
+    const proposed = git('rev-parse', 'HEAD');
+    const split = G.splitProposal(G.changedPaths(git, 'origin/main'), teamFiles);
+    const diffOf = (files) => execFileSync('git', ['diff', '--binary', 'origin/main', proposed, '--', ...files], { encoding: 'utf8', maxBuffer: 1 << 26 });
+    const note = (m) => (target ? gh('POST', repo(`/issues/${target}/comments`), { body: m }) : Promise.resolve());
+    if (split.generated.length) await note(`A10 proposal: ignored changes to ${split.generated.map((f) => `\`${f}\``).join(', ')} (generated by the renderer).`);
+    // 3a. project files: one branch and PR in this repo.
+    const projectFiles = split.project;
+    if (projectFiles.some((f) => f.startsWith('.github/'))) {
+      await note('A10 proposal not opened: it changes `.github/`, which no agent may push (REQ-GATE-4). Put workflow changes in the PR body as a patch for @delmarolivier to apply.');
       throw new Error('proposal touches .github/: refused');
     }
-    gitNet('push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${branch}`);
-    const opened = await gh('POST', repo('/pulls'), { title: String(pr.title || `A10 proposal (${branch})`).slice(0, 200), head: branch, base: 'main', body: String(pr.body || '').slice(0, 60000) });
-    done.push(`PR #${opened.number} from ${branch} (${files.length} files)`);
+    if (projectFiles.length) {
+      git('checkout', '-B', branch, 'origin/main');
+      execFileSync('git', ['apply', '--index'], { input: diffOf(projectFiles) });
+      git('commit', '-m', title);
+      gitNet('push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${branch}`);
+      const opened = await gh('POST', repo('/pulls'), { title, head: branch, base: 'main', body });
+      done.push(`PR #${opened.number} from ${branch} (${projectFiles.length} files)`);
+    }
+    // 3b. team files: a `team-proposal` issue in the template carrying the patch (paths mapped to team/...).
+    //     A10 can only open issues there (REQ-OPS-10 exception, A7 sec-1 on blackjack#84); the health watcher,
+    //     running as the console, turns an issue whose patch applies into a template PR for H.
+    if (split.team.length) {
+      const tplToken = process.env.TEMPLATE_ISSUES_TOKEN;
+      if (!tplToken) throw new Error('no TEMPLATE_ISSUES_TOKEN: team-file proposal not sent to the template');
+      const patch = G.retargetPatch(diffOf(split.team), G.templatePathFor);
+      const from = `From ${REPO}${target ? `#${target}` : ''} (A10, run ${process.env.GITHUB_RUN_ID || 'local'}). Team v${teamVersion}.`;
+      const issueBody = `${from}\n\n${body}\n\n<!-- a10-patch -->\n\`\`\`diff\n${patch.slice(0, 50000)}\n\`\`\`\n`;
+      const r = await ghWith(tplToken, 'POST', `/repos/${TEMPLATE}/issues`, { title: `A10 team proposal: ${title}`.slice(0, 200), labels: ['team-proposal'], body: issueBody.slice(0, 64000) });
+      done.push(`template issue ${TEMPLATE}#${r.number} (${split.team.length} team files)`);
+    }
   }
   console.log(done.length ? `published: ${done.join('; ')}` : 'nothing to publish');
 };
