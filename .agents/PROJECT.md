@@ -33,6 +33,7 @@ manual_checks:   # not gates; A9 notes them on merged PRs whose paths match ("<p
 no_lint_or_types: true   # G4 'lint, types pass' is vacuous here until one is added
 owner_login: delmarolivier   # the sole human approver (H)
 test_command: npm test
+qa_command: npm run qa:ci   # browser QA round after each merge (qa.yml, team v2.8): sandbox VM, headless Chrome
 test_tools:   # commands implementers and verifiers may run to test
   - npm test
   - node --test

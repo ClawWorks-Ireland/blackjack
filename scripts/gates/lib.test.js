@@ -107,6 +107,28 @@ test('merge verdict: all gates green + H approval on head → merge', () => {
   assert.equal(v.ok, true);
 });
 
+test('merge verdict: a stale stored tier-approval does not block when the live level needs no approval (blackjack#74)', () => {
+  const p = readyPr({ tier: 1, level: 4 });
+  p.reviews = [];
+  p.statuses = p.statuses.map((x) => (x.context === 'tier-approval' ? status('tier-approval', 'pending') : x));
+  const v = G.mergeVerdict(p);
+  assert.deepEqual(v.reasons, []);
+  assert.equal(v.ok, true);
+  const q = readyPr({ tier: 1, level: 0 });   // and the other way round: a stale green never replaces a live approval
+  q.reviews = [];
+  assert.equal(G.mergeVerdict(q).ok, false);
+});
+
+test('CI retry: only jobs that never started are re-run, once (team v2.8)', () => {
+  const never = { conclusion: 'failure', steps: [] };
+  const ran = { conclusion: 'failure', steps: [{ name: 'npm test' }] };
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [never]), 'rerun');
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 2 }, [never]), 'none', 'once only');
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [ran]), 'none', 'a real test failure is not retried');
+  assert.equal(G.ciRetryAction({ conclusion: 'success', attempt: 1 }, [never]), 'none');
+  assert.equal(G.ciRetryAction(null, [never]), 'none');
+});
+
 test('T16 missing approval: all checks green but no H approval (or only a bot approval) → refused', () => {
   const p = readyPr();
   p.reviews = [review(BOT, 'APPROVED', p.pr.head.sha, '2026-11-14T10:00:00Z')];
@@ -370,6 +392,23 @@ test('review rounds: only a previous head with a review verdict counts (A7 sec-2
   assert.equal(G.roundKeepsPure(u, []).pure, false, 'dropping the review check would make this true');
   assert.equal(G.roundKeepsPure({ pure: false, why: 'not a merge commit' }, st('success', 'Round 1: x')).pure, false);
   assert.equal(G.roundKeepsPure(null, []).pure, false);
+});
+
+test('A10 proposals: team files go to the template, project files stay (team v2.7)', () => {
+  const team = new Set(['.agents/SPEC.md', 'scripts/gates/lib.js', '.github/workflows/review.yml', '.agents/TEAM_FILES']);
+  assert.deepEqual(G.splitProposal(['scripts/gates/lib.js', 'evals/review/18/case.md', '.agents/TEAM_FILES', '.agents/SPEC.md'], team),
+    { team: ['scripts/gates/lib.js', '.agents/SPEC.md'], project: ['evals/review/18/case.md'], generated: ['.agents/TEAM_FILES'] });
+  assert.equal(G.templatePathFor('.agents/SPEC.md'), '.agents/SPEC.md');
+  assert.equal(G.templatePathFor('scripts/gates/lib.js'), 'team/scripts/gates/lib.js');
+  const patch = ['diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js', 'index 1..2 100644', '--- a/scripts/gates/lib.js', '+++ b/scripts/gates/lib.js',
+    '@@ -1 +1 @@', '-const a = 1;', '+const a = 2;', 'diff --git a/x.js b/y.js', 'rename from x.js', 'rename to y.js', '--- /dev/null'].join('\n');
+  const out = G.retargetPatch(patch, G.templatePathFor).split('\n');
+  assert.equal(out[0], 'diff --git a/team/scripts/gates/lib.js b/team/scripts/gates/lib.js');
+  assert.equal(out[2], '--- a/team/scripts/gates/lib.js');
+  assert.equal(out[3], '+++ b/team/scripts/gates/lib.js');
+  assert.equal(out[5], '-const a = 1;', 'content lines are untouched');
+  assert.equal(out[8], 'rename from team/x.js');
+  assert.equal(out[10], '--- /dev/null');
 });
 
 test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {

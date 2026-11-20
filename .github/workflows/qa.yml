@@ -1,0 +1,77 @@
+# Browser QA round (team v2.8, REQ-GATE-7): after every merge to main, run the project's QA command (the
+# overlay's qa_command; skipped if it has none) against that commit on a sandbox VM with headless Chrome, and
+# record the result as a `qa` status on the commit and a comment on the merged PR. A feature is Done only
+# after its acceptance criteria are verified (G12); for UI work this round is that record. No model.
+name: qa
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha: { description: 'Commit to test (default: main)', required: false, default: '' }
+permissions:
+  contents: read
+concurrency:
+  group: qa-${{ inputs.sha || github.sha }}
+  cancel-in-progress: false
+env:
+  QA_COMMAND: "npm run qa:ci"
+jobs:
+  qa:
+    runs-on: [self-hosted, vm-sandbox]   # runs repo code: read-only token, not persisted (REQ-CFG-3)
+    timeout-minutes: 60
+    outputs:
+      sha: ${{ steps.s.outputs.sha }}
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - id: s
+        env: { IN_SHA: "${{ inputs.sha }}", PUSH_SHA: "${{ github.sha }}" }
+        run: |
+          S="${IN_SHA:-$PUSH_SHA}"
+          [[ "$S" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::bad sha: $S"; exit 1; }
+          echo "sha=$S" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: env.QA_COMMAND != ''
+        with: { ref: "${{ steps.s.outputs.sha }}", persist-credentials: false }
+      - uses: actions/setup-node@v4
+        if: env.QA_COMMAND != ''
+        with: { node-version: 22 }
+      - id: r
+        name: QA round
+        run: |
+          if [ -z "$QA_COMMAND" ]; then echo "result=skipped" >> "$GITHUB_OUTPUT"; echo "no qa_command in the overlay"; exit 0; fi
+          set +e
+          bash -c "$QA_COMMAND" 2>&1 | tee qa-output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          case "$rc" in 0) R=pass ;; 1) R=fail ;; *) R=error ;; esac
+          echo "result=$R" >> "$GITHUB_OUTPUT"
+          echo "exit=$rc" > qa-exit.txt
+      - uses: actions/upload-artifact@v4
+        if: always() && env.QA_COMMAND != ''
+        with:
+          name: qa-${{ steps.s.outputs.sha }}
+          path: |
+            qa-output.txt
+            qa-exit.txt
+            qa/reports/
+          retention-days: 90
+          if-no-files-found: ignore
+
+  report:
+    needs: qa
+    if: always() && needs.qa.outputs.result != 'skipped' && needs.qa.outputs.sha != ''
+    runs-on: [self-hosted, vm-keyed]   # holds a write token and runs no repo code beyond the gate scripts on main
+    timeout-minutes: 5
+    permissions: { contents: read, statuses: write, pull-requests: write, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { name: "qa-${{ needs.qa.outputs.sha }}", path: qa-out }
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.qa.outputs.sha }}
+          RESULT: ${{ needs.qa.outputs.result || 'error' }}
+        run: node scripts/gates/gate.js qa-report --sha "$SHA" --result "$RESULT" --dir qa-out

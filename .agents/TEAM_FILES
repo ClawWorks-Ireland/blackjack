@@ -31,6 +31,7 @@
 .github/workflows/merge.yml
 .github/workflows/orchestrator.yml
 .github/workflows/pool-canary.yml
+.github/workflows/qa.yml
 .github/workflows/release.yml
 .github/workflows/retro.yml
 .github/workflows/review-retry.yml
