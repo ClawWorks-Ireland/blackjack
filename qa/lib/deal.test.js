@@ -58,3 +58,20 @@ test('dealRound: stops after the first started round (never deals twice)', async
   await dealRound(null, f.ops);
   assert.equal(f.clicks, 1);
 });
+
+const { crossCheck } = require('./deal');
+const base = { round: 3, before: { bank0: 100, net0: 0, rounds0: 4, rec0: 4 }, after: { bank1: 110, net1: 10, rounds1: 5, rec1: 5, handsN: 1 }, msg: 'You win', reportOpened: false };
+
+test('crossCheck: dealt round with matching stats -> no findings', () => {
+  assert.deepEqual(crossCheck(base), []);
+});
+test("crossCheck: rounds unchanged -> 'stats Rounds did not increment by 1' with round/bank0/bank1/msg/reportOpened", () => {
+  const r = crossCheck({ ...base, after: { ...base.after, rounds1: 4 }, reportOpened: true });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].issue, 'stats Rounds did not increment by 1');
+  assert.deepEqual(r[0].detail, { round: 3, rounds0: 4, rounds1: 4, bank0: 100, bank1: 110, msg: 'You win', reportOpened: true });
+});
+test('crossCheck: W-L-P short by one hand -> W-L-P finding', () => {
+  const r = crossCheck({ ...base, after: { ...base.after, rec1: 4 } });
+  assert.deepEqual(r.map((f) => f.issue), ['W-L-P did not grow by number of hands']);
+});
