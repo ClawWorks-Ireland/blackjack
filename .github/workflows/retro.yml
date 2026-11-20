@@ -104,7 +104,7 @@ jobs:
           app-id: ${{ secrets.A10_APP_ID }}
           private-key: ${{ secrets.A10_APP_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
+          repositories: ${{ github.event.repository.name }},agent-team-template   # team-file fixes go to the template (team v2.7)
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write

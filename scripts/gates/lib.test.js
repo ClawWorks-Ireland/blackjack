@@ -372,6 +372,23 @@ test('review rounds: only a previous head with a review verdict counts (A7 sec-2
   assert.equal(G.roundKeepsPure(null, []).pure, false);
 });
 
+test('A10 proposals: team files go to the template, project files stay (team v2.7)', () => {
+  const team = new Set(['.agents/SPEC.md', 'scripts/gates/lib.js', '.github/workflows/review.yml', '.agents/TEAM_FILES']);
+  assert.deepEqual(G.splitProposal(['scripts/gates/lib.js', 'evals/review/18/case.md', '.agents/TEAM_FILES', '.agents/SPEC.md'], team),
+    { team: ['scripts/gates/lib.js', '.agents/SPEC.md'], project: ['evals/review/18/case.md'], generated: ['.agents/TEAM_FILES'] });
+  assert.equal(G.templatePathFor('.agents/SPEC.md'), '.agents/SPEC.md');
+  assert.equal(G.templatePathFor('scripts/gates/lib.js'), 'team/scripts/gates/lib.js');
+  const patch = ['diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js', 'index 1..2 100644', '--- a/scripts/gates/lib.js', '+++ b/scripts/gates/lib.js',
+    '@@ -1 +1 @@', '-const a = 1;', '+const a = 2;', 'diff --git a/x.js b/y.js', 'rename from x.js', 'rename to y.js', '--- /dev/null'].join('\n');
+  const out = G.retargetPatch(patch, G.templatePathFor).split('\n');
+  assert.equal(out[0], 'diff --git a/team/scripts/gates/lib.js b/team/scripts/gates/lib.js');
+  assert.equal(out[2], '--- a/team/scripts/gates/lib.js');
+  assert.equal(out[3], '+++ b/team/scripts/gates/lib.js');
+  assert.equal(out[5], '-const a = 1;', 'content lines are untouched');
+  assert.equal(out[8], 'rename from team/x.js');
+  assert.equal(out[10], '--- /dev/null');
+});
+
 test('review retry: infra failures retry once, then become a visible error; verdicts are never retried (team v2.1)', () => {
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 1 }, 'pending'), 'rerun');
   assert.equal(G.reviewRetryAction({ conclusion: 'failure', attempt: 2 }, 'pending'), 'mark-error');
