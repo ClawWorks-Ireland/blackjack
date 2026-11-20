@@ -13,6 +13,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { pagePath } = require('./lib/layout');
+const { dealRound } = require('./lib/deal');
 
 const { chromium } = require('./lib/browser');
 
@@ -52,8 +53,10 @@ const seen = new Set();
  * Click Deal. The F18 shoe report opens on a timer after the cut-card round,
  * so it can appear between our last look and the click (T5): close it and
  * retry rather than wait out Playwright's 30 s timeout.
+ * Unchecked: it does not verify a round started. The random-play loop uses
+ * dealRound (qa/lib/deal.js); this is for the bet-probe and go-broke sections.
  */
-async function clickDeal(page, sel) {
+async function clickDealUnchecked(page, sel) {
   for (let attempt = 0; ; attempt++) {
     await page.evaluate(() => { const d = document.getElementById('report'); if (d && d.open) d.close(); });
     try {
@@ -110,6 +113,19 @@ async function main() {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();
   hook(page);
+  // Count every time the shoe report dialog opens (for the Deal guard and finding details).
+  await page.addInitScript(() => {
+    window.__reportOpens = 0;
+    const proto = window.HTMLDialogElement && window.HTMLDialogElement.prototype;
+    if (proto && proto.showModal) {
+      const orig = proto.showModal;
+      proto.showModal = function (...a) { if (this.id === 'report') window.__reportOpens++; return orig.apply(this, a); };
+    }
+    if (proto && proto.show) {
+      const orig = proto.show;
+      proto.show = function (...a) { if (this.id === 'report') window.__reportOpens++; return orig.apply(this, a); };
+    }
+  });
   await page.goto(url);
   await page.waitForSelector(SEL.deal);
   await shot(page, '01-initial');
@@ -138,7 +154,23 @@ async function main() {
     const rec0 = await record();
     const bet = Math.min(bets[i % bets.length], Math.floor(bank0));
     await page.fill(SEL.bet, String(bet));
-    await clickDeal(page, SEL.deal);
+    const opens0 = await page.evaluate(() => window.__reportOpens || 0);
+    const dealt = await dealRound(page, {
+      probe: async () => ({
+        inHand: await page.evaluate(() => document.body.classList.contains('in-hand')),
+        hitEnabled: await enabled(SEL.hit),
+        noInsureEnabled: await enabled(SEL.noInsure),
+        rounds: Number(await text(SEL.statRounds)),
+      }),
+      closeReport: () => page.evaluate(() => { const d = document.getElementById('report'); if (d && d.open) d.close(); }),
+      clickDeal: () => page.click(SEL.deal, { timeout: 2000 }).catch(() => {}),
+      reportOpen: () => page.$eval('#report', (d) => d.open).catch(() => false),
+    });
+    const reportOpened = dealt.reportOpened || (await page.evaluate(() => window.__reportOpens || 0)) > opens0;
+    if (!dealt.started) {
+      flag('Deal did not start a round', { round: i + 1, attempts: dealt.attempts, bank0, bank1: money(await text(SEL.bankroll)), msg: await text(SEL.message), reportOpened });
+      continue;
+    }
     let steps = 0;
     let usedKey = false;
     while (steps++ < 40) {
@@ -188,16 +220,16 @@ async function main() {
     const msg = await text(SEL.message);
     const delta = bank1 - bank0;
     if (/blackjack/i.test(msg || '')) { tally.blackjacks++; if (!firsts.bj) { firsts.bj = true; await shot(page, '04-blackjack'); } }
-    if (Math.abs(delta - (net1 - net0)) > 1e-9) flag('stats Net change != bankroll change', { round: i, delta, statsDelta: net1 - net0, msg });
-    if (rounds1 !== rounds0 + 1) flag('stats Rounds did not increment by 1', { round: i, rounds0, rounds1 });
-    if (rec1 - rec0 !== handsN) flag('W-L-P did not grow by number of hands', { round: i, hands: handsN, grew: rec1 - rec0 });
+    if (Math.abs(delta - (net1 - net0)) > 1e-9) flag('stats Net change != bankroll change', { round: i + 1, delta, statsDelta: net1 - net0, bank0, bank1, msg, reportOpened });
+    if (rounds1 !== rounds0 + 1) flag('stats Rounds did not increment by 1', { round: i + 1, rounds0, rounds1, bank0, bank1, msg, reportOpened });
+    if (rec1 - rec0 !== handsN) flag('W-L-P did not grow by number of hands', { round: i + 1, hands: handsN, grew: rec1 - rec0, bank0, bank1, msg, reportOpened });
     const hist = await page.$eval(`${SEL.history} .net`, (e) => e.textContent.trim()).catch(() => null);
-    if (hist !== null && Math.abs(money(hist) - delta) > 1e-9) flag('history net != bankroll change', { round: i, hist, delta });
-    if (await enabled(SEL.hit)) flag('Hit still enabled after round ended', { round: i, msg });
-    if (!(await enabled(SEL.deal)) && bank1 >= 1) flag('Deal disabled after round ended', { round: i });
+    if (hist !== null && Math.abs(money(hist) - delta) > 1e-9) flag('history net != bankroll change', { round: i + 1, hist, delta });
+    if (await enabled(SEL.hit)) flag('Hit still enabled after round ended', { round: i + 1, msg });
+    if (!(await enabled(SEL.deal)) && bank1 >= 1) flag('Deal disabled after round ended', { round: i + 1 });
     if (/\.\d(?!\d)/.test(bankTxt || '')) flag('money shown with one decimal (e.g. $1002.5)', { text: bankTxt, msg });
     if (bank1 >= 1000 && !/,/.test(bankTxt || '')) flag('no thousands separator in money', { text: bankTxt });
-    if (!msg) flag('empty result message after round', { round: i });
+    if (!msg) flag('empty result message after round', { round: i + 1 });
   }
   await shot(page, '05-after-random-play');
 
@@ -216,7 +248,7 @@ async function main() {
   for (const v of (bank >= 1 ? ['0', '-5', '2.5', String(Math.floor(bank) + 1), ''] : [])) {
     await page.fill(SEL.bet, v);
     const before = await text(SEL.message);
-    await clickDeal(page, SEL.deal);
+    await clickDealUnchecked(page, SEL.deal);
     await page.waitForTimeout(50);
     const after = await text(SEL.message);
     const valid = await page.$eval(SEL.bet, (e) => e.validationMessage).catch(() => '');
@@ -245,7 +277,7 @@ async function main() {
     const b = money(await text(SEL.bankroll));
     if (!(b >= 1)) break;
     await page.fill(SEL.bet, String(Math.floor(b)));
-    await clickDeal(page, SEL.deal);
+    await clickDealUnchecked(page, SEL.deal);
     for (let s = 0; s < 10; s++) {
       if (await enabled(SEL.noInsure)) { await page.click(SEL.noInsure); continue; }
       if (await enabled(SEL.hit)) await page.click(SEL.hit); else break;
