@@ -471,3 +471,23 @@ test('declaredSpecTier: only a declared Tier 0/1 spec can be approved by the orc
   assert.equal(G.declaredSpecTier('TIER: 1\n**TIER: 2**'), 2);
   assert.equal(G.declaredSpecTier('TIER: 7'), null);
 });
+
+test('qaCoveredPrs: a QA round covers every PR merged since the last trusted qa status (team v2.11.3)', async () => {
+  // first-parent chain: d (PR 4) -> c (PR 3) -> b (no PR, direct revert) -> a (PR 1, has a qa status)
+  const chain = { d: 'c', c: 'b', b: 'a', a: 'z' };
+  const prAt = { d: 4, c: 3, a: 1 };
+  const qaAt = { a: G.GATE_BOT };
+  const fakes = (qa) => ({
+    commitAt: async (s) => ({ sha: s, parents: chain[s] ? [{ sha: chain[s] }] : [] }),
+    statusesAt: async (s) => (qa[s] ? [{ context: 'qa', state: 'success', creator: { login: qa[s] }, created_at: '2026-11-21T00:00:00Z' }] : []),
+    prsAt: async (s) => (prAt[s] ? [{ number: prAt[s], merge_commit_sha: s }, { number: 99, merge_commit_sha: 'other' }] : []),
+  });
+  const nums = async (o) => (await G.qaCoveredPrs({ sha: 'd', ...o })).map((p) => p.number);
+  assert.deepEqual(await nums(fakes(qaAt)), [4, 3]);
+  // a qa status from anyone but the gate bot doesn't end the walk
+  assert.deepEqual(await nums(fakes({ a: 'someone' })), [4, 3, 1]);
+  // bounded walk
+  assert.deepEqual(await nums({ ...fakes({}), max: 1 }), [4]);
+  // the round's own commit counts even if it already has a qa status (a re-run)
+  assert.deepEqual(await nums(fakes({ d: G.GATE_BOT, a: G.GATE_BOT })), [4, 3]);
+});
