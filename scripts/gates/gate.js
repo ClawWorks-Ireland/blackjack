@@ -37,6 +37,7 @@ const { execFileSync } = require('child_process');
 const G = require('./lib.js');
 
 const REPO = process.env.GITHUB_REPOSITORY || 'ClawWorks-Ireland/blackjack';
+const OWNER_LOGIN = 'delmarolivier';
 const TEMPLATE = 'ClawWorks-Ireland/agent-team-template';   // the agent-team template this project is rendered from (team fixes go there first)
 const TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 // Reads (statuses, checks, reviews) may use a separate read-only token: the Claude App
@@ -146,6 +147,12 @@ const commands = {
     const f = await prFacts(args.pr);
     const s = G.tierApprovalStatus({ tier: f.tier, level: await level(), reviews: f.reviews, headSha: f.pr.head.sha });
     await setStatus(f.pr.head.sha, 'tier-approval', s.state, s.description);
+    // Waiting for H: request his review, so the PR is in github.com/pulls/review-requested (team v2.12).
+    if (s.state === 'pending' && f.pr.user && f.pr.user.login !== OWNER_LOGIN
+      && !(f.pr.requested_reviewers || []).some((u) => u.login === OWNER_LOGIN)) {
+      try { await gh('POST', repo(`/pulls/${args.pr}/requested_reviewers`), { reviewers: [OWNER_LOGIN] }); console.log(`#${args.pr}: review requested from @${OWNER_LOGIN}`); }
+      catch (e) { console.log(`#${args.pr}: could not request a review (${String(e.message).slice(0, 80)})`); }
+    }
     console.log(`#${args.pr} tier ${f.tier}: tier-approval ${s.state} — ${s.description}`);
   },
   async cooling() {
