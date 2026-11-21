@@ -161,3 +161,29 @@ test('poker: random play over thousands of hands never creates or loses a chip',
     }
   }
 });
+
+test('poker: blinds must be positive whole numbers, small at most big', () => {
+  // AC1: throw for non-positive-integer values and when small > big
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: 2.5, bigBlind: 5 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: 5, bigBlind: 7.5 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: '5', bigBlind: 10 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: 5, bigBlind: '10' }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: null, bigBlind: 10 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: 0, bigBlind: 10 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: -5, bigBlind: 10 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: NaN, bigBlind: 10 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: 5, bigBlind: Infinity }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: 1e-9, bigBlind: 10 }), P.PokerError);
+  assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind: 10, bigBlind: 5 }), P.PokerError, 'small > big');
+
+  // AC1: builds without throwing for valid cases (defaults 5/10)
+  const t = new P.PokerTable({ seed: 'valid' });
+  assert.equal(t.sb, 5);
+  assert.equal(t.bb, 10);
+  const t2 = new P.PokerTable({ seed: 'valid', smallBlind: 1, bigBlind: 2 });
+  assert.equal(t2.sb, 1);
+  assert.equal(t2.bb, 2);
+  const t3 = new P.PokerTable({ seed: 'valid', smallBlind: 10, bigBlind: 10 });
+  assert.equal(t3.sb, 10);
+  assert.equal(t3.bb, 10);
+});
