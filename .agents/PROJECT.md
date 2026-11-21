@@ -23,6 +23,8 @@ deploy: none   # confirmed 2026-11-14: nothing deployed; server/ is home-network
 tracker: github-issues + github-project
 solo_owner: true
 tier2_cooling_hours: 0   # Delmar 2026-11-15: BlackJack is the test project for the template; Tier 2 still needs his approval, but no cooling wait
+ask_default_hours: 2   # Delmar 2026-11-21: BlackJack is the test project; asks he hasn't answered in 2 h take the recommended option (REQ-COORD-5)
+ask_default_scope: all   # Delmar 2026-11-21: Tier 2 spec and plan confirmations default too; his PR approval still gates Tier 2 code
 orchestrator_schedule: hourly 24x7   # spec v0.11; daily digest at 08:00 Europe/Dublin
 sensitive_paths_extra:   # Tier 2 floor, see RISK.md
   - server/**        # live table server, network-facing; never expose publicly
