@@ -15,6 +15,7 @@ const reportOpen = (p) => p.$eval('#report', (d) => d.open).catch(() => false);
 const inHand = (p) => p.evaluate(() => document.body.classList.contains('in-hand'));
 const rounds = (p) => p.$eval('#stat-rounds', (e) => Number(e.textContent.replace(/[^\d]/g, '')));
 const reportText = (p) => p.evaluate(() => ({ title: document.getElementById('report-title').textContent, sub: document.getElementById('report-sub').textContent }));
+const bankroll = (p) => p.$eval('#bankroll', (e) => Number(e.textContent.replace(/[^\d]/g, '')));
 const active = (p) => p.evaluate(() => document.activeElement && document.activeElement.id);
 
 async function freshPage(b) {
@@ -40,11 +41,11 @@ async function playOut(p) {
 }
 
 /** Deal and play rounds until the shoe report opens by itself between rounds. */
-async function reachReport(p) {
+async function reachReport(p, betFor = () => '10') {
   for (let i = 0; i < 80; i++) {
     if (await reportOpen(p)) return true;
     if (await enabled(p, '#deal')) {
-      await p.fill('#bet', '10');
+      await p.fill('#bet', await betFor(p));
       await p.click('#deal');
     }
     await playOut(p);
@@ -80,6 +81,37 @@ async function reachReport(p) {
         reopened && between && again.title === first.title && again.sub === first.sub, { reopened, between, first, again });
       await p.close();
     }
+    // AC3: x in the grace window deals one round at twice the last bet.
+    {
+      const p = await freshPage(b);
+      if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC3)');
+      const before = await rounds(p);
+      const bank = await bankroll(p);
+      await p.keyboard.press('x');
+      await p.waitForTimeout(100);
+      const closed = !(await reportOpen(p));
+      const bet = await p.$eval('#bet', (e) => e.value);
+      const guess = await p.$eval('#rep-guess', (e) => e.value);
+      await playOut(p);
+      const dealt = (await rounds(p)) - before;
+      put('AC3 x in grace window deals one round at twice the last bet',
+        closed && dealt === 1 && bet === '20' && !/x/i.test(guess), { closed, dealt, bet, guess, bank });
+      await p.close();
+    }
+    // AC4: x with Rebet x2 disabled keeps the report open and deals nothing.
+    {
+      const p = await freshPage(b);
+      if (!(await reachReport(p, async (q) => String(Math.min(255, await bankroll(q)))))) throw new Error('no shoe report appeared (AC4)');
+      const rebet2Disabled = await p.$eval('#rebet-2', (e) => e.disabled);
+      const before = await rounds(p);
+      await p.keyboard.press('x');
+      await p.waitForTimeout(150);
+      const open = await reportOpen(p);
+      const dealt = (await rounds(p)) - before;
+      put('AC4 x with Rebet x2 disabled keeps the report open and deals nothing',
+        rebet2Disabled && open && dealt === 0, { rebet2Disabled, open, dealt });
+      await p.close();
+    }
     // AC5: after the grace window Enter deals nothing.
     {
       const p = await freshPage(b);
@@ -106,6 +138,7 @@ async function reachReport(p) {
       await p.click('#report-open');
       const opened = await reportOpen(p);
       await p.keyboard.press('Enter');
+      await p.keyboard.press('x');
       await p.waitForTimeout(150);
       const dealt = (await rounds(p)) - before;
       put('AC6 session report has no grace window', opened && dealt === 0, { opened, dealt });
