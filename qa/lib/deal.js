@@ -31,4 +31,20 @@ async function dealRound(page, ops, maxAttempts = 3) {
   return { started: false, attempts, reportOpened };
 }
 
-module.exports = { roundStarted, dealRound };
+/**
+ * Per-round cross-check of what the player sees (stats vs bankroll vs hands).
+ * before: { bank0, net0, rounds0, rec0 }; after: { bank1, net1, rounds1, rec1, handsN }.
+ * Returns [{ issue, detail }]; the conditions are the UI playtest's own.
+ */
+function crossCheck({ round, before, after, msg, reportOpened }) {
+  const { bank0, net0, rounds0, rec0 } = before;
+  const { bank1, net1, rounds1, rec1, handsN } = after;
+  const delta = bank1 - bank0;
+  const out = [];
+  if (Math.abs(delta - (net1 - net0)) > 1e-9) out.push({ issue: 'stats Net change != bankroll change', detail: { round, delta, statsDelta: net1 - net0, bank0, bank1, msg, reportOpened } });
+  if (rounds1 !== rounds0 + 1) out.push({ issue: 'stats Rounds did not increment by 1', detail: { round, rounds0, rounds1, bank0, bank1, msg, reportOpened } });
+  if (rec1 - rec0 !== handsN) out.push({ issue: 'W-L-P did not grow by number of hands', detail: { round, hands: handsN, grew: rec1 - rec0, bank0, bank1, msg, reportOpened } });
+  return out;
+}
+
+module.exports = { roundStarted, dealRound, crossCheck };
