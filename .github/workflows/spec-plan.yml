@@ -11,11 +11,18 @@ on:
 permissions:
   contents: read
   issues: write
+# One group per issue AND role (blackjack#108): GitHub keeps one pending run per group, so a shared
+# per-issue group let a later non-routing label event replace a pending needs-spec/needs-replan run.
+# A hand dispatch shares its role's group with the label event it stands in for; any other label gets a
+# group of its own and needs no runner (the route job's `if`).
 concurrency:
-  group: spec-plan-${{ github.event.issue.number || inputs.issue }}
+  group: spec-plan-${{ github.event.issue.number || inputs.issue }}-${{ inputs.role || (github.event.label.name == 'needs-spec' && 'spec') || ((github.event.label.name == 'needs-replan' || github.event.label.name == 'spec-approved') && 'plan') || format('none-{0}', github.run_id) }}
   cancel-in-progress: false
 jobs:
   route:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(fromJSON('["needs-spec", "needs-replan", "spec-approved"]'), github.event.label.name)
     runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     outputs:

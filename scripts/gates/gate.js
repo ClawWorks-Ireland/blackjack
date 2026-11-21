@@ -125,7 +125,7 @@ async function verdictFor(n, lvl, behindCheck = true, refresh = false) {
     behindBy = cmp.ahead_by; // commits on main the PR head doesn't have
   }
   const v = G.mergeVerdict({ pr: f.pr, statuses, checkRuns, reviews: f.reviews, tier: f.tier, level: lvl,
-    coolingHours: overlayNumber('tier2_cooling_hours', 24), behindBy });
+    coolingHours: overlayNumber('tier2_cooling_hours', 0), behindBy });
   // Keep the visible tier-approval status in step with the live one (it goes stale when the level changes).
   if (refresh) {
     const live = G.tierApprovalStatus({ tier: f.tier, level: lvl, reviews: f.reviews, headSha: head });
@@ -153,7 +153,7 @@ const commands = {
     for (const p of prs) {
       const f = await prFacts(p.number);
       const s = G.coolingStatus({ tier: f.tier, reviews: f.reviews, headSha: f.pr.head.sha, labels: f.pr.labels,
-        hours: overlayNumber('tier2_cooling_hours', 24) });
+        hours: overlayNumber('tier2_cooling_hours', 0) });
       await setStatus(f.pr.head.sha, 'tier2-cooling', s.state, s.description);
       console.log(`#${p.number} tier ${f.tier}: tier2-cooling ${s.state} — ${s.description}`);
     }
@@ -342,7 +342,7 @@ commands['pure-update'] = async () => {
 };
 
 // Browser QA round result (qa.yml, team v2.8): a `qa` status on the commit and a comment on the PR merged
-// there. The output is the project's QA command's own summary; it is printed, never executed.
+// there, plus a pointer on each PR merged since the last round (team v2.11.3). The output is the project's QA command's own summary; it is printed, never executed.
 commands['qa-report'] = async () => {
   if (!/^(pass|fail|error)$/.test(args.result || '')) throw new Error('qa-report needs --result pass|fail|error');
   const c = await gh('GET', repo(`/commits/${args.sha}`));
@@ -352,14 +352,32 @@ commands['qa-report'] = async () => {
   const out = read('qa-output.txt').split('\n').filter((l) => l.trim()).slice(-40).join('\n');
   const state = args.result === 'pass' ? 'success' : args.result === 'fail' ? 'failure' : 'error';
   const words = { pass: 'QA round passed', fail: 'QA round found failures', error: 'QA round could not run' }[args.result];
+  // Before setting this round's status: a newer merge can replace a waiting round, so report to every PR
+  // merged since the last round (team v2.11.3).
+  const prs = await G.qaCoveredPrs({ sha,
+    commitAt: (s) => (s === sha ? c : gh('GET', repo(`/commits/${s}`))),
+    statusesAt: (s) => all(repo(`/commits/${s}/statuses`)),
+    prsAt: (s) => gh('GET', repo(`/commits/${s}/pulls`)) });
   await setStatus(sha, 'qa', state, `${words} on ${sha.slice(0, 7)}`);
-  const pr = ((await gh('GET', repo(`/commits/${sha}/pulls`))) || []).find((p) => p.merge_commit_sha === sha);
-  const body = `ROLE: QA (qa.yml)   ITEM: ${pr ? `#${pr.number}` : sha.slice(0, 7)}   RESULT: ${args.result}\n` +
-    `WHAT CHANGED: nothing; a QA round ran on the merged commit ${sha.slice(0, 7)} with headless Chrome on a sandbox VM.\n` +
-    `EVIDENCE: ${RUN_URL || 'the qa run'} (artifact \`qa-${args.sha}\` has the full report)\n\n\`\`\`\n${out.slice(0, 6000) || '(no output)'}\n\`\`\`\n` +
-    `NEXT: ${args.result === 'pass' ? 'acceptance checks that this round covers are verified (G12).' : 'the orchestrator files the failures as issues (REQ-FLOW-5).'}`;
-  if (pr) await gh('POST', repo(`/issues/${pr.number}/comments`), { body });
-  console.log(`qa-report: ${args.result} on ${sha.slice(0, 7)}${pr ? ` (PR #${pr.number})` : ''}`);
+  // The full report goes on the PR merged at `sha` (or the newest covered PR), so the orchestrator files any
+  // failures once; each earlier PR gets a pointer to it.
+  const [main, ...earlier] = prs;
+  if (main) {
+    const also = earlier.length ? ` It also covers ${earlier.map((p) => `#${p.number}`).join(', ')}, merged since the last round.` : '';
+    const body = `ROLE: QA (qa.yml)   ITEM: #${main.number}   RESULT: ${args.result}\n` +
+      `WHAT CHANGED: nothing; a QA round ran on main at ${sha.slice(0, 7)} with headless Chrome on a sandbox VM.${also}\n` +
+      `EVIDENCE: ${RUN_URL || 'the qa run'} (artifact \`qa-${args.sha}\` has the full report)\n\n\`\`\`\n${out.slice(0, 6000) || '(no output)'}\n\`\`\`\n` +
+      `NEXT: ${args.result === 'pass' ? 'acceptance checks that this round covers are verified (G12).' : 'the orchestrator files the failures as issues (REQ-FLOW-5).'}`;
+    await gh('POST', repo(`/issues/${main.number}/comments`), { body });
+  }
+  for (const pr of earlier) {
+    const body = `ROLE: QA (qa.yml)   ITEM: #${pr.number}   RESULT: ${args.result}\n` +
+      `WHAT CHANGED: nothing; this merge was covered by the QA round on main at ${sha.slice(0, 7)}, which includes it.\n` +
+      `EVIDENCE: the full report is on #${main.number} (${RUN_URL || 'the qa run'}).\n` +
+      `NEXT: ${args.result === 'pass' ? 'acceptance checks that this round covers are verified (G12).' : `failures are filed from #${main.number}, not here.`}`;
+    await gh('POST', repo(`/issues/${pr.number}/comments`), { body });
+  }
+  console.log(`qa-report: ${args.result} on ${sha.slice(0, 7)}${prs.length ? ` (PRs ${prs.map((p) => `#${p.number}`).join(', ')})` : ''}`);
 };
 
 // Resume a paused ladder attempt (team v2.10.3; A7 sec-1 on blackjack#91). Deterministic, so a comment can't

@@ -173,6 +173,25 @@ function trustedStatuses(statuses) {
 }
 
 /**
+ * REQ-GATE-7 (team v2.11.3): the PRs a QA round on `sha` covers. A newer merge can replace a waiting round,
+ * so a round reports to the PR merged at `sha` and to each PR merged at an earlier first-parent commit, back
+ * to (not including) the last commit with a trusted `qa` status, at most `max` commits.
+ * `commitAt(sha)` returns { sha, parents }, `statusesAt(sha)` the commit's statuses and `prsAt(sha)` its PRs.
+ */
+async function qaCoveredPrs({ sha, commitAt, statusesAt, prsAt, max = 20 }) {
+  const out = [];
+  let cur = sha;
+  for (let i = 0; i < max && cur; i++) {
+    if (i > 0 && trustedStatuses(await statusesAt(cur)).qa) break;
+    const pr = ((await prsAt(cur)) || []).find((p) => p.merge_commit_sha === cur);
+    if (pr) out.push(pr);
+    const c = await commitAt(cur);
+    cur = c && c.parents && c.parents[0] && c.parents[0].sha;
+  }
+  return out;
+}
+
+/**
  * REQ-GATE-1: everything A9 verifies before a merge, on the PR's latest head.
  * Recomputes approvals and cooling itself rather than trusting their statuses
  * (those workflows run on review events, which use the PR's own workflow files).
@@ -626,6 +645,6 @@ module.exports = {
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
-  trustedStatuses, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
+  trustedStatuses, qaCoveredPrs, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
   dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

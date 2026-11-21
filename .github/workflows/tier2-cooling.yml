@@ -1,5 +1,5 @@
-# REQ-RISK-3: `tier2-cooling` stays pending until 24h after H's approval of the
-# current head. Re-evaluated hourly and after every review. Deterministic.
+# REQ-RISK-3: `tier2-cooling` stays pending until `tier2_cooling_hours` (default 0) after H's
+# approval of the current head. Re-evaluated hourly and after every review. Deterministic.
 name: tier2-cooling
 on:
   schedule:

@@ -1,6 +1,6 @@
 # Claude Agent Delivery Team — Requirements & Design Spec
 
-**Version:** 0.30 · **Date:** 2026-11-20 · **Owner:** Delmar (sole human approver, "H")
+**Version:** 0.34 · **Date:** 2026-11-20 · **Owner:** Delmar (sole human approver, "H")
 **Status:** Control plane bootstrapped (Phase 2 + reboot test done). BlackJack setup open as ClawWorks-Ireland/blackjack#11 (Tier 2, Level 0). Next: its checklist, then merge (§13).
 
 ---
@@ -12,7 +12,7 @@
 | D1 | Runtime | GitHub-native: private repos in the **`ClawWorks-Ireland`** organisation (H is admin; REQ-OPS-10), Claude Code GitHub Action for review/security/classification, scheduled runs for the Orchestrator |
 | D2 | Local models | Ollama/Qwen as **Implementers only**; Claude implementer takes over after 2 failed attempts on a slice |
 | D3 | Tracker | GitHub Issues + GitHub Projects |
-| D4 | Human approvers | Solo owner. Tier 2 = H's approval + 24h cooling period |
+| D4 | Human approvers | Solo owner. Tier 2 = H's approval + the overlay's cooling period (`tier2_cooling_hours`, default 0h) |
 | D5 | Review layer | Build our own bug hunters + voting verifiers (not Anthropic's Code Review product) |
 | D6 | Budget | Claude subscription only — no API spend. Work throttles at usage limits |
 | D7 | Pilot | BlackJack (existing, low-risk project) |
@@ -133,11 +133,11 @@ Issue → Spec → Plan (slices) → [Local implement (≤2) → Claude implemen
 |---|---|---|
 | **0 — Low** | Docs, comments, test-only, copy | 0 human approvals |
 | **1 — Standard** | Flagged features, covered refactors, UI | H approves (→ 0 at Level 4) |
-| **2 — Sensitive** | Auth, secrets, CI/CD & workflows, deploy config, data migrations/deletes, dependency major bumps, anything irreversible, agent policy files | **H approves + 24h cooling period**; H can cancel during cooling |
+| **2 — Sensitive** | Auth, secrets, CI/CD & workflows, deploy config, data migrations/deletes, dependency major bumps, anything irreversible, agent policy files | **H approves + cooling period** (`tier2_cooling_hours`, default 0h); H can cancel during cooling |
 
 - `REQ-RISK-1` Path rules in `RISK.md` set the floor; A8 may raise, never lower. (`CODEOWNERS` is kept for documentation only — GitHub Free doesn't enforce it on private repos.)
 - `REQ-RISK-2` A8 posts a one-paragraph rationale on every PR.
-- `REQ-RISK-3` Tier 2 cooling: a required status check `tier2-cooling` stays pending until 24h after H's approval; any new push restarts it.
+- `REQ-RISK-3` Tier 2 cooling: a required status check `tier2-cooling` stays pending until `tier2_cooling_hours` (overlay; default 0, H's decision 2026-11-20) after H's approval; any new push restarts it. H's approval itself is always required.
 - `REQ-RISK-4` Approval requests batch into one daily digest (GitHub issue comment + notification), unless a Tier 2 release is blocked.
 
 ---
@@ -199,6 +199,7 @@ Issue → Spec → Plan (slices) → [Local implement (≤2) → Claude implemen
 - `REQ-CFG-5` **Subscription auth:** Claude jobs authenticate with a Claude subscription OAuth token stored as a repo/org secret, not an API key. Verify at setup that every workflow uses it.
 - `REQ-CFG-6` Orchestrator runs on cron every 60 min, 24x7, plus event triggers (issue labelled, PR merged, check failed).
 - `REQ-CFG-7` Secrets never in agent context; deploy credentials only in the release job.
+- `REQ-CFG-8` **Model and effort are per-role settings** (team v2.11). The overlay sets `model_<role>` and `effort_<role>` for the nine places a Claude job picks a model (orchestrator, spec_plan, security, retro, classify, hunt, verify, implement, self_verify), and `local_model`, `local_thinking`, `local_max_output` and `local_context` for the local coder's harness. `effort` is Claude Code's `--effort` (low, medium, high, xhigh, max); unset means its default. Every key is optional and its default is what the workflows hard-coded before, so an overlay that sets nothing renders the same files. A typo in a key or a value is a render error, never silently ignored. **A change to a role's model or effort is proven before it stays:** reviewers (hunt, verify, security, classify) replay the eval set (REQ-IMP-2) and recall must not drop; coders are judged by merge rate and attempts in the metrics. Cost evidence: on 2026-11-20 the hourly orchestrator sweep was 41% of the day's Claude cost.
 
 ### 8.3 Software gates (GitHub Free)
 GitHub Free doesn't enforce branch protection on private repos, so the team enforces its own gates. Protection is **detective** (unauthorised changes are caught and reverted within minutes), not preventive.
@@ -206,7 +207,7 @@ GitHub Free doesn't enforce branch protection on private repos, so the team enfo
 - `REQ-GATE-2` **main-guard:** `main-guard.yml` runs on every push to `main` and judges only first-parent commits (a merge's branch commits are covered by the merge's own verdict). Any commit that is not a merge by **the A9 App** (`clawworks-release-manager[bot]`) of a PR carrying trusted gate evidence, or an exact revert (`scripts/rollback`, main-guard's own), is automatically reverted, labelled `incident`, @-mentions H and trips REQ-CB-5. The guard is armed by a marker file (`.github/main-guard.active`): a commit whose parent lacks it is the bootstrap and is exempt. *(non-overridable)*
 - `REQ-GATE-3` **Identity:** every agent write uses **its own role's App token** (§8.5). Agents never receive H's personal token or credentials, and never another role's token. Gate results count only as statuses created by `github-actions[bot]` (deterministic workflow steps), and approvals only as H's GitHub review on the PR's current head. H does not merge by hand; H's routes to `main` are approving PRs (A9 merges) and `scripts/rollback`.
 - `REQ-GATE-4` The gate workflows (`merge.yml`, `main-guard.yml`, `tier-approval.yml`, `tier2-cooling.yml`) and their scripts are Tier 2 paths. Any PR touching `.github/workflows/` @-mentions H regardless of tier. **No agent identity except A9 holds the `workflows` permission**, so no agent can *write* a workflow change: an agent proposes it (as a patch in its PR), and H applies it as a commit on that agent-opened PR, which the gates then review. A9 holds `workflows` only because GitHub requires it to merge or revert such PRs; its token is only ever given to the one-command merge/revert step, which merges exactly the head H approved. *(non-overridable)*
-- `REQ-GATE-7` **Browser QA after merge** (team v2.8). If the overlay sets `qa_command`, `qa.yml` runs it after every merge to `main` (or on demand for a commit), against that commit, on a sandbox VM with headless Google Chrome. The result is a `qa` status on the commit and a comment on the merged PR. For UI work this round is the acceptance record G12 needs; failures become issues (REQ-FLOW-5). The command must test the checked-out commit and exit 0 on pass and 1 on failures.
+- `REQ-GATE-7` **Browser QA after merge** (team v2.8). If the overlay sets `qa_command`, `qa.yml` runs it after merges to `main` (or on demand for a commit), one round at a time against the latest `main`: a newer merge replaces a round still waiting (team v2.11.3). It runs on a sandbox VM with headless Google Chrome. The result is a `qa` status on the commit, the full report on the PR merged there, and a pointer to it on each PR merged since the last round, so every merged PR keeps its record. For UI work this round is the acceptance record G12 needs; failures become issues (REQ-FLOW-5). The command must test the checked-out commit and exit 0 on pass and 1 on failures.
 - **Residual risk (accepted at Level ≤ 2):** an agent with write access could push directly to `main`, including to the guard itself. Mitigations: H approves all Tier 1/2 work, main-guard reverts and alerts, REQ-CB-5/CB-6, and the weekly digest lists every commit on `main` with its merge evidence.
 
 ### 8.4 Operator access (control plane)
@@ -350,7 +351,7 @@ H's interface is layered from least to most effort. The design goal: on a normal
 | T9 Circuit breaker | Simulated revert spike drops the level and notifies H | CB-1 |
 | T10 Unattended day | Full day on schedule; digest lists every ask | CFG-6, COORD-4 |
 | T11 Local fallback | A slice Qwen deliberately can't pass hands to Claude after 2 attempts with context attached | FLOW-2, FLOW-7 |
-| T12 Tier 2 cooling | Tier 2 PR approved by H doesn't merge for 24h; a new push restarts the clock | RISK-3 |
+| T12 Tier 2 cooling | With `tier2_cooling_hours` > 0, a Tier 2 PR approved by H doesn't merge until that many hours pass; a new push restarts the clock | RISK-3 |
 | T13 Throttling | Simulated usage-limit hit: new slices pause, reviews finish, work resumes, digest reports it | CB-4 |
 | T14 Local host offline | Runner offline: slices queue, no silent Claude fallback | CFG-4 |
 | T15 Direct push | A push to `main` outside A9's merge path is reverted, labelled `incident`, H notified, level drops to 0 | GATE-2, CB-5 |
@@ -396,7 +397,7 @@ flags: env-config   # confirm at setup
 deploy: <confirm at setup>
 tracker: github-issues + github-project
 solo_owner: true
-tier2_cooling_hours: 24
+tier2_cooling_hours: 0
 orchestrator_schedule: hourly 24x7
 sensitive_paths_extra: []
 ```
@@ -413,6 +414,10 @@ sensitive_paths_extra: []
 ---
 
 ## 14. Changelog
+- **0.34 (2026-11-21):** **One QA round at a time, on the latest `main`** (team v2.11.3; H approved the console's proposal). A full QA round holds the only sandbox VM for 30-50 min, and one started after every merge, so PR CI and repro waited behind it (blackjack#102's review sat behind a round for over 30 min on 2026-11-20). `qa.yml` now uses one concurrency group per repo for merges: a round in progress finishes, and a newer merge replaces a round still waiting. `gate.js qa-report` (`lib.js qaCoveredPrs`) walks first-parent commits back to the last trusted `qa` status (at most 20). It posts the full report on the newest PR and a pointer on each earlier one, so failures are filed once and every merged PR keeps its G12 record. A dispatch for a given commit still runs on its own. Affected: REQ-GATE-7; `qa.yml`, `gate.js qa-report`, `lib.js`.
+- **0.33 (2026-11-20):** **Tier 2 cooling defaults to 0 hours** (team v2.11.2; H: "just make the default 0 hours"). H's approval is still required on every Tier 2 PR; only the wait after it changes. `templates/PROJECT.md` and the gate fallback (`gate.js`, when the overlay has no `tier2_cooling_hours`) are now 0. Projects whose overlay sets 24 keep it until their own overlay PR (home-automation#5, finance-insights#8). A project that wants a window to cancel sets a positive value. Affected: D4, §6 Tier 2, REQ-RISK-3, T12, the overlay template, `gate.js`, `tier2-cooling.yml` (comment).
+- **0.32 (2026-11-20):** **Label events no longer lose planner runs or queue key-VM jobs** (team v2.11.1; blackjack#108, spec approved by H). GitHub keeps one pending run per concurrency group, and `spec-plan.yml` used one group per issue, so a later non-routing label (for example a status label added just after `needs-replan`) replaced the pending routing run and A2 never re-sliced (#100, #109). The group is now per issue and role (`spec` for `needs-spec` and a `spec` dispatch, `plan` for `needs-replan`, `spec-approved` and a `plan` dispatch, a run-unique group otherwise). The `route` jobs of `spec-plan.yml` and `retro.yml` now skip labels that route nowhere, so those events no longer take a `vm-keyed` runner: they were most of the single key VM's backlog on 2026-11-20 (retro routes queued for over an hour). A gate test enforces both. Affected: REQ-CFG-3, REQ-CFG-6; `spec-plan.yml`, `retro.yml`, `runners.test.js`.
+- **0.31 (2026-11-20):** **Per-role model and effort in the overlay** (team v2.11; H: "include the effort lever as part of the configuration"). New REQ-CFG-8. The nine hard-coded `--model` flags become `model_<role>` plus `effort_<role>` overlay keys, and the local coder's model, thinking switch, output cap and context become `local_*` keys. Defaults equal the previous hard-coded values: a BlackJack render at v2.10.3 is byte-identical. Typos and bad values fail the render. `claude --effort low` was checked end to end on the pinned Claude Code (2.1.327). No behaviour changes in this release: tuning follows as separate, measured changes. Affected: REQ-CFG-8 (new); `render.js`, all workflows' `claude_args`, `local-harness/settings.json`, `local-implement.sh`, `templates/PROJECT.md`.
 - **0.30 (2026-11-20):** **Paused ladder attempts are bounded and can't be steered** (team v2.10.3; AI review and A7 sec-1 on blackjack#91 and home-automation#4). (1) A model that never ran with no usage limit open (expired credentials, a broken key) paused forever in v2.10.2. Now, after 2 such pauses in a row, the issue goes to H as `needs-human`; a real usage limit still pauses as long as it lasts. (2) The orchestrator resumed from the latest `ladder-resume` comment, whoever wrote it. Now `gate.js ladder-resume` resumes only from a marker written by `github-actions[bot]` or A0's App, validates every value and dispatches itself, and the orchestrator only calls it (REQ-COMMS-3). Affected: REQ-CB-4, REQ-FLOW-2, REQ-COMMS-3; `implement.yml` (`pauses` input), `lib.js` (`nextRung`, `parseLadderResume`), `gate.js ladder-resume`, the orchestrator role and its allowed tools.
 - **0.29 (2026-11-20):** **A usage limit no longer uses up ladder attempts** (team v2.10.2; blackjack#57). Delmar's Claude usage limit hit at 12:11 (throttle #90). The ladder kept running Claude attempts, which failed in 0.4 s with no model work, and counted the refusals as real attempts until it declared itself exhausted and sent the slice to re-plan. Now: a failure while a `throttled` issue is open, or a result where the model never ran (`lib.js modelNeverRan`: an error with no model usage, no cost and at most one turn), **pauses** the exact attempt (`ladder-paused` and a `ladder-resume` marker) without consuming the attempt or its infra retry. The gate step pauses every ladder attempt while throttled, not only new local slices, and the orchestrator resumes paused attempts once the limit resets. Affected: REQ-CB-4, REQ-FLOW-2; `implement.yml`, `lib.js nextRung`, the orchestrator role.
 - **0.28 (2026-11-20):** **Python projects** (team v2.10; H chose home-automation, a Python project, as the second project). New overlay key `language: node | python`, with `node` the default, so Node renders are unchanged apart from two lines. It sets how bug hunters write runnable checks (`python3 -I -c` in the repro sandbox, standard library only), the hunter schema's description, and the local coder's test convention (`test_convention` overrides it). The team's own gate scripts stay Node, so `node_version` is always required. `/setup-project` now accepts Node and Python. Affected: REQ-ROLE-3a (checks), the overlay, the bug-hunter and local-implementer prompts, `hunter.json`, `gate.js repro-run`, `render.js`, `/setup-project`.
