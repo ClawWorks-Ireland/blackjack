@@ -137,6 +137,19 @@ test('poker: a fold to one player ends the hand; others see only their own cards
   assert.deepEqual(t.view(1).seats[0].cards, ['??', '??'], 'no showdown: cards stay hidden');
 });
 
+test('poker: blinds must be positive whole numbers, small at most big', () => {
+  const bad = [[2.5, 5], [5, 7.5], ['5', 10], [5, '10'], [null, 10], [0, 10], [-5, 10], [NaN, 10], [5, Infinity], [1e-9, 10], [10, 5]];
+  for (const [smallBlind, bigBlind] of bad) {
+    assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind, bigBlind }), P.PokerError, `${smallBlind}/${bigBlind}`);
+  }
+  for (const [smallBlind, bigBlind] of [[5, 10], [1, 2], [10, 10]]) {
+    assert.doesNotThrow(() => new P.PokerTable({ seed: 'b', smallBlind, bigBlind }));
+  }
+  const d = new P.PokerTable({ seed: 'b' });
+  assert.equal(d.sb, 5);
+  assert.equal(d.bb, 10);
+});
+
 test('poker: random play over thousands of hands never creates or loses a chip', () => {
   const rand = lcg(42);
   for (const n of [2, 3, 6]) {
