@@ -1674,7 +1674,7 @@
     if (e.key === 'ArrowLeft') { e.preventDefault(); els.replayPrev.click(); }
   });
   els.reportClose.addEventListener('click', () => els.reportDialog.close());
-  els.reportDialog.addEventListener('close', () => { reportGraceUntil = 0; reportFocusBefore = null; });
+  els.reportDialog.addEventListener('close', () => { reportGraceUntil = 0; reportFocusBefore = null; gracePress = false; });
   // Grace window: Enter meant for Deal or Rebet, which the report covered, still deals (#109).
   els.reportDialog.addEventListener('keydown', (e) => {
     if (!inReportGrace() || e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1703,7 +1703,8 @@
   els.reportDialog.addEventListener('click', (e) => {
     if (!gracePress) return;
     gracePress = false;
-    e.stopPropagation(); // no panel button acts, no form submits
+    if (e.detail === 0) return; // a keyboard-made click has no press: let the button act
+    e.stopImmediatePropagation(); // no panel button acts, no form submits, and the backdrop-close listener doesn't run
     e.preventDefault();
     const visible = (c) => !c.hidden && c.offsetParent !== null;
     const controls = [['deal', els.deal], ['rebet-1', els.rebet], ['rebet-2', els.rebet2]].map(([id, el]) => {
