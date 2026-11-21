@@ -27,7 +27,15 @@ class LivePokerTable {
     this.name = cleanName(name) || `Poker ${id}`;
     this.timing = { ...DEFAULTS, ...hub.timing, ...timing };
     if (!(bigBlind > 0) || !(smallBlind > 0) || smallBlind > bigBlind) throw new HubError('Blinds must be positive, small at most big');
-    const styles = Array.isArray(bots) ? bots : Array.from({ length: Number(bots) || 0 }, (_, i) => ['tight-passive', 'calling-station', 'loose-aggressive', 'maniac', 'default'][i % 5]);
+    const order = ['tight-passive', 'calling-station', 'loose-aggressive', 'maniac', 'default'];
+    let styles;
+    if (bots == null) styles = [];
+    else if (Array.isArray(bots)) styles = bots;
+    else {
+      if (typeof bots !== 'number' || !Number.isInteger(bots) || bots < 0) throw new HubError('bots must be a whole number from 0 to 5, or a list of styles');
+      if (bots > 5) throw new HubError('At most 5 bots');
+      styles = Array.from({ length: bots }, (_, i) => order[i % 5]);
+    }
     if (styles.length > 5) throw new HubError('At most 5 bots');
     for (const s of styles) if (!POLICIES[s]) throw new HubError(`unknown bot style "${s}"`);
     this.buyIn = buyIn || 100 * bigBlind;
