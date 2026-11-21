@@ -47,6 +47,7 @@ const STEPS = [
   ['F15-F17 engine', 'f15_f17_check.js', [snap], 'bankroll.js'],
   ['F18-F20 engine', 'f18_f20_check.js', [snap], 'report.js'],
   ['UI playtest', 'ui_playtest.js', [snap, out, rounds], null],
+  ['deal race', 'deal_race_check.js', [snap, out], null],
   ['feature checks', 'feature_checks.js', [snap, out], null],
   ['F5/F8/F9 UI', 'f5_f8_f9_check.js', [snap, out], null],
   ['F7/F10 UI', 'f7_f10_check.js', [snap, out], 'stats.js'],

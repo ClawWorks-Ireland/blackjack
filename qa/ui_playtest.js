@@ -13,7 +13,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { pagePath } = require('./lib/layout');
-const { dealRound } = require('./lib/deal');
+const { dealRound, crossCheck } = require('./lib/deal');
 
 const { chromium } = require('./lib/browser');
 
@@ -220,9 +220,7 @@ async function main() {
     const msg = await text(SEL.message);
     const delta = bank1 - bank0;
     if (/blackjack/i.test(msg || '')) { tally.blackjacks++; if (!firsts.bj) { firsts.bj = true; await shot(page, '04-blackjack'); } }
-    if (Math.abs(delta - (net1 - net0)) > 1e-9) flag('stats Net change != bankroll change', { round: i + 1, delta, statsDelta: net1 - net0, bank0, bank1, msg, reportOpened });
-    if (rounds1 !== rounds0 + 1) flag('stats Rounds did not increment by 1', { round: i + 1, rounds0, rounds1, bank0, bank1, msg, reportOpened });
-    if (rec1 - rec0 !== handsN) flag('W-L-P did not grow by number of hands', { round: i + 1, hands: handsN, grew: rec1 - rec0, bank0, bank1, msg, reportOpened });
+    for (const f of crossCheck({ round: i + 1, before: { bank0, net0, rounds0, rec0 }, after: { bank1, net1, rounds1, rec1, handsN }, msg, reportOpened })) flag(f.issue, f.detail);
     const hist = await page.$eval(`${SEL.history} .net`, (e) => e.textContent.trim()).catch(() => null);
     if (hist !== null && Math.abs(money(hist) - delta) > 1e-9) flag('history net != bankroll change', { round: i + 1, hist, delta });
     if (await enabled(SEL.hit)) flag('Hit still enabled after round ended', { round: i + 1, msg });
