@@ -97,6 +97,17 @@ jobs:
             --append-system-prompt-file .claude/agents/${{ needs.route.outputs.role == 'spec' && 'spec-writer' || 'planner' }}.md --model opus --max-turns 50
             --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh label list:*)"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,Bash(git push:*),Bash(gh pr:*)"
+      - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
+        continue-on-error: true   # a metric never fails the job
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          TM_FILE: ${{ steps.claude.outputs.execution_file }}
+          TM_ROLE: "${{ needs.route.outputs.role }}"
+          TM_SUBJECT: "${{ needs.route.outputs.issue }}"
+          TM_SHA: ""
+          TM_ATTEMPT: ""
+          TM_ARGS: "opus"
+        run: node scripts/gates/gate.js metrics --file "$TM_FILE"
       - if: failure() && steps.claude.outcome == 'failure'
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"

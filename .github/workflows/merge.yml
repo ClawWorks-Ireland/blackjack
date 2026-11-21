@@ -4,7 +4,7 @@
 name: merge
 on:
   workflow_run:
-    workflows: [ci, review, security, classify, tier-approval, tier2-cooling]
+    workflows: [ci, review, security, classify, tier-approval]
     types: [completed]
   schedule:
     - cron: '41 * * * *'
@@ -20,6 +20,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   plan:
+    # A gate run that was skipped or cancelled changed nothing: no key VM for it (team v2.13). Security's
+    # comment-triggered runs are skipped dozens of times a day. Schedule and dispatch always plan.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      !contains(fromJSON('["skipped", "cancelled"]'), github.event.workflow_run.conclusion)
     runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 10
     outputs:

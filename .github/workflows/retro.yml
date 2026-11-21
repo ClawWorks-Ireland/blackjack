@@ -54,6 +54,7 @@ jobs:
       - run: rm -rf out && mkdir -p out
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
         run: |
+          mkdir -p "$RUNNER_TEMP/frozen" && git archive HEAD scripts/gates | tar -x -C "$RUNNER_TEMP/frozen"   # team metrics (REQ-OPS-14)
           cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
           # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
           # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
@@ -74,6 +75,17 @@ jobs:
             --append-system-prompt-file .claude/agents/incident-retro.md --model opus --max-turns 120
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git checkout -b:*),Bash(git switch -c:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(git diff:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh run list:*),Bash(gh api -X GET:*),Bash(npm test:*),Bash(node --test:*)"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr create:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh issue comment:*),Bash(gh issue create:*)"
+      - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
+        continue-on-error: true   # a metric never fails the job
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          TM_FILE: ${{ steps.claude.outputs.execution_file }}
+          TM_ROLE: "retro"
+          TM_SUBJECT: "${{ inputs.incident || github.event.issue.number || '' }}"
+          TM_SHA: ""
+          TM_ATTEMPT: ""
+          TM_ARGS: "opus"
+        run: node "$RUNNER_TEMP/frozen/scripts/gates/gate.js" metrics --file "$TM_FILE"   # the copy frozen before the model started
       - name: Package the proposal commits
         if: always()
         run: |

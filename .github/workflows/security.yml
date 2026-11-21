@@ -72,6 +72,17 @@ jobs:
             --allowedTools "Read,Grep,Glob"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
             --json-schema '${{ steps.s.outputs.schema }}'
+      - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
+        continue-on-error: true   # a metric never fails the job
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          TM_FILE: ${{ steps.claude.outputs.execution_file }}
+          TM_ROLE: "security"
+          TM_SUBJECT: "${{ github.event.pull_request.number || github.event.issue.number }}"
+          TM_SHA: "${{ github.event.pull_request.head.sha || '' }}"
+          TM_ATTEMPT: ""
+          TM_ARGS: "opus"
+        run: node scripts/gates/gate.js metrics --file "$TM_FILE"
       - name: Blocking status
         if: steps.s.outputs.carried != 'true'
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }

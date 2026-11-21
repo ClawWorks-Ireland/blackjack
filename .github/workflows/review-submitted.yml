@@ -1,6 +1,8 @@
 # Shim: pull_request_review runs use the PR's own workflow files, so this does
 # nothing but exist. tier-approval.yml listens for its completion via
-# workflow_run, which always runs the base-branch version.
+# workflow_run, which always runs the base-branch version. The job is always
+# skipped (team v2.13): a skipped run still completes and fires workflow_run,
+# so no key VM boots just to echo.
 name: review-submitted
 on:
   pull_request_review:
@@ -8,6 +10,7 @@ on:
 permissions: {}
 jobs:
   note:
+    if: github.event_name == 'never'
     runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 2
     steps:
