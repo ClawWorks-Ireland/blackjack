@@ -26,7 +26,7 @@
  *   GET  /api/leaderboard                  ?kind=ai|human: players ranked by units won per 100 rounds
  *
  * Poker (CLA-121) has the same routes under /api/poker/: tables (POST takes
- * {name, smallBlind, bigBlind, buyIn, bots: [styles] or a count, turnSeconds}),
+ * {name, smallBlind, bigBlind, buyIn, bots: a count from 0 to 5 or a list of styles, turnSeconds}),
  * a table, events, wait, join, act ({action, amount} where amount is the
  * "to" total for bet and raise), leave, and /api/poker/leaderboard in big
  * blinds per 100 hands.

@@ -72,3 +72,39 @@ test('poker server: the clock checks or folds for a slow player, bots never play
     assert.equal((await api(s.url, 'GET', '/api/poker/tables/p99')).status, 404);
   } finally { await s.close(); }
 });
+
+test('poker server: a bad bots count is a 400, not a 500', async () => {
+  const s = await start();
+  try {
+    const MSG = 'bots must be a whole number from 0 to 5, or a list of styles';
+    const post = (b) => api(s.url, 'POST', '/api/poker/tables', b);
+    const created = [];
+    const ok = async (b) => { const r = await post(b); assert.equal(r.status, 201, JSON.stringify(b)); created.push(r.body.id); return r.body; };
+    for (const b of [-1, 1.5, '2', true, {}]) {
+      const r = await post({ bots: b });
+      assert.equal(r.status, 400, JSON.stringify(b));
+      assert.deepEqual(r.body, { error: MSG });
+    }
+    for (const b of [6, 1e9, 1e10]) {
+      const t0 = Date.now();
+      const r = await post({ bots: b });
+      assert.equal(r.status, 400);
+      assert.deepEqual(r.body, { error: 'At most 5 bots' });
+      assert.ok(Date.now() - t0 < 1000, 'fast refusal');
+    }
+    const seated = (t) => t.seats.filter(Boolean);
+    assert.equal(seated(await ok({ bots: 0 })).length, 0);
+    const five = await ok({ bots: 5 });
+    assert.deepEqual(seated(five).map((x) => x.name), ['Bot 1', 'Bot 2', 'Bot 3', 'Bot 4', 'Bot 5']);
+    assert.equal(five.free, 1);
+    assert.equal(seated(await ok({})).length, 0);
+    assert.equal(seated(await ok({ bots: null })).length, 0);
+    await ok({ bots: ['calling-station', 'maniac'] });
+    assert.equal((await post({ bots: ['shark'] })).status, 400);
+    const six = await post({ bots: Array(6).fill('default') });
+    assert.equal(six.status, 400);
+    assert.deepEqual(six.body, { error: 'At most 5 bots' });
+    const list = await api(s.url, 'GET', '/api/poker/tables');
+    assert.deepEqual(list.body.tables.map((t) => t.id).sort(), [...created].sort());
+  } finally { await s.close(); }
+});
