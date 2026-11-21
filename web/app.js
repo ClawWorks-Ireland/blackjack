@@ -40,6 +40,8 @@
   let sessionShoes = []; // finished shoes this session
   let reports = [];      // saved shoe summaries, newest first (set after storage is ready)
   let pendingReport = null; // a shoe report held back because a hand was dealt before it opened (B16)
+  const REPORT_GRACE_MS = 500; // a click on a deal control this soon after a report opens by itself still deals (#99)
+  let reportGraceUntil = 0; // performance.now() when that grace window ends
   let reportShown = null; // the shoe the report dialog is showing (for the end-count check)
   let roundBefore = null; // F19: bankroll and count at this round's deal, for its replay record
   const REPLAY_KEEP = 20; // rounds that keep a replay record
@@ -499,7 +501,7 @@
    */
   function queueReport(shoe, delay) {
     setTimeout(() => {
-      if (!inFlight && game.phase !== 'player' && game.phase !== 'insurance') showReport(shoe);
+      if (!inFlight && game.phase !== 'player' && game.phase !== 'insurance') { showReport(shoe); reportGraceUntil = performance.now() + REPORT_GRACE_MS; }
       else pendingReport = shoe;
     }, delay);
   }
@@ -629,6 +631,7 @@
       const held = pendingReport;
       pendingReport = null;
       showReport(held);
+      reportGraceUntil = performance.now() + REPORT_GRACE_MS;
     }
 
     els.dealerTotal.textContent = !game.dealer.length ? ''
@@ -1653,7 +1656,22 @@
     if (e.key === 'ArrowLeft') { e.preventDefault(); els.replayPrev.click(); }
   });
   els.reportClose.addEventListener('click', () => els.reportDialog.close());
-  els.reportDialog.addEventListener('click', (e) => { if (e.target === els.reportDialog) els.reportDialog.close(); });
+  els.reportDialog.addEventListener('close', () => { reportGraceUntil = 0; });
+  els.reportDialog.addEventListener('click', (e) => {
+    if (e.target !== els.reportDialog) return;
+    if (performance.now() >= reportGraceUntil) { els.reportDialog.close(); return; }
+    // Grace window: a click meant for Deal or Rebet, which the report covered, still deals (#99).
+    const control = [els.deal, els.rebet, els.rebet2].find((c) => {
+      if (c.disabled || c.hidden || c.offsetParent === null) return false;
+      const r = c.getBoundingClientRect();
+      return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    });
+    if (!control) return; // not on a deal control: stay open
+    const held = reportShown;
+    els.reportDialog.close();
+    pendingReport = held; // reopens after the dealt hand settles
+    control.click();
+  });
 
   // --- Bankroll estimates (F16) ---
 
