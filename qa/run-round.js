@@ -60,6 +60,7 @@ const STEPS = [
   ['F18-F20 UI', 'f18_f20_ui_check.js', [url, out], 'report.js'],
   ['B16 report timing', 'b16_ui_check.js', [url], 'report.js'],
   ['B99 report click', 'b99_report_click_check.js', [url], 'report.js'],
+  ['B109 report keys', 'b109_report_key_check.js', [url], 'report.js'],
   ['poker lobby UI', 'poker_lobby_check.js', [snap, out, String(port + 1)], 'lobby.html'],
 ];
 
