@@ -9,7 +9,7 @@ on:
     types: [completed]
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write   # requests Delmar's review while a PR waits for his approval (team v2.12)
   issues: read
   statuses: write
 jobs:

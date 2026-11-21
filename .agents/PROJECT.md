@@ -42,5 +42,5 @@ implementer_extra_commands:   # project commands implementers may run
 implementer_notes: Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js` so the macOS app embeds the current engine (npm test checks it).
 node_version: 22
 # Per-role model and effort (team v2.11, REQ-CFG-8). Unset roles keep the template defaults.
-model_orchestrator: sonnet   # 2026-11-20: the hourly sweep was 41% of the day's Claude cost on Opus; triage and the digest are routine
-effort_orchestrator: low
+# 2026-11-21: orchestrator back to the default (Opus, default effort). Sonnet at low effort ran sweeps in 3-5 turns
+# and left 6 answered asks unprocessed for 3+ hours (#112, #113, #43-#45, #48).
