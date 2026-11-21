@@ -47,6 +47,7 @@ const STEPS = [
   ['F15-F17 engine', 'f15_f17_check.js', [snap], 'bankroll.js'],
   ['F18-F20 engine', 'f18_f20_check.js', [snap], 'report.js'],
   ['UI playtest', 'ui_playtest.js', [snap, out, rounds], null],
+  ['deal race', 'deal_race_check.js', [snap, out], null],
   ['feature checks', 'feature_checks.js', [snap, out], null],
   ['F5/F8/F9 UI', 'f5_f8_f9_check.js', [snap, out], null],
   ['F7/F10 UI', 'f7_f10_check.js', [snap, out], 'stats.js'],
@@ -76,9 +77,7 @@ function run(cmd, argv, cwd) {
 // report most checks print ({checks: {name: {pass}}, errors: [...]}).
 function judge(name, { code, text }) {
   if (name === 'unit tests') {
-    const pass = Number((text.match(/ℹ pass (\d+)/) || [])[1] || 0);
-    const fail = Number((text.match(/ℹ fail (\d+)/) || [])[1] || 0);
-    return { ok: code === 0 && fail === 0, detail: `${pass} pass, ${fail} fail` };
+    return require('./lib/judge').judgeUnitTests({ code, text });
   }
   let json = null;
   const start = text.indexOf('{');
@@ -115,7 +114,7 @@ function judge(name, { code, text }) {
       const started = Date.now();
       const res = script
         ? await run(process.execPath, [path.join(QA, script), ...argv], QA)
-        : await run(process.execPath, ['--test'], snap); // finds engine/, web/ and agent/ tests too
+        : await run(process.execPath, ['--test', '--test-reporter=tap'], snap); // finds engine/, web/ and agent/ tests too
       fs.writeFileSync(path.join(out, `${script ? path.basename(script, '.js') : 'unit_tests'}.out`), res.text);
       const verdict = judge(name, res);
       results.push({ name, ...verdict, seconds: Math.round((Date.now() - started) / 1000) });

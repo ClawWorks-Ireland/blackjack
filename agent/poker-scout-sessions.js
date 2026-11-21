@@ -7,6 +7,7 @@
  * ends. A rerun discards the rows of unfinished sessions and replays them.
  *
  *   node agent/poker-scout-sessions.js run [--styles a,b] [--sessions 40] [--hands 30] [--watch 300] [--seed sessions]
+ *   node agent/poker-scout-sessions.js report [--diagnose STYLE]
  */
 'use strict';
 const fs = require('fs');
@@ -106,10 +107,135 @@ async function run(opts = {}) {
   return { stopped: false };
 }
 
+const ROWS = path.join(DATA, 'poker-scout-sessions.jsonl');
+const r1 = (x) => Math.round(x * 10) / 10;
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+/** mean and 95% half-width (1.96 x sample sd / sqrt n) of xs, scaled by `k`. */
+const ci = (xs, k = 1) => {
+  const n = xs.length;
+  if (!n) return { n: 0, mean: null, ci95: null };
+  const m = mean(xs);
+  const sd = n > 1 ? Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1)) : 0;
+  return { n, mean: r1(m * k), ci95: n > 1 ? r1((1.96 * sd * k) / Math.sqrt(n)) : null };
+};
+const readRows = (file) => fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+
+/** Complete sessions of one style: {hero: Map(session -> rows sorted by handIndex)}. A triple is complete when it has as many hands as the fullest one. */
+function sessionsOf(rows, style, seed) {
+  const triples = new Map();
+  const mine = rows.filter((r) => r.style === style);
+  // One jsonl can hold several seeds: use the given seed, else the most recent one.
+  const use = seed !== undefined && mine.some((r) => r.seed === seed) ? seed : (mine.length ? mine[mine.length - 1].seed : undefined);
+  for (const r of mine) {
+    if (r.seed !== use) continue;
+    const k = `${r.hero}|${r.session}`;
+    if (!triples.has(k)) triples.set(k, new Map());
+    triples.get(k).set(`${r.pair}:${r.seat}`, r);
+  }
+  const full = Math.max(0, ...[...triples.values()].map((m) => m.size));
+  const out = { cold: new Map(), scouted: new Map() };
+  for (const [k, m] of triples) {
+    const [hero, session] = k.split('|');
+    if (m.size === full && out[hero]) out[hero].set(Number(session), [...m.values()].sort((a, b) => a.handIndex - b.handIndex));
+  }
+  return out;
+}
+
+/** Per style: each hero's bb/100, scouted minus cold with the session as the unit (overall and by hand bucket), and the scout's read. */
+function report(file = ROWS, dataDir = DATA, { bucket = 10, buckets = 3 } = {}) {
+  const rows = readRows(file);
+  const out = {};
+  for (const style of [...new Set(rows.map((r) => r.style))]) {
+    let frozen = null;
+    try { frozen = JSON.parse(fs.readFileSync(path.join(dataDir, `poker-scout-sessions-${style}.json`), 'utf8')); } catch (_) { /* no frozen report */ }
+    const s = sessionsOf(rows, style, frozen && frozen.seed);
+    const o = { heroes: {}, diff: null, buckets: [], read: null };
+    for (const hero of ['cold', 'scouted']) {
+      const all = [...s[hero].values()].flat().map((r) => r.bb);
+      o.heroes[hero] = { ...ci(all, 100), hands: all.length, sessions: s[hero].size };
+    }
+    const both = [...s.scouted.keys()].filter((k) => s.cold.has(k));
+    const per100 = (hands) => (hands.length ? (mean(hands.map((r) => r.bb)) * 100) : null);
+    const delta = (lo, hi) => both.map((k) => {
+      const part = (hero) => per100(s[hero].get(k).filter((r) => r.handIndex >= lo && r.handIndex < hi));
+      const a = part('scouted');
+      const b = part('cold');
+      return a === null || b === null ? null : a - b;
+    }).filter((d) => d !== null);
+    o.diff = ci(delta(0, Infinity));
+    for (let i = 0; i < buckets; i++) o.buckets.push({ label: `hands ${i * bucket + 1}-${(i + 1) * bucket}`, ...ci(delta(i * bucket, (i + 1) * bucket)) });
+    try {
+      const read = frozen.read;
+      o.read = { style: read.style, confidence: read.confidence, vpip: read.stats.vpip, pfr: read.stats.pfr, aggression: read.stats.aggression, foldToBet: read.stats.foldToBet };
+    } catch (_) { /* no frozen report */ }
+    out[style] = o;
+  }
+  return out;
+}
+
+const KINDS = ['bluff', 'thin', 'value', 'call', 'fold'];
+
+/** Per hero: bb by main-move kind (overall and for the first `early` hands), the call-down rate, and the showdown win rate of river calls. */
+function diagnose(file = ROWS, style, { early = 10, dataDir = DATA } = {}) {
+  let seed;
+  try { seed = JSON.parse(fs.readFileSync(path.join(dataDir, `poker-scout-sessions-${style}.json`), 'utf8')).seed; } catch (_) { /* no frozen report */ }
+  const s = sessionsOf(readRows(file), style, seed);
+  const out = {};
+  for (const hero of ['cold', 'scouted']) {
+    const rows = [...s[hero].values()].flat();
+    const kinds = (rs) => Object.fromEntries(KINDS.map((k) => {
+      const m = rs.filter((r) => r.mainMove === k);
+      const bb = m.reduce((a, r) => a + r.bb, 0);
+      return [k, { n: m.length, bb, perMove: m.length ? r1(bb / m.length) : null }];
+    }));
+    const faced = rows.filter((r) => r.facedRiverBet).length;
+    const called = rows.filter((r) => r.riverCall);
+    const shown = called.filter((r) => r.showdown);
+    out[hero] = {
+      kinds: kinds(rows),
+      early: kinds(rows.filter((r) => r.handIndex < early)),
+      callDown: faced ? called.length / faced : null,
+      showdownWin: shown.length ? shown.filter((r) => r.bb > 0).length / shown.length : null,
+    };
+  }
+  return out;
+}
+
+const sign = (x) => (x === null ? '?' : `${x >= 0 ? '+' : ''}${x}`);
+const pm = (x) => `${sign(x.mean)} ± ${x.ci95 ?? '?'}`;
+const pct = (x) => (x === null ? '?' : `${Math.round(x * 100)}%`);
+
+function printReport(res) {
+  for (const [style, v] of Object.entries(res)) {
+    console.log(`\n${style}`);
+    if (v.read) console.log(`  ${'scout read'.padEnd(36)} ${v.read.style} (${v.read.confidence}); VPIP ${v.read.vpip}, PFR ${v.read.pfr}, aggression ${v.read.aggression}, fold to bet ${v.read.foldToBet}`);
+    for (const [hero, x] of Object.entries(v.heroes)) console.log(`  ${hero.padEnd(36)} ${pm(x)} bb/100 (${x.hands} hands, ${x.sessions} sessions)`);
+    console.log(`  ${'scouted minus cold, per session'.padEnd(36)} ${pm(v.diff)} bb/100 (${v.diff.n} sessions)`);
+    for (const b of v.buckets) console.log(`  ${`  ${b.label}`.padEnd(36)} ${pm(b)} bb/100 (${b.n} sessions)`);
+  }
+}
+
+function printDiagnose(style, res) {
+  console.log(`\n${style}`);
+  for (const [hero, x] of Object.entries(res)) {
+    console.log(`  ${hero}: call-down ${pct(x.callDown)}, river calls that won at showdown ${pct(x.showdownWin)}`);
+    for (const [label, ks] of [['all hands', x.kinds], ['first hands', x.early]]) {
+      console.log(`    ${label}: ${KINDS.map((k) => `${k} ${ks[k].n} (${sign(ks[k].bb)} bb, ${ks[k].perMove === null ? '?' : sign(ks[k].perMove)}/move)`).join('; ')}`);
+    }
+  }
+}
+
 if (require.main === module) {
   const [cmd, ...a] = process.argv.slice(2);
   const flag = (n, d) => { const i = a.indexOf(n); return i === -1 ? d : a[i + 1]; };
-  if (cmd !== 'run') { console.error('usage: node agent/poker-scout-sessions.js run [--styles a,b] [--sessions 40] [--hands 30] [--watch 300] [--seed sessions]'); process.exit(1); }
+  if (cmd === 'report') {
+    if (!fs.existsSync(ROWS)) { console.error('no rows yet: run the "run" command first'); process.exit(1); }
+    if (a.includes('--diagnose') && !flag('--diagnose')) { console.error('usage: report --diagnose STYLE'); process.exit(1); }
+    if (flag('--diagnose')) printDiagnose(flag('--diagnose'), diagnose(ROWS, flag('--diagnose')));
+    else printReport(report());
+    process.exit(0);
+  }
+  if (cmd !== 'run') { console.error('usage: node agent/poker-scout-sessions.js run [--styles a,b] [--sessions 40] [--hands 30] [--watch 300] [--seed sessions] | report [--diagnose STYLE]'); process.exit(1); }
   const opts = { sessions: Number(flag('--sessions', 40)), hands: Number(flag('--hands', 30)), watch: Number(flag('--watch', 300)), seed: flag('--seed', 'sessions') };
   if (flag('--styles')) opts.styles = flag('--styles').split(',');
   const stop = () => process.exit(0);
@@ -118,4 +244,4 @@ if (require.main === module) {
   run(opts).then(() => log('finished')).catch((e) => { console.error(e.usage ? `usage: ${e.message}` : e.stack); process.exit(e.usage ? 1 : 2); });
 }
 
-module.exports = { run, ALL };
+module.exports = { run, report, diagnose, ALL };
