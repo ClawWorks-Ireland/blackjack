@@ -26,7 +26,6 @@ class LivePokerTable {
     this.id = id;
     this.name = cleanName(name) || `Poker ${id}`;
     this.timing = { ...DEFAULTS, ...hub.timing, ...timing };
-    if (!(bigBlind > 0) || !(smallBlind > 0) || smallBlind > bigBlind) throw new HubError('Blinds must be positive, small at most big');
     const order = ['tight-passive', 'calling-station', 'loose-aggressive', 'maniac', 'default'];
     let styles;
     if (bots == null) styles = [];
@@ -39,7 +38,12 @@ class LivePokerTable {
     if (styles.length > 5) throw new HubError('At most 5 bots');
     for (const s of styles) if (!POLICIES[s]) throw new HubError(`unknown bot style "${s}"`);
     this.buyIn = buyIn || 100 * bigBlind;
-    this.table = new PokerTable({ seed: seed || token(), smallBlind, bigBlind, seats: 6 });
+    try {
+      this.table = new PokerTable({ seed: seed || token(), smallBlind, bigBlind, seats: 6 });
+    } catch (e) {
+      if (e instanceof PokerError) throw new HubError(e.message, 400);
+      throw e;
+    }
     this.players = new Map(); // token -> {id, name, kind, seat, idle, style?}
     this.subscribers = new Set();
     this.waiters = new Set();
