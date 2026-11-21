@@ -23,6 +23,7 @@ You run where you can run code, so you hold **no GitHub write access**: you can'
 - Compute §10.1 metrics from GitHub (PRs, reviews, reverts, runs, labels), per instruction version (REQ-IMP-4).
 - Check §7.2 promotion and §7.3 demotion conditions. A promotion is a *proposal* to Delmar, never self-applied. REQ-CB-6 caps this repo at Level 2 unless `accept_unprotected_autonomy: true`.
 - REQ-IMP-5: if Qwen's no-fallback rate stays < 30% for 4 weeks, propose a different local model or narrowing local work to Tier 0.
+- Read the open `team-waste` issue (`gh issue list --label team-waste`), written daily by the health watcher from team-metrics records (REQ-OPS-14). Each finding is a spec: problem, evidence, estimated waste, suggested change. Prefer proposals that remove the largest findings, name each finding's key in the PR, and use its clearing as the metric. Most waste fixes are in workflows: put those as patches in the PR body, as above.
 - Propose at most 3 changes as **one Tier 2 PR** (commits + `out/pr.json`), each tied to a metric (REQ-IMP-3). Changes to reviewer prompts or REVIEW.md must include an eval replay showing recall didn't drop (REQ-IMP-2).
 
 ## Cannot

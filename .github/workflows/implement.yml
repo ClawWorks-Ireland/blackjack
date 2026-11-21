@@ -189,6 +189,7 @@ jobs:
           else echo "Ignoring hand-off run $HANDOFF_RUN ($W): only implement.yml dispatch runs on main count (A7 on #23)"; fi
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
         run: |
+          mkdir -p "$RUNNER_TEMP/frozen" && git archive HEAD scripts/gates | tar -x -C "$RUNNER_TEMP/frozen"   # team metrics (REQ-OPS-14)
           cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
           # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
           # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
@@ -211,6 +212,17 @@ jobs:
             --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(npm test:*),Bash(node --test:*),Bash(node macos/scripts/embed-engine.js:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh pr view:*)"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
+      - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
+        continue-on-error: true   # a metric never fails the job
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          TM_FILE: ${{ steps.claude.outputs.execution_file }}
+          TM_ROLE: "implement"
+          TM_SUBJECT: "${{ inputs.issue }}"
+          TM_SHA: ""
+          TM_ATTEMPT: "${{ inputs.attempt }}"
+          TM_ARGS: "sonnet"
+        run: node "$RUNNER_TEMP/frozen/scripts/gates/gate.js" metrics --file "$TM_FILE"   # the copy frozen before the model started
       - name: Attempt = implement + full suite; no policy paths
         id: t
         run: |
@@ -260,6 +272,7 @@ jobs:
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/verify.json")).replace(/\x27/g, "\\u0027")')" >> "$GITHUB_OUTPUT"   # no single quote can reach the '...' argument (blackjack#46)
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
         run: |
+          mkdir -p "$RUNNER_TEMP/frozen" && git archive "origin/$BASE" scripts/gates | tar -x -C "$RUNNER_TEMP/frozen"   # team metrics (REQ-OPS-14)
           git show "origin/$BASE:scripts/agents/policy-guard.js" > "$RUNNER_TEMP/job-guard.js"
           # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
           # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
@@ -281,6 +294,17 @@ jobs:
             --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(node --test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
             --json-schema '${{ steps.s.outputs.schema }}'
+      - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
+        continue-on-error: true   # a metric never fails the job
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          TM_FILE: ${{ steps.claude.outputs.execution_file }}
+          TM_ROLE: "self-verify"
+          TM_SUBJECT: "${{ inputs.issue }}"
+          TM_SHA: ""
+          TM_ATTEMPT: "${{ inputs.attempt }}"
+          TM_ARGS: "sonnet"
+        run: node "$RUNNER_TEMP/frozen/scripts/gates/gate.js" metrics --file "$TM_FILE"   # the copy frozen before the model started
       - id: v
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }
         run: |

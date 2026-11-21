@@ -333,19 +333,59 @@ function applyRepro(kept, repro = []) {
  */
 const USAGE_LIMIT_RE = /usage_limit_reached|usage limit reached|you(?:'|’)ve hit your (?:[\w-]+ )*limit|\b(?:5-hour|weekly|opus) limit\b|API Error: 429\b/i;
 
-/** The last `{type: "result"}` message in an execution file (JSON array or JSON lines). */
-function finalResult(text) {
+/** The messages of an execution file (JSON array or JSON lines). */
+function execMessages(text) {
   const s = String(text || '').trim();
-  if (!s) return null;
-  let msgs;
+  if (!s) return [];
   try {
     const j = JSON.parse(s);
-    msgs = Array.isArray(j) ? j : [j];
+    return Array.isArray(j) ? j : [j];
   } catch {
-    msgs = s.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } });
+    return s.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } });
   }
+}
+
+/** The last `{type: "result"}` message in an execution file (JSON array or JSON lines). */
+function finalResult(text) {
+  const msgs = execMessages(text);
   for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i] && msgs[i].type === 'result') return msgs[i];
   return null;
+}
+
+/**
+ * REQ-OPS-14 (team v2.14): one team-metrics record per Claude run, built from the run's own execution file
+ * by a step with no model. The health watcher reads these records (never job logs) to find wasted tokens
+ * and time. `ctx`: role, subject (issue or PR number), sha, attempt, args (the role's "model --effort x").
+ */
+function metricsRecord(text, ctx = {}) {
+  const msgs = execMessages(text).filter(Boolean);
+  const r = finalResult(text);
+  const init = msgs.find((m) => m.type === 'system' && m.subtype === 'init');
+  const clean = (v, re) => (re.test(String(v ?? '')) ? String(v) : null);
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const u = (r && r.usage) || {};
+  const effort = (/--effort (low|medium|high|xhigh|max)\b/.exec(ctx.args || '') || [])[1] || 'default';
+  return {
+    v: 1,
+    role: clean(ctx.role, /^[a-z][a-z0-9-]{0,40}$/) || 'unknown',
+    subject: clean(ctx.subject, /^[0-9]{1,7}$/) ? Number(ctx.subject) : null,
+    sha: clean(ctx.sha, /^[0-9a-f]{7,40}$/),
+    attempt: clean(ctx.attempt, /^[0-9]{1,3}$/) ? Number(ctx.attempt) : null,
+    model: clean(init && init.model, /^[A-Za-z0-9._:\[\]-]{1,60}$/) || clean((ctx.args || '').split(' ')[0], /^[a-z0-9.-]{1,60}$/),
+    effort,
+    outcome: r ? clean(r.subtype, /^[a-z_]{1,40}$/) || 'unknown' : 'no-result',
+    error: r ? r.is_error === true : true,
+    turns: n(r && r.num_turns),
+    cost: Math.round(n(r && r.total_cost_usd) * 1e4) / 1e4,
+    ms: n(r && r.duration_ms),
+    denials: r ? (Array.isArray(r.permission_denials) ? r.permission_denials.length : n(r.permission_denials_count)) : 0,
+    tokens: { in: n(u.input_tokens), out: n(u.output_tokens), cacheRead: n(u.cache_read_input_tokens), cacheWrite: n(u.cache_creation_input_tokens) },
+  };
+}
+
+/** The record as a GitHub Actions notice titled team-metrics (one line; `%` escaped per the workflow-command rules). */
+function metricsNotice(rec) {
+  return `::notice title=team-metrics::${JSON.stringify(rec).replace(/%/g, '%25')}`;
 }
 
 function isUsageLimited(text) {
@@ -646,5 +686,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, qaCoveredPrs, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, execMessages, metricsRecord, metricsNotice, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

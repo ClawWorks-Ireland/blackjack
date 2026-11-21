@@ -40,7 +40,6 @@
 .github/workflows/security.yml
 .github/workflows/spec-plan.yml
 .github/workflows/tier-approval.yml
-.github/workflows/tier2-cooling.yml
 scripts/agents/local-implement.sh
 scripts/agents/local-implement.test.js
 scripts/agents/package.json

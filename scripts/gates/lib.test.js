@@ -491,3 +491,25 @@ test('qaCoveredPrs: a QA round covers every PR merged since the last trusted qa 
   // the round's own commit counts even if it already has a qa status (a re-run)
   assert.deepEqual(await nums(fakes({ d: G.GATE_BOT, a: G.GATE_BOT })), [4, 3]);
 });
+
+test('REQ-OPS-14 metrics record: built from the execution file, inputs validated', () => {
+  const exec = JSON.stringify([
+    { type: 'system', subtype: 'init', model: 'claude-opus-5-5' },
+    { type: 'assistant', message: { content: [] } },
+    { type: 'result', subtype: 'success', is_error: false, num_turns: 29, total_cost_usd: 0.70999180001, duration_ms: 125643,
+      permission_denials: [{ tool_name: 'Bash' }, { tool_name: 'Edit' }], usage: { input_tokens: 10, output_tokens: 2000, cache_read_input_tokens: 90000, cache_creation_input_tokens: 5000 } },
+  ]);
+  const r = G.metricsRecord(exec, { role: 'orchestrator', subject: '43', sha: 'abc1234', args: 'opus --effort high' });
+  assert.deepEqual(r, { v: 1, role: 'orchestrator', subject: 43, sha: 'abc1234', attempt: null, model: 'claude-opus-5-5', effort: 'high',
+    outcome: 'success', error: false, turns: 29, cost: 0.71, ms: 125643, denials: 2, tokens: { in: 10, out: 2000, cacheRead: 90000, cacheWrite: 5000 } });
+  // the stream-json variant reports a count; a max-turns stop is an error outcome
+  const lines = [JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, num_turns: 50, total_cost_usd: 1.2, permission_denials_count: 6 })].join('\n');
+  const m = G.metricsRecord(lines, { role: 'review-hunt', args: 'sonnet' });
+  assert.deepEqual([m.outcome, m.error, m.denials, m.model, m.effort, m.subject], ['error_max_turns', true, 6, 'sonnet', 'default', null]);
+  // no file (the run died before a result) and hostile context values
+  const x = G.metricsRecord('', { role: 'Bad Role; rm', subject: '12abc', sha: 'zz', attempt: '2' });
+  assert.deepEqual([x.outcome, x.error, x.role, x.subject, x.sha, x.attempt], ['no-result', true, 'unknown', null, null, 2]);
+  // one line, % escaped for the workflow-command parser
+  const notice = G.metricsNotice({ role: 'a', note: '100%\nx' });
+  assert.ok(notice.startsWith('::notice title=team-metrics::') && !notice.includes('\n') && notice.includes('100%25'));
+});

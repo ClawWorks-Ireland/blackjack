@@ -25,6 +25,7 @@
  *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; sandbox VM)
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
+ *   gate.js metrics --file F                  REQ-OPS-14: print F's team-metrics notice (env TM_ROLE, TM_SUBJECT, TM_SHA, TM_ATTEMPT, TM_ARGS)
  *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
  *
  * Token: GITHUB_TOKEN or GH_TOKEN. Repo: GITHUB_REPOSITORY (owner/name).
@@ -125,14 +126,24 @@ async function verdictFor(n, lvl, behindCheck = true, refresh = false) {
     const cmp = await gh('GET', repo(`/compare/${head}...${f.pr.base.ref}`));
     behindBy = cmp.ahead_by; // commits on main the PR head doesn't have
   }
-  const v = G.mergeVerdict({ pr: f.pr, statuses, checkRuns, reviews: f.reviews, tier: f.tier, level: lvl,
-    coolingHours: overlayNumber('tier2_cooling_hours', 0), behindBy });
-  // Keep the visible tier-approval status in step with the live one (it goes stale when the level changes).
+  const coolingHours = overlayNumber('tier2_cooling_hours', 0);
+  // The merge sweep keeps the visible tier-approval and tier2-cooling statuses in step with the live ones, before
+  // judging: tier-approval goes stale when the level changes, and cooling ends on the clock with no event.
+  // This hourly refresh replaced the separate tier2-cooling workflow (team v2.13).
   if (refresh) {
-    const live = G.tierApprovalStatus({ tier: f.tier, level: lvl, reviews: f.reviews, headSha: head });
-    const stored = G.trustedStatuses(statuses)['tier-approval'];
-    if (!stored || stored.state !== live.state) await setStatus(head, 'tier-approval', live.state, live.description);
+    const stored = G.trustedStatuses(statuses);
+    const live = {
+      'tier-approval': G.tierApprovalStatus({ tier: f.tier, level: lvl, reviews: f.reviews, headSha: head }),
+      'tier2-cooling': G.coolingStatus({ tier: f.tier, reviews: f.reviews, headSha: head, labels: f.pr.labels, hours: coolingHours }),
+    };
+    for (const [ctx, s] of Object.entries(live)) {
+      if (stored[ctx] && stored[ctx].state === s.state) continue;
+      const posted = await setStatus(head, ctx, s.state, s.description);
+      if (posted && posted.context) statuses.unshift(posted);
+    }
   }
+  const v = G.mergeVerdict({ pr: f.pr, statuses, checkRuns, reviews: f.reviews, tier: f.tier, level: lvl,
+    coolingHours, behindBy });
   return { ...v, number: n, sha: head, tier: f.tier, created: f.pr.created_at };
 }
 
@@ -655,8 +666,15 @@ commands['throttle-check'] = async () => {
   console.log('opened throttled issue');
 };
 
+// REQ-OPS-14: no token and no API call; a missing file still emits a no-result record (the run died early).
+commands.metrics = async () => {
+  const text = args.file && fs.existsSync(args.file) ? fs.readFileSync(args.file, 'utf8') : '';
+  const e = process.env;
+  console.log(G.metricsNotice(G.metricsRecord(text, { role: e.TM_ROLE, subject: e.TM_SUBJECT, sha: e.TM_SHA, attempt: e.TM_ATTEMPT, args: e.TM_ARGS })));
+};
+
 const cmd = commands[process.argv[2]];
 if (!cmd) { console.error(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 21).join('\n')); process.exit(2); }
-const OFFLINE = new Set(['repro-run', 'manual-checks']);   // no API calls: they run without a token
+const OFFLINE = new Set(['repro-run', 'manual-checks', 'metrics']);   // no API calls: they run without a token
 if (!TOKEN && !OFFLINE.has(process.argv[2])) { console.error('GITHUB_TOKEN or GH_TOKEN is required'); process.exit(2); }
 cmd().catch((e) => { console.error(e.message); process.exit(1); });
