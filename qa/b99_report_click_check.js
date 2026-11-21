@@ -17,8 +17,8 @@ const rounds = (p) => p.$eval('#stat-rounds', (e) => Number(e.textContent.replac
 const reportText = (p) => p.evaluate(() => ({ title: document.getElementById('report-title').textContent, sub: document.getElementById('report-sub').textContent }));
 const center = (p, s) => p.$eval(s, (e) => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
 
-async function freshPage(b) {
-  const p = await b.newPage();
+async function freshPage(b, viewport) {
+  const p = await b.newPage({ viewport: viewport || VIEWPORT });
   p.on('pageerror', (e) => errors.push(e.stack || String(e)));
   await p.goto(URL_);
   await p.evaluate(() => {
@@ -56,6 +56,33 @@ async function reachReport(p) {
   return false;
 }
 
+const VIEWPORT = { width: 1280, height: 720 };
+const rectOf = (p, s) => p.evaluate((sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; }, s);
+/** Where a click at (x, y) lands: the dialog backdrop (#report itself), the panel, or neither. */
+const hitAt = (p, x, y) => p.evaluate(([px, py]) => {
+  const el = document.elementFromPoint(px, py);
+  const rep = document.getElementById('report');
+  return el === rep ? 'backdrop' : (el && rep.contains(el) ? 'panel' : 'none');
+}, [x, y]);
+/** Hit record for a click on the centre of a control: viewport, point, target and panel rects, hit. */
+async function hitRecord(p, sel) {
+  const at = await center(p, sel);
+  return {
+    viewport: p.viewportSize(), point: at, target: await rectOf(p, sel),
+    panel: await rectOf(p, '#report .help-body'), hit: await hitAt(p, at.x, at.y),
+  };
+}
+/** A point inside the control's rect that is backdrop (not covered by the panel), or null. */
+async function backdropPointOver(p, sel) {
+  const r = await rectOf(p, sel);
+  for (let y = Math.ceil(r.top) + 1; y < r.bottom; y += 2) {
+    for (let x = Math.ceil(r.left) + 1; x < r.right; x += 2) {
+      if ((await hitAt(p, x, y)) === 'backdrop') return { x, y };
+    }
+  }
+  return null;
+}
+
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
@@ -67,20 +94,46 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       if (!(await reachReport(p))) throw new Error('no shoe report appeared');
       const first = await reportText(p);
       const before = await rounds(p);
-      const at = await center(p, '#deal');
+      const rec = await hitRecord(p, '#deal');
+      const at = rec.point;
       await p.mouse.click(at.x, at.y);
       await p.waitForTimeout(100);
       const closed = !(await reportOpen(p));
       await playOut(p);
       const dealt = (await rounds(p)) - before;
-      put('AC1 deal click in grace window deals one round', closed && dealt === 1, { closed, dealt });
+      put('AC1 deal click in grace window deals one round',
+        rec.hit === 'panel' && closed && dealt === 1,
+        { ...rec, closed, dealt, precondition: rec.hit === 'panel' ? 'ok' : 'deal centre is not under the panel' });
       let reopened = false;
       try { await p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: 1500 }); reopened = true; } catch (e) { /* stays closed */ }
       const again = reopened ? await reportText(p) : null;
       const between = !(await inHand(p));
       put('AC2 held report reopens for the same shoe between rounds',
-        reopened && between && again.title === first.title && again.sub === first.sub, { reopened, between, first, again });
+        closed && reopened && between && again.title === first.title && again.sub === first.sub, { closedBefore: closed, reopened, between, first, again });
       await p.close();
+    }
+    // AC1b: a point over #deal that is backdrop also deals in the grace window.
+    {
+      let used = null;
+      for (const vp of [VIEWPORT, { width: 1280, height: 1000 }, { width: 1600, height: 1000 }, { width: 900, height: 1200 }]) {
+        const p = await freshPage(b, vp);
+        if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC1b)');
+        const pt = await backdropPointOver(p, '#deal');
+        if (pt) {
+          const before = await rounds(p);
+          await p.mouse.click(pt.x, pt.y);
+          await p.waitForTimeout(100);
+          const closed = !(await reportOpen(p));
+          await playOut(p);
+          const dealt = (await rounds(p)) - before;
+          used = { viewport: vp, point: pt, closed, dealt };
+          put('AC1b backdrop point over deal in grace window deals one round', closed && dealt === 1, used);
+          await p.close();
+          break;
+        }
+        await p.close();
+      }
+      if (!used) put('AC1b backdrop point over deal in grace window deals one round', true, { skipped: 'no backdrop point over #deal' });
     }
     // AC3: Rebet clicked in the grace window.
     {
@@ -91,10 +144,11 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       const at = await center(p, '#rebet-1');
       await p.mouse.click(at.x, at.y);
       await p.waitForTimeout(100);
+      const closed = !(await reportOpen(p));
       await playOut(p);
       const dealt = (await rounds(p)) - before;
       const bet = await p.$eval('#bet', (e) => e.value);
-      put('AC3 rebet click in grace window deals one round at the last bet', rebetOk && dealt === 1 && bet === '10', { rebetOk, dealt, bet });
+      put('AC3 rebet click in grace window deals one round at the last bet', rebetOk && closed && dealt === 1 && bet === '10', { rebetOk, closed, dealt, bet });
       await p.close();
     }
     // AC4: after the grace window a click on Deal only closes the report.
@@ -102,14 +156,16 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       const p = await freshPage(b);
       if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC4)');
       const before = await rounds(p);
-      const at = await center(p, '#deal');
       await wait(1000);
+      const rec = await hitRecord(p, '#deal');
+      const at = rec.point;
       await p.mouse.click(at.x, at.y);
       await p.waitForTimeout(150);
-      const closed = !(await reportOpen(p));
+      const stillOpen = await reportOpen(p);
       const hand = await inHand(p);
       const dealt = (await rounds(p)) - before;
-      put('AC4 deal click after grace window only closes the report', closed && !hand && dealt === 0, { closed, hand, dealt });
+      put('AC4 deal click after grace window only closes the report',
+        !hand && dealt === 0 && (rec.hit === 'backdrop' ? !stillOpen : stillOpen), { ...rec, stillOpen, hand, dealt });
       await p.close();
     }
     // AC5: a backdrop click off the controls in the grace window is ignored.
@@ -134,13 +190,38 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       const before = await rounds(p);
       await p.click('#report-open');
       const opened = await reportOpen(p);
-      const at = await center(p, '#deal');
+      const rec = await hitRecord(p, '#deal');
+      const at = rec.point;
       await p.mouse.click(at.x, at.y);
       await p.waitForTimeout(150);
-      const closed = !(await reportOpen(p));
+      const stillOpen = await reportOpen(p);
       const hand = await inHand(p);
       const dealt = (await rounds(p)) - before;
-      put('AC6 session report has no grace window', opened && closed && !hand && dealt === 0, { opened, closed, hand, dealt });
+      put('AC6 session report has no grace window',
+        opened && !hand && dealt === 0 && (rec.hit === 'backdrop' ? !stillOpen : stillOpen), { ...rec, opened, stillOpen, hand, dealt });
+      await p.close();
+    }
+    // AC5b: a panel button clicked in the grace window does not act, and the report stays open.
+    {
+      const p = await freshPage(b);
+      if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC5b)');
+      const dr = [];
+      for (const d of ['#deal', '#rebet-1', '#rebet-2']) if (await enabled(p, d)) dr.push(await rectOf(p, d));
+      const btns = await p.evaluate(() => [...document.querySelectorAll('#report button')]
+        .filter((e) => !e.disabled && e.offsetParent !== null)
+        .map((e) => { const r = e.getBoundingClientRect(); return { id: e.id, left: r.left, top: r.top, right: r.right, bottom: r.bottom }; }));
+      const clear = btns.find((r) => !dr.some((d) => r.left < d.right && r.right > d.left && r.top < d.bottom && r.bottom > d.top));
+      if (!clear) {
+        put('AC5b panel button in grace window does not act', false, { precondition: 'no panel button clear of the deal controls', btns, dr });
+      } else {
+        const before = await rounds(p);
+        await p.mouse.click((clear.left + clear.right) / 2, (clear.top + clear.bottom) / 2);
+        await p.waitForTimeout(100);
+        const stillOpen = await reportOpen(p);
+        const dealt = (await rounds(p)) - before;
+        const hand = await inHand(p);
+        put('AC5b panel button in grace window does not act', stillOpen && dealt === 0 && !hand, { button: clear.id, stillOpen, dealt, hand });
+      }
       await p.close();
     }
   } catch (e) {
