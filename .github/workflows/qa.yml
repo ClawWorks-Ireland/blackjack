@@ -1,6 +1,6 @@
-# Browser QA round (team v2.8, REQ-GATE-7): after every merge to main, run the project's QA command (the
-# overlay's qa_command; skipped if it has none) against that commit on a sandbox VM with headless Chrome, and
-# record the result as a `qa` status on the commit and a comment on the merged PR. A feature is Done only
+# Browser QA round (team v2.8, REQ-GATE-7): after merges to main, run the project's QA command (the
+# overlay's qa_command; skipped if it has none) against the latest main on a sandbox VM with headless Chrome,
+# and record the result as a `qa` status on the commit and a comment on every PR merged since the last round. A feature is Done only
 # after its acceptance criteria are verified (G12); for UI work this round is that record. No model.
 name: qa
 on:
@@ -11,8 +11,12 @@ on:
       sha: { description: 'Commit to test (default: main)', required: false, default: '' }
 permissions:
   contents: read
+# One round at a time on main (team v2.11.3): GitHub keeps one pending run per group, so a newer merge
+# replaces a round still waiting and QA tests the latest main. A round could hold the only sandbox VM for
+# 30-50 min after every merge, starving PR CI and repro (blackjack#102, 2026-11-20). A round in progress
+# finishes. A dispatch for a given commit gets its own group.
 concurrency:
-  group: qa-${{ inputs.sha || github.sha }}
+  group: qa-${{ inputs.sha && format('sha-{0}', inputs.sha) || 'main' }}
   cancel-in-progress: false
 env:
   QA_COMMAND: "npm run qa:ci"
