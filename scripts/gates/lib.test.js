@@ -513,3 +513,17 @@ test('REQ-OPS-14 metrics record: built from the execution file, inputs validated
   const notice = G.metricsNotice({ role: 'a', note: '100%\nx' });
   assert.ok(notice.startsWith('::notice title=team-metrics::') && !notice.includes('\n') && notice.includes('100%25'));
 });
+
+test('REQ-COORD-5: a spec approval settles by default only via the console, after the spec, with scope all', () => {
+  const spec = { id: 1, login: 'clawworks-spec-writer[bot]', body: '## Spec\nTIER: 2' };
+  const ask = { id: 2, login: 'clawworks-orchestrator[bot]', body: 'NEXT: @delmar, approve the spec? (A, recommended) yes' };
+  const dflt = { id: 3, login: 'clawworks-console[bot]', body: '<!-- ask-default:2 -->\nNo answer' };
+  const ON = { hours: 2, scope: 'all' };
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], ON), true);
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 2, scope: 'non-tier2' }), false, 'scope');
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 0, scope: 'all' }), false, 'off');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, login: 'clawworks-orchestrator[bot]' }], ON), false, 'forged by a model');
+  assert.equal(G.specApprovalDefaulted([ask, dflt, spec], ON), false, 'a newer spec needs a new answer');
+  assert.equal(G.specApprovalDefaulted([spec, { ...ask, body: 'NEXT: @delmar, close #126? (A, recommended)' }, dflt], ON), false, 'not a spec approval ask');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, body: '<!-- ask-default:9 -->' }], ON), false, 'default for another ask');
+});

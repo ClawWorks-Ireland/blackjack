@@ -445,10 +445,19 @@ commands['review-retry'] = async () => {
 // May the orchestrator approve this spec? Only if the issue doesn't need Delmar, isn't labelled Tier 2,
 // and the spec writer's latest spec declares `TIER: 0` or `TIER: 1` (A7 sec-2 on blackjack#68).
 // Only the spec writer's own comments count. Prints ok=true|false; the reason goes to stderr.
+// REQ-COORD-5 (team v2.15): or Delmar's ask about approving it was settled by default (overlay
+// `ask_default_scope: all`), which only the console App can post (lib.js specApprovalDefaulted).
+const overlayText = (key) => (projectMd().match(new RegExp(`^${key}:\\s*([\\w-]+)`, 'm')) || [])[1] || '';
 commands['spec-check'] = async () => {
   const no = (why) => { console.log('ok=false'); console.error(`spec-check: ${why}`); };
   const issue = await gh('GET', repo(`/issues/${args.issue}`));
   const labels = issue.labels.map((l) => l.name);
+  const comments = (await all(repo(`/issues/${args.issue}/comments`))).map((c) => ({ id: c.id, login: c.user && c.user.login, body: c.body }));
+  if (G.specApprovalDefaulted(comments, { hours: overlayNumber('ask_default_hours', 0), scope: overlayText('ask_default_scope') })) {
+    console.error('spec-check: approval settled by the ask default (REQ-COORD-5)');
+    console.log('ok=true');
+    return;
+  }
   if (labels.includes('needs-human')) return no('the issue needs Delmar');
   if (labels.includes('tier:2')) return no('the issue is Tier 2');
   const specs = (await all(repo(`/issues/${args.issue}/comments`)))

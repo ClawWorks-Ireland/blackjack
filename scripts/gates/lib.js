@@ -592,6 +592,23 @@ function declaredSpecTier(specText) {
   return all.length ? Math.max(...all) : null;
 }
 
+/**
+ * REQ-COORD-5 (team v2.15): did Delmar's ask default settle this spec's approval? True only when the overlay
+ * lets defaults cover everything (`ask_default_scope: all`, `ask_default_hours` > 0) and, after the spec
+ * writer's latest spec, the console App (posted by the health watcher on the PC, which no model can post as)
+ * marked an ask about approving the spec as defaulted. `comments` oldest first: [{ id, login, body }].
+ */
+function specApprovalDefaulted(comments, overlay = {}) {
+  if (!(overlay.hours > 0) || overlay.scope !== 'all') return false;
+  const isSpec = (c) => c.login === 'clawworks-spec-writer[bot]' && /^\s*#*\s*Spec\b/m.test(c.body || '');
+  let s = -1;
+  comments.forEach((c, i) => { if (isSpec(c)) s = i; });
+  if (s < 0) return false;
+  const after = comments.slice(s + 1);
+  const asks = new Map(after.filter((c) => /\[bot\]$/.test(c.login) && /approv\w*[^.\n]{0,40}\bspec\b|\bspec\b[^.\n]{0,40}approv/i.test(c.body || '')).map((c) => [String(c.id), c]));
+  return after.some((c) => c.login === 'clawworks-console[bot]' && asks.has((/<!-- ask-default:(\d+) -->/.exec(c.body || '') || [])[1]));
+}
+
 /** The coder Apps that open slice PRs (spec §8.5). */
 const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
 /**
@@ -686,5 +703,5 @@ module.exports = {
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, tierApprovalStatus, coolingStatus,
   trustedStatuses, qaCoveredPrs, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, execMessages, metricsRecord, metricsNotice, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };
