@@ -42,6 +42,7 @@
   let pendingReport = null; // a shoe report held back because a hand was dealt before it opened (B16)
   const REPORT_GRACE_MS = 500; // a click on a deal control this soon after a report opens by itself still deals (#99)
   let reportGraceUntil = 0; // performance.now() when that grace window ends
+  let reportFocusBefore = null; // the element focused just before the report opened by itself (#109)
   let reportShown = null; // the shoe the report dialog is showing (for the end-count check)
   let roundBefore = null; // F19: bankroll and count at this round's deal, for its replay record
   const REPLAY_KEEP = 20; // rounds that keep a replay record
@@ -493,6 +494,13 @@
     els[ADVICE_BUTTON[advice.action]].classList.add('suggested');
   }
 
+  /** Open a report by itself: remember where focus was, then start the grace window (#99, #109). */
+  function openReportWithGrace(shoe) {
+    reportFocusBefore = document.activeElement;
+    showReport(shoe);
+    reportGraceUntil = performance.now() + REPORT_GRACE_MS;
+  }
+
   /**
    * Open a shoe report after `delay` ms, but only between rounds: if a new
    * hand was dealt meanwhile, hold it, and render() opens it once that hand
@@ -501,7 +509,7 @@
    */
   function queueReport(shoe, delay) {
     setTimeout(() => {
-      if (!inFlight && game.phase !== 'player' && game.phase !== 'insurance') { showReport(shoe); reportGraceUntil = performance.now() + REPORT_GRACE_MS; }
+      if (!inFlight && game.phase !== 'player' && game.phase !== 'insurance') openReportWithGrace(shoe);
       else pendingReport = shoe;
     }, delay);
   }
@@ -630,8 +638,7 @@
     if (pendingReport && game.phase !== 'player' && game.phase !== 'insurance') {
       const held = pendingReport;
       pendingReport = null;
-      showReport(held);
-      reportGraceUntil = performance.now() + REPORT_GRACE_MS;
+      openReportWithGrace(held);
     }
 
     els.dealerTotal.textContent = !game.dealer.length ? ''
@@ -1656,7 +1663,22 @@
     if (e.key === 'ArrowLeft') { e.preventDefault(); els.replayPrev.click(); }
   });
   els.reportClose.addEventListener('click', () => els.reportDialog.close());
-  els.reportDialog.addEventListener('close', () => { reportGraceUntil = 0; });
+  els.reportDialog.addEventListener('close', () => { reportGraceUntil = 0; reportFocusBefore = null; });
+  // Grace window: Enter meant for Deal or Rebet, which the report covered, still deals (#109).
+  els.reportDialog.addEventListener('keydown', (e) => {
+    if (performance.now() >= reportGraceUntil || e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target === els.repGuess && els.repGuess.value.trim() !== '') return; // submits the guess
+    e.preventDefault();
+    if (e.repeat) return;
+    const usable = (c) => !!c && !c.disabled && !c.hidden && !c.closest('[hidden]') && c.offsetParent !== null;
+    const before = [els.deal, els.rebet, els.rebet2].find((c) => c === reportFocusBefore);
+    const target = usable(before) ? before : (usable(els.deal) ? els.deal : null);
+    if (!target) return; // nothing to deal: stay open
+    const held = reportShown;
+    els.reportDialog.close();
+    pendingReport = held; // reopens after the dealt hand settles
+    if (target === before) target.click(); else els.betForm.requestSubmit();
+  });
   els.reportDialog.addEventListener('click', (e) => {
     if (e.target !== els.reportDialog) return;
     if (performance.now() >= reportGraceUntil) { els.reportDialog.close(); return; }
