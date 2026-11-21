@@ -29,6 +29,7 @@
   const Counting = window.BlackjackCounting;
   const Side = window.BlackjackSideBets;
   const A11y = window.BlackjackA11y;
+  const ReportHit = window.BlackjackReportHit;
   const Prefs = window.BlackjackPrefs;
   const Chart = window.BlackjackChart;
   const Drill = window.BlackjackDrill;
@@ -492,6 +493,16 @@
     const basicNote = advice.basicLabel ? ` Basic strategy alone says ${advice.basicLabel}.` : '';
     els.hintText.textContent = `${source}: ${advice.label}. ${advice.reason}.${basicNote}`;
     els[ADVICE_BUTTON[advice.action]].classList.add('suggested');
+  }
+
+  const inReportGrace = () => els.reportDialog.open && performance.now() < reportGraceUntil;
+
+  /** Close the held report, let the dealt hand settle, then reopen it; `act` (default control.click) deals. */
+  function forwardGraceClick(control, act) {
+    const held = reportShown;
+    els.reportDialog.close();
+    pendingReport = held; // reopens after the dealt hand settles
+    if (act) act(); else control.click();
   }
 
   /** Open a report by itself: remember where focus was, then start the grace window (#99, #109). */
@@ -1666,7 +1677,7 @@
   els.reportDialog.addEventListener('close', () => { reportGraceUntil = 0; reportFocusBefore = null; });
   // Grace window: Enter meant for Deal or Rebet, which the report covered, still deals (#109).
   els.reportDialog.addEventListener('keydown', (e) => {
-    if (performance.now() >= reportGraceUntil || e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!inReportGrace() || e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.target === els.repGuess && els.repGuess.value.trim() !== '') return; // submits the guess
     e.preventDefault();
     if (e.repeat) return;
@@ -1674,26 +1685,34 @@
     const before = [els.deal, els.rebet, els.rebet2].find((c) => c === reportFocusBefore);
     const target = usable(before) ? before : (usable(els.deal) ? els.deal : null);
     if (!target) return; // nothing to deal: stay open
-    const held = reportShown;
-    els.reportDialog.close();
-    pendingReport = held; // reopens after the dealt hand settles
-    if (target === before) target.click(); else els.betForm.requestSubmit();
+    if (target === before) forwardGraceClick(target);
+    else forwardGraceClick(null, () => els.betForm.requestSubmit());
   });
   els.reportDialog.addEventListener('click', (e) => {
-    if (e.target !== els.reportDialog) return;
-    if (performance.now() >= reportGraceUntil) { els.reportDialog.close(); return; }
-    // Grace window: a click meant for Deal or Rebet, which the report covered, still deals (#99).
-    const control = [els.deal, els.rebet, els.rebet2].find((c) => {
-      if (c.disabled || c.hidden || c.offsetParent === null) return false;
-      const r = c.getBoundingClientRect();
-      return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    });
-    if (!control) return; // not on a deal control: stay open
-    const held = reportShown;
-    els.reportDialog.close();
-    pendingReport = held; // reopens after the dealt hand settles
-    control.click();
+    if (e.target === els.reportDialog) els.reportDialog.close(); // the grace window is handled in the capture listener below
   });
+  // Grace window: a click meant for Deal or Rebet, which the report covered, still deals (#99, #139),
+  // whether it lands on the backdrop or on the report's panel. Decided on the press, not the release.
+  let gracePress = false;
+  const swallowGracePress = (e) => { if (gracePress) e.preventDefault(); };
+  els.reportDialog.addEventListener('pointerdown', (e) => {
+    gracePress = inReportGrace();
+    swallowGracePress(e); // no panel element takes focus
+  }, true);
+  els.reportDialog.addEventListener('mousedown', swallowGracePress, true);
+  els.reportDialog.addEventListener('click', (e) => {
+    if (!gracePress) return;
+    gracePress = false;
+    e.stopPropagation(); // no panel button acts, no form submits
+    e.preventDefault();
+    const visible = (c) => !c.hidden && c.offsetParent !== null;
+    const controls = [['deal', els.deal], ['rebet-1', els.rebet], ['rebet-2', els.rebet2]].map(([id, el]) => {
+      const r = el.getBoundingClientRect();
+      return { id, el, rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom }, enabled: !el.disabled, visible: visible(el) };
+    });
+    const hit = ReportHit.dealControlAt(e.clientX, e.clientY, controls);
+    if (hit) forwardGraceClick(hit.el); // not on a deal control: stay open
+  }, true);
 
   // --- Bankroll estimates (F16) ---
 
