@@ -195,12 +195,12 @@ function main(argv) {
   const log = (m) => console.log(`${new Date().toISOString()} ${m}`);
   const leaderboard = new Leaderboard({ file: data });
   const hub = new Hub({ leaderboard, log });
-  hub.create({ name: 'Main table', minBet: 10, maxBet: 500 });
-  hub.create({ name: 'Practice (with bots)', minBet: 10, maxBet: 500, bots: 3 });
+  hub.create({ name: 'Main table', minBet: 10, maxBet: 500 }, { seeded: true });
+  hub.create({ name: 'Practice (with bots)', minBet: 10, maxBet: 500, bots: 3 }, { seeded: true });
   const pokerBoard = new Leaderboard({ file: path.join(path.dirname(data), 'poker-players.json'), minRounds: 200 });
   const pokerHub = new PokerHub({ leaderboard: pokerBoard, log });
-  pokerHub.create({ name: "Hold'em (with bots)", smallBlind: 5, bigBlind: 10, bots: ['tight-passive', 'calling-station', 'loose-aggressive'] });
-  pokerHub.create({ name: "Hold'em", smallBlind: 5, bigBlind: 10 });
+  pokerHub.create({ name: "Hold'em (with bots)", smallBlind: 5, bigBlind: 10, bots: ['tight-passive', 'calling-station', 'loose-aggressive'] }, { seeded: true });
+  pokerHub.create({ name: "Hold'em", smallBlind: 5, bigBlind: 10 }, { seeded: true });
   const logFile = flag('--log', null) && path.resolve(flag('--log'));
   if (logFile) fs.mkdirSync(path.dirname(logFile), { recursive: true });
   let logFailed = false;

@@ -14,11 +14,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function start(opts = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tables-'));
   const board = new Leaderboard({ file: path.join(dir, 'players.json'), minRounds: 5 });
-  const hub = new Hub({ leaderboard: board, timing: FAST });
+  const hub = new Hub({ leaderboard: board, timing: FAST, ...opts });
   const server = createServer({ hub });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${server.address().port}`;
-  return { url, hub, board, dir, ...opts, close: () => { hub.close(); server.closeAllConnections(); return new Promise((r) => server.close(r)); } };
+  return { url, hub, board, dir, close: () => { hub.close(); server.closeAllConnections(); return new Promise((r) => server.close(r)); } };
 }
 
 async function api(url, method, p, body, token) {
@@ -136,6 +136,47 @@ test('server: bad requests are refused with a reason', async () => {
     assert.equal((await fetch(`${s.url}/server/data/players.json`)).status, 404, 'data is never served');
     assert.equal((await fetch(`${s.url}/web/../server/hub.js`)).status, 404);
   } finally { await s.close(); }
+});
+
+test('table cap: the third POST /api/tables gets 409 naming the limit (AC1)', async () => {
+  const s = await start({ maxTables: 2 });
+  try {
+    for (let i = 0; i < 2; i++) assert.equal((await api(s.url, 'POST', '/api/tables', { name: `T${i}` })).status, 201);
+    const r = await api(s.url, 'POST', '/api/tables', { name: 'Third' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.error, /2/);
+    assert.equal((await api(s.url, 'GET', '/api/tables')).body.tables.length, 2);
+  } finally { await s.close(); }
+});
+
+test('table cap: seeded tables do not count (AC3, blackjack)', async () => {
+  const s = await start({ maxTables: 2 });
+  try {
+    s.hub.create({ name: 'Seed' }, { seeded: true });
+    s.hub.create({ name: 'Seed2' }, { seeded: true });
+    for (let i = 0; i < 2; i++) assert.equal((await api(s.url, 'POST', '/api/tables', { name: `T${i}` })).status, 201);
+    assert.equal((await api(s.url, 'POST', '/api/tables', { name: 'Third' })).status, 409);
+  } finally { await s.close(); }
+});
+
+test('table cap: a refused create changes nothing and ids stay in order (AC5, blackjack)', async () => {
+  const s = await start({ maxTables: 2 });
+  try {
+    for (let i = 0; i < 2; i++) await api(s.url, 'POST', '/api/tables', { name: `T${i}` });
+    const size = s.hub.tables.size;
+    const next = s.hub.next;
+    assert.equal((await api(s.url, 'POST', '/api/tables', { name: 'No' })).status, 409);
+    assert.equal(s.hub.tables.size, size);
+    assert.equal(s.hub.next, next);
+    s.hub.maxTables = 3;
+    const r = await api(s.url, 'POST', '/api/tables', { name: 'Yes' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.id, '3');
+  } finally { await s.close(); }
+});
+
+test('table cap: default is 20 (Behaviour 1)', () => {
+  assert.equal(new Hub().maxTables, 20);
 });
 
 test('hub: a join or leave between rounds does not freeze the table (CLA-117)', async () => {
