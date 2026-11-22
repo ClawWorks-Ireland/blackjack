@@ -1,6 +1,6 @@
 # Reviewer eval set (spec §10.2, REQ-IMP-1/2, T3)
 
-Ten planted bugs specific to BlackJack, each a real patch against `main` (2026-11-14, e284836). A10 adds a case after every revert or incident (REQ-IMP-1). Any change to a reviewer prompt (`.claude/agents/bug-hunter-*.md`, `finding-verifier.md`) or to `REVIEW.md` must replay this set and show recall didn't drop (REQ-IMP-2). This directory is Tier 2 (RISK.md).
+17 planted bugs specific to BlackJack, each a real patch: cases 01–10 are patches against `main` at e284836 (2026-11-14), and later cases name their own base in their row. A10 adds a case after every revert or incident (REQ-IMP-1). Any change to a reviewer prompt (`.claude/agents/bug-hunter-*.md`, `finding-verifier.md`) or to `REVIEW.md` must replay this set and show recall didn't drop (REQ-IMP-2). This directory is Tier 2 (RISK.md).
 
 | Case | Bug | Caught by `npm test` today |
 |---|---|---|
@@ -22,10 +22,10 @@ Ten planted bugs specific to BlackJack, each a real patch against `main` (2026-1
 | 16-owner-merge-allowed | main-guard accepts a merge by the owner when the head's gates are green, bypassing A9's merge-time checks and REQ-GATE-2 (incident #66; patch against main after the revert efc1bb0) | **no** |
 | 17-break-glass-owner-merge | main-guard accepts the owner's hand merge when its commit message carries a self-written `Break-glass:` trailer, with no gate checked (incident #80; patch against main at dc35831) | **no** |
 
-The tests are strong, so CI already catches 9 of 10. The set still measures **reviewer** recall: reviewers see only the diff (REQ-COMMS-2), and future bugs won't all be covered by tests. The next cases A10 adds should be ones the tests miss, like 07.
+CI already catches 13 of 17; it misses 07, 15, 16 and 17. The set still measures **reviewer** recall: reviewers see only the diff (REQ-COMMS-2), and future bugs won't all be covered by tests. The next cases A10 adds should be ones the tests miss, like 07, 15, 16 and 17.
 
 ## Replay
 ```
 scripts/evals/replay.js [--cases 01,07] [--out evals-results.json]
 ```
-For each case it builds `pr-head/` (main + `bug.patch`) next to a base checkout, then runs the same agents, models, tools and schemas as `review.yml`: three blind hunters (logic, state, contract), then three verifiers voting, then `decideFindings` (≥ 2/3). It scores against `case.md`. **Hit** = a kept Important finding at the patched file/function. **Pass (T3)** = ≥ 8/10 hits and ≤ 2 false Important findings in total. It uses the Claude subscription of whoever runs it (about 60 Claude runs for the full set).
+For each case it builds `pr-head/` (main + `bug.patch`) next to a base checkout, then runs the same agents, models, tools and schemas as `review.yml`: three blind hunters (logic, state, contract), then three verifiers voting, then `decideFindings` (≥ 2/3). It scores against `case.md`. **Hit** = a kept Important finding at the patched file/function. **Pass (T3)** = ≥ 80% of cases hit and false Important findings ≤ 20% of the case count (the original 10-case set used ≥ 8/10 and ≤ 2, spec §T3); a partial `--cases` run gets no T3 verdict. It uses the Claude subscription of whoever runs it (about 6 Claude runs per case, about 100 for the full set).

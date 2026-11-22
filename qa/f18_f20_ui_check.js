@@ -3,6 +3,7 @@
 const { chromium } = require('./lib/browser');
 const fs = require('fs');
 const path = require('path');
+const REPORT_GRACE_WAIT_MS = 650; // web/app.js REPORT_GRACE_MS (500) + 150 ms margin: a panel click inside the report's grace window is swallowed by design (#139 Q1 (a), #146)
 const URL_ = process.argv[2];
 const OUT = process.argv[3] || '.';
 const checks = {};
@@ -193,19 +194,29 @@ async function replayFinal(p, value) {
       put('F19 seed survives a reload', before === after && /qa-r11/.test(after || ''), { before, after });
       // Finish the shoe, then "Play this shoe again" and compare the first 10 rounds.
       let opened = false;
-      for (let i = 0; i < 90 && !opened; i++) { await round(A.p, 'stand', 10); opened = await isOpen(A.p, 'report'); }
+      let openSeenAt = 0;
+      for (let i = 0; i < 90 && !opened; i++) { await round(A.p, 'stand', 10); opened = await isOpen(A.p, 'report'); if (opened) openSeenAt = Date.now(); }
       const rep = opened ? await readReport(A.p) : null;
       let again = null;
       if (opened && rep.againVisible) {
+        const wait = REPORT_GRACE_WAIT_MS - (Date.now() - openSeenAt);
+        if (wait > 0) await A.p.waitForTimeout(wait);
+        const msSinceOpen = Date.now() - openSeenAt;
         await A.p.click('#report-again');
         await A.p.waitForTimeout(100);
+        const closedAfterClick = !(await isOpen(A.p, 'report'));
+        const seedText = await text(A.p, '#seed-text');
         const msg = await text(A.p, '#message');
-        for (let i = 0; i < 10; i++) await round(A.p, 'stand', 10);
-        const ro = await replayOptions(A.p);
-        const first10 = ro.opts.slice(0, 10).map((o) => o.t.replace(/^Round \d+: /, ''));
-        again = { msg, same: JSON.stringify(first10) === JSON.stringify(A.opts), first10: first10.slice(-2), orig: A.opts.slice(-2), seedText: await text(A.p, '#seed-text') };
+        if (!closedAfterClick || !/qa-r11/.test(seedText || '')) {
+          again = { msSinceOpen, closedAfterClick, seedText, msg };
+        } else {
+          for (let i = 0; i < 10; i++) await round(A.p, 'stand', 10);
+          const ro = await replayOptions(A.p);
+          const first10 = ro.opts.slice(0, 10).map((o) => o.t.replace(/^Round \d+: /, ''));
+          again = { msSinceOpen, closedAfterClick, seedText, msg, same: JSON.stringify(first10) === JSON.stringify(A.opts), first10: first10.slice(-2), orig: A.opts.slice(-2), seedTextAfter10: await text(A.p, '#seed-text') };
+        }
       }
-      put('F19 "Play this shoe again" restarts the same seed: first 10 rounds identical', !!again && again.same, { reportOpened: opened, again });
+      put('F19 "Play this shoe again" restarts the same seed: first 10 rounds identical', !!again && again.closedAfterClick && /qa-r11/.test(again.seedText || '') && again.same === true,{ reportOpened: opened, again });
       await A.ctx.close(); await B.ctx.close();
     }
     // ---- F20: KO and Hi-Opt II on the table, drill follows the system ----
