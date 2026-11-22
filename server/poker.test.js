@@ -8,19 +8,65 @@ const { createServer } = require('./server.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function start(timing = { turnSeconds: 0.4, botDelayMs: 5, nextHandMs: 30, idleHands: 2 }) {
+async function start(timing = { turnSeconds: 0.4, botDelayMs: 5, nextHandMs: 30, idleHands: 2 }, hubOpts = {}) {
   const board = new Leaderboard({ minRounds: 5 });
-  const pokerHub = new PokerHub({ leaderboard: board, timing });
-  const server = createServer({ hub: new Hub(), pokerHub });
+  const pokerHub = new PokerHub({ leaderboard: board, timing, ...hubOpts });
+  const hub = new Hub(hubOpts.blackjack || {});
+  const server = createServer({ hub, pokerHub });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${server.address().port}`;
-  return { url, pokerHub, board, close: () => { pokerHub.close(); server.closeAllConnections(); return new Promise((r) => server.close(r)); } };
+  return { url, hub, pokerHub, board, close: () => { pokerHub.close(); server.closeAllConnections(); return new Promise((r) => server.close(r)); } };
 }
 
 async function api(url, method, p, body, token) {
   const res = await fetch(url + p, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, body: await res.json() };
 }
+
+test('poker table cap: the third POST /api/poker/tables gets 409 and builds no bot table (AC2)', async () => {
+  const s = await start(undefined, { maxTables: 2 });
+  try {
+    for (let i = 0; i < 2; i++) assert.equal((await api(s.url, 'POST', '/api/poker/tables', { name: `T${i}` })).status, 201);
+    const r = await api(s.url, 'POST', '/api/poker/tables', { name: 'Third', bots: ['maniac'] });
+    assert.equal(r.status, 409);
+    assert.match(r.body.error, /2/);
+    assert.equal(s.pokerHub.tables.size, 2);
+  } finally { await s.close(); }
+});
+
+test('poker table cap: seeded tables do not count (AC3, poker)', async () => {
+  const s = await start(undefined, { maxTables: 2 });
+  try {
+    s.pokerHub.create({ name: 'Seed' }, { seeded: true });
+    s.pokerHub.create({ name: 'Seed2' }, { seeded: true });
+    for (let i = 0; i < 2; i++) assert.equal((await api(s.url, 'POST', '/api/poker/tables', { name: `T${i}` })).status, 201);
+    assert.equal((await api(s.url, 'POST', '/api/poker/tables', { name: 'Third' })).status, 409);
+  } finally { await s.close(); }
+});
+
+test('poker table cap: a refused create changes nothing; next id is p3 (AC5, poker)', async () => {
+  const s = await start(undefined, { maxTables: 2 });
+  try {
+    for (let i = 0; i < 2; i++) await api(s.url, 'POST', '/api/poker/tables', { name: `T${i}` });
+    const size = s.pokerHub.tables.size;
+    const next = s.pokerHub.next;
+    assert.equal((await api(s.url, 'POST', '/api/poker/tables', { name: 'No' })).status, 409);
+    assert.equal(s.pokerHub.tables.size, size);
+    assert.equal(s.pokerHub.next, next);
+    s.pokerHub.maxTables = 3;
+    const r = await api(s.url, 'POST', '/api/poker/tables', { name: 'Yes' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.id, 'p3');
+  } finally { await s.close(); }
+});
+
+test('table caps are per hub (AC4)', async () => {
+  const s = await start(undefined, { maxTables: 1, blackjack: { maxTables: 1 } });
+  try {
+    assert.equal((await api(s.url, 'POST', '/api/tables', { name: 'B' })).status, 201);
+    assert.equal((await api(s.url, 'POST', '/api/poker/tables', { name: 'P' })).status, 201);
+  } finally { await s.close(); }
+});
 
 test('poker server: an agent plays hands among the bots, sees only its own cards, and is recorded in big blinds', async () => {
   const s = await start();
