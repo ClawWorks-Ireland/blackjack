@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { Hub } = require('./hub.js');
+const { Hub, HubError } = require('./hub.js');
+const { PokerError } = require('../engine/poker.js');
 const { PokerHub } = require('./poker-hub.js');
 const { Leaderboard } = require('./leaderboard.js');
 const { createServer } = require('./server.js');
@@ -106,5 +107,29 @@ test('poker server: a bad bots count is a 400, not a 500', async () => {
     assert.deepEqual(six.body, { error: 'At most 5 bots' });
     const list = await api(s.url, 'GET', '/api/poker/tables');
     assert.deepEqual(list.body.tables.map((t) => t.id).sort(), [...created].sort());
+  } finally { await s.close(); }
+});
+
+test('poker server: blinds that are not positive whole numbers are a 400, and no table is made', async () => {
+  const s = await start();
+  try {
+    const ids = async () => (await api(s.url, 'GET', '/api/poker/tables')).body.tables.map((t) => t.id).sort();
+    const before = await ids();
+    for (const b of [{ smallBlind: 2.5, bigBlind: 5 }, { smallBlind: '1', bigBlind: '2' }, { smallBlind: 5, bigBlind: 7.5 }, { smallBlind: 10, bigBlind: 5 }]) {
+      const r = await api(s.url, 'POST', '/api/poker/tables', b);
+      assert.equal(r.status, 400, JSON.stringify(b));
+      assert.match(r.body.error, /^Blinds must be positive/);
+    }
+    assert.deepEqual(await ids(), before);
+    const n = s.pokerHub.list().length;
+    assert.throws(() => s.pokerHub.create({ smallBlind: 2.5, bigBlind: 5 }), (e) => e instanceof HubError && e.status === 400 && !(e instanceof PokerError));
+    assert.equal(s.pokerHub.list().length, n);
+    const one = await api(s.url, 'POST', '/api/poker/tables', { smallBlind: 1, bigBlind: 2 });
+    assert.equal(one.status, 201);
+    assert.equal(one.body.buyIn, 200);
+    const def = await api(s.url, 'POST', '/api/poker/tables', {});
+    assert.equal(def.status, 201);
+    assert.equal(def.body.smallBlind, 5);
+    assert.equal(def.body.bigBlind, 10);
   } finally { await s.close(); }
 });
