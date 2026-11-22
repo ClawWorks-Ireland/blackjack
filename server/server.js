@@ -3,7 +3,10 @@
  * Live table server (CLA-111): agents and people sit at the same tables.
  * Plain HTTP + Server-Sent Events, no dependencies. Serves the web pages too.
  *
- *   node server/server.js [--port 8787] [--host 0.0.0.0] [--data server/data/players.json] [--log server/data/requests.log]
+ *   node server/server.js [--port 8787] [--host 0.0.0.0] [--data server/data/players.json] [--log server/data/requests.log] [--max-tables 20]
+ *
+ * --max-tables caps the player-created tables per hub (seeded tables don't
+ * count); past it, POST .../tables returns 409.
  *
  * Listens on the home network by default (every interface of this machine);
  * --host 127.0.0.1 keeps it to this machine. It is not meant to face the
@@ -187,18 +190,29 @@ function lanAddresses() {
   return Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address);
 }
 
+/** --max-tables N: 20 when absent; a positive integer; anything else throws. */
+function maxTablesFlag(argv) {
+  const i = argv.indexOf('--max-tables');
+  if (i === -1) return 20;
+  const raw = argv[i + 1];
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) throw new Error(`--max-tables needs a positive whole number, got ${raw === undefined ? 'nothing' : JSON.stringify(raw)}`);
+  return Number(raw);
+}
+
 function main(argv) {
+  let maxTables;
+  try { maxTables = maxTablesFlag(argv); } catch (e) { console.error(e.message); process.exit(1); }
   const flag = (name, def) => { const i = argv.indexOf(name); return i === -1 ? def : argv[i + 1]; };
   const port = Number(flag('--port', 8787));
   const host = flag('--host', '0.0.0.0');
   const data = path.resolve(flag('--data', path.join(__dirname, 'data', 'players.json')));
   const log = (m) => console.log(`${new Date().toISOString()} ${m}`);
   const leaderboard = new Leaderboard({ file: data });
-  const hub = new Hub({ leaderboard, log });
+  const hub = new Hub({ leaderboard, log, maxTables });
   hub.create({ name: 'Main table', minBet: 10, maxBet: 500 }, { seeded: true });
   hub.create({ name: 'Practice (with bots)', minBet: 10, maxBet: 500, bots: 3 }, { seeded: true });
   const pokerBoard = new Leaderboard({ file: path.join(path.dirname(data), 'poker-players.json'), minRounds: 200 });
-  const pokerHub = new PokerHub({ leaderboard: pokerBoard, log });
+  const pokerHub = new PokerHub({ leaderboard: pokerBoard, log, maxTables });
   pokerHub.create({ name: "Hold'em (with bots)", smallBlind: 5, bigBlind: 10, bots: ['tight-passive', 'calling-station', 'loose-aggressive'] }, { seeded: true });
   pokerHub.create({ name: "Hold'em", smallBlind: 5, bigBlind: 10 }, { seeded: true });
   const logFile = flag('--log', null) && path.resolve(flag('--log'));
@@ -225,4 +239,4 @@ function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { createServer };
+module.exports = { createServer, maxTablesFlag };
