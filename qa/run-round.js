@@ -3,7 +3,7 @@
 // Windows) and needs no model: an agent or person only reads the summary.
 //
 // Usage (from the repo root):  node qa/run-round.js [commit=HEAD] [--rounds 80]
-// Ports: nothing else may be on 8765 (the snapshot server) or 8766 (port + 1, the live server for 'poker lobby UI').
+// Ports: nothing else may be on 8765 (the snapshot server), 8766 (port + 1, the live server for 'poker lobby UI') or 8767 (port + 2, the live server for 'lobby table limit').
 // Output: qa/reports/<sha7>/summary.json, plus one line per check on stdout.
 // Exit code: 0 = everything passed, 1 = a check failed, 2 = harness error.
 const { execFileSync, spawn } = require('child_process');
@@ -62,6 +62,7 @@ const STEPS = [
   ['B99 report click', 'b99_report_click_check.js', [url], 'report.js'],
   ['B109 report keys', 'b109_report_key_check.js', [url], 'report.js'],
   ['poker lobby UI', 'poker_lobby_check.js', [snap, out, String(port + 1)], 'lobby.html'],
+  ['lobby table limit', 'lobby_limit_check.js', [snap, out, String(port + 2)], 'lobby.html'],
 ];
 
 function run(cmd, argv, cwd) {
