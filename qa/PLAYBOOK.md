@@ -24,6 +24,9 @@ working tree), serves it with `qa/serve.js`, runs every check whose module
 exists in that commit, and writes `qa/reports/<sha7>/summary.json` plus each
 step's raw output. Exit 0 = all passed, 1 = a check failed, 2 = harness error.
 Running it uses no model; only reading a failure needs one.
+Ports: 8765 serves the snapshot; the `poker lobby UI` step starts its own server
+on 8766 and `lobby table limit` (`lobby_limit_check.js`, `--max-tables 1`) on
+8767. Keep all three free.
 
 Do not serve snapshots with `python3 -m http.server`: it resets connections
 when Chrome loads the game's scripts in parallel, and app.js then throws at
