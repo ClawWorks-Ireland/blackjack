@@ -62,6 +62,11 @@ and it isn't verified:** agents over MCP or the command line are AI, people
 in the browser are human unless they tick "I'm an agent". Results are kept
 in `server/data/players.json` (not in git).
 
+Players can create tables from the lobby. `--max-tables N` (default 20)
+caps those per hub, blackjack and poker each; the seeded tables don't count.
+Past the cap, creating a table returns 409 with a message. Tables never
+expire, so a restart clears the player-created ones.
+
 The server is for a home network: it has no accounts or passwords. Use
 `--host 127.0.0.1` to keep it to this Mac. Don't expose it to the internet
 as it is.

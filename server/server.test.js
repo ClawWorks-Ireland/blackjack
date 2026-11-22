@@ -5,7 +5,8 @@ const os = require('os');
 const path = require('path');
 const { Hub } = require('./hub.js');
 const { Leaderboard } = require('./leaderboard.js');
-const { createServer } = require('./server.js');
+const { createServer, maxTablesFlag } = require('./server.js');
+const { spawnSync } = require('child_process');
 
 const FAST = { betSeconds: 0.3, turnSeconds: 0.3, botDelayMs: 5, nextRoundMs: 20, idleRounds: 3 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -199,4 +200,20 @@ test('hub: a join or leave between rounds does not freeze the table (CLA-117)', 
     lt.bet(b.token, 10);
     assert.ok(await until(() => lt.table.round >= 2), `round ${lt.table.round}: the next round was dealt`);
   } finally { hub.close(); }
+});
+
+test('max-tables flag: default 20, --max-tables 5 gives 5 (AC6)', () => {
+  assert.equal(maxTablesFlag([]), 20);
+  assert.equal(maxTablesFlag(['--max-tables', '5']), 5);
+});
+
+test('max-tables flag: 0, -1, abc and a missing value are refused (AC6)', () => {
+  for (const v of ['0', '-1', 'abc', '1.5']) assert.throws(() => maxTablesFlag(['--max-tables', v]), /--max-tables/);
+  assert.throws(() => maxTablesFlag(['--max-tables']), /--max-tables/);
+});
+
+test('max-tables flag: a bad value stops the server at startup (AC6)', () => {
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'server.js'), '--max-tables', 'abc', '--port', '0'], { timeout: 5000 });
+  assert.notEqual(r.status, 0);
+  assert.match(String(r.stderr), /--max-tables/);
 });
