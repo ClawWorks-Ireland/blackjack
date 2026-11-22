@@ -78,6 +78,7 @@ jobs:
       - name: Freeze the job guard before the model starts (a model edit cannot change it)
         run: |
           cat scripts/agents/policy-guard.js > "$RUNNER_TEMP/job-guard.js"
+          mkdir -p "$RUNNER_TEMP/frozen" && git archive HEAD scripts/gates | tar -x -C "$RUNNER_TEMP/frozen"   # slice-check (REQ-FLOW-9)
           # One runner per Linux user (REQ-CFG-3): two runners under one user share ~/.local, and two
           # Claude jobs at once corrupt each other's Claude Code install (blackjack#53). Fail loudly.
           n=$(find "$HOME" -maxdepth 2 -path "$HOME/actions-runner*/.runner" | wc -l)
@@ -97,6 +98,17 @@ jobs:
             --append-system-prompt-file .claude/agents/${{ needs.route.outputs.role == 'spec' && 'spec-writer' || 'planner' }}.md --model opus --max-turns 50
             --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh label list:*)"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,Bash(git push:*),Bash(gh pr:*)"
+      - name: Slice check at plan time (REQ-FLOW-9; no model)
+        # Flags this plan's slices that name an implementer policy path (needs-human) or no Files: line
+        # (needs-replan) in the same run, before the orchestrator could dispatch them (blackjack#158).
+        if: always() && needs.route.outputs.role == 'plan'
+        continue-on-error: true   # a failed flag mustn't hide the planner's result; implement.yml's backstop still catches it
+        env: { GITHUB_TOKEN: "${{ github.token }}", PARENT: "${{ needs.route.outputs.issue }}" }
+        run: |
+          [[ "$PARENT" =~ ^[0-9]+$ ]] || { echo "bad parent"; exit 1; }
+          gh issue list -R "$GITHUB_REPOSITORY" --label slice --state open --limit 200 --json number,body \
+            | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const re=new RegExp("^Part of #"+process.env.PARENT+"(?!\\d)","m");for(const i of JSON.parse(b))if(re.test(i.body||""))console.log(i.number)})' \
+            | while read -r n; do echo "#$n: $(node "$RUNNER_TEMP/frozen/scripts/gates/gate.js" slice-check --issue "$n" --apply)"; done
       - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
         continue-on-error: true   # a metric never fails the job
         if: always() && steps.claude.outputs.execution_file != ''

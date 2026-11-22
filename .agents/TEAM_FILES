@@ -1,5 +1,6 @@
 .agents/SPEC.md
 .agents/TEAM_FILES
+.agents/TEAM_SOURCE
 .agents/TEAM_VERSION
 .agents/local-harness/settings.json
 .agents/local-implementer.md
@@ -39,6 +40,7 @@
 .github/workflows/review.yml
 .github/workflows/security.yml
 .github/workflows/spec-plan.yml
+.github/workflows/template-render.yml
 .github/workflows/tier-approval.yml
 scripts/agents/local-implement.sh
 scripts/agents/local-implement.test.js
@@ -53,4 +55,5 @@ scripts/gates/lib.js
 scripts/gates/lib.test.js
 scripts/gates/package.json
 scripts/gates/runners.test.js
+scripts/gates/slice-check.test.js
 scripts/rollback

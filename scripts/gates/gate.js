@@ -25,6 +25,8 @@
  *   gate.js repro-run --candidates F --head DIR --base DIR --user U --out F   run hunters' checks as sandbox user U (no API; sandbox VM)
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
+ *   gate.js template-render --pr N            REQ-OPS-15: `template-render` status: is the PR exactly a render of an owner-merged template commit?
+ *   gate.js slice-check --issue N [--apply]  REQ-FLOW-9: may this slice go to an implementer? ok=true | ok=false reason=policy|no-files
  *   gate.js metrics --file F                  REQ-OPS-14: print F's team-metrics notice (env TM_ROLE, TM_SUBJECT, TM_SHA, TM_ATTEMPT, TM_ARGS)
  *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
  *
@@ -133,8 +135,8 @@ async function verdictFor(n, lvl, behindCheck = true, refresh = false) {
   if (refresh) {
     const stored = G.trustedStatuses(statuses);
     const live = {
-      'tier-approval': G.tierApprovalStatus({ tier: f.tier, level: lvl, reviews: f.reviews, headSha: head }),
-      'tier2-cooling': G.coolingStatus({ tier: f.tier, reviews: f.reviews, headSha: head, labels: f.pr.labels, hours: coolingHours }),
+      'tier-approval': G.tierApprovalStatus({ tier: f.tier, level: lvl, reviews: f.reviews, headSha: head, statuses }),
+      'tier2-cooling': G.coolingStatus({ tier: f.tier, reviews: f.reviews, headSha: head, labels: f.pr.labels, hours: coolingHours, statuses }),
     };
     for (const [ctx, s] of Object.entries(live)) {
       if (stored[ctx] && stored[ctx].state === s.state) continue;
@@ -156,7 +158,8 @@ const commands = {
   async level() { console.log(await level()); },
   async 'tier-approval'() {
     const f = await prFacts(args.pr);
-    const s = G.tierApprovalStatus({ tier: f.tier, level: await level(), reviews: f.reviews, headSha: f.pr.head.sha });
+    const s = G.tierApprovalStatus({ tier: f.tier, level: await level(), reviews: f.reviews, headSha: f.pr.head.sha,
+      statuses: await all(repo(`/commits/${f.pr.head.sha}/statuses`)) });
     await setStatus(f.pr.head.sha, 'tier-approval', s.state, s.description);
     // Waiting for H: request his review, so the PR is in github.com/pulls/review-requested (team v2.12).
     if (s.state === 'pending' && f.pr.user && f.pr.user.login !== OWNER_LOGIN
@@ -170,7 +173,8 @@ const commands = {
     const prs = args.pr ? [await gh('GET', repo(`/pulls/${args.pr}`))] : await all(repo('/pulls?state=open'));
     for (const p of prs) {
       const f = await prFacts(p.number);
-      const s = G.coolingStatus({ tier: f.tier, reviews: f.reviews, headSha: f.pr.head.sha, labels: f.pr.labels,
+      const st = await all(repo(`/commits/${f.pr.head.sha}/statuses`));
+      const s = G.coolingStatus({ tier: f.tier, reviews: f.reviews, headSha: f.pr.head.sha, labels: f.pr.labels, statuses: st,
         hours: overlayNumber('tier2_cooling_hours', 0) });
       await setStatus(f.pr.head.sha, 'tier2-cooling', s.state, s.description);
       console.log(`#${p.number} tier ${f.tier}: tier2-cooling ${s.state} — ${s.description}`);
@@ -226,10 +230,8 @@ const commands = {
     for (const sha of shas) {
       const guardActive = G.guardActiveFor((rev, p) => gitOk('cat-file', '-e', `${rev}:${p}`), sha);
       const message = git('log', '-1', '--format=%B', sha);
-      const prs = await gh('GET', repo(`/commits/${sha}/pulls`));
-      const pr = prs.find((p) => p.merge_commit_sha === sha) || null;
-      const headStatuses = pr ? await all(repo(`/commits/${pr.head.sha}/statuses`)) : [];
-      const fullPr = pr ? await gh('GET', repo(`/pulls/${pr.number}`)) : null;
+      const fullPr = await mergedPrFor(sha, message);
+      const headStatuses = fullPr ? await all(repo(`/commits/${fullPr.head.sha}/statuses`)) : [];
       const target = G.revertTrailer(message);
       const exactRevertOf = target && isExactRevert(sha, target) ? target : null;
       const v = G.guardVerdict({ sha, guardActive, pr: fullPr, headStatuses, exactRevertOf, message });
@@ -252,6 +254,29 @@ const commands = {
     console.log(`reverted ${args.sha} on main as ${git('rev-parse', 'HEAD')}`);
   },
 };
+
+/**
+ * The merged PR whose merge commit is `sha`, or null. GitHub's commit→PR index lags a fresh merge, and
+ * main-guard runs within seconds of A9's push: on 2026-11-21 it found no PR for 9d21035 53 s after A9
+ * merged #4 and reverted it (incident home-automation#7; A10's proposal, template #88). So: the index, then
+ * the PR the squash subject names (lib.js guardPrNumber), retried for up to ~2 minutes before calling it a
+ * direct push. A subject that names no PR fails at once. guardVerdict still checks every fact on the PR
+ * returned here (merged by A9, merge commit === sha, trusted merge-evidence).
+ */
+async function mergedPrFor(sha, message, { tries = 5, waitMs = 30000 } = {}) {
+  const n = G.guardPrNumber(message);
+  for (let i = 0; i < tries; i++) {
+    const listed = (await gh('GET', repo(`/commits/${sha}/pulls`))).find((p) => p.merge_commit_sha === sha);
+    if (listed) return gh('GET', repo(`/pulls/${listed.number}`));
+    if (n) {
+      const p = await gh('GET', repo(`/pulls/${n}`)).catch(() => null);
+      if (p && p.merge_commit_sha === sha) return p;
+    }
+    if (!n) return null;   // not even named as a PR: a plain direct push; no index will ever list it
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs));
+  }
+  return null;
+}
 
 /** Implementers may never change policy files (spec §8.1). Re-checked here, on the trusted runner, after `git am` (A7 on #23). */
 function refusePolicyPaths(base) {
@@ -445,11 +470,22 @@ commands['review-retry'] = async () => {
 // May the orchestrator approve this spec? Only if the issue doesn't need Delmar, isn't labelled Tier 2,
 // and the spec writer's latest spec declares `TIER: 0` or `TIER: 1` (A7 sec-2 on blackjack#68).
 // Only the spec writer's own comments count. Prints ok=true|false; the reason goes to stderr.
+// REQ-COORD-5 (team v2.15.2): or Delmar's latest ask, an orchestrator ask recommending approval
+// (`DEFAULT-CHOICE: approve-spec`), was settled by the console's default (lib.js specApprovalDefaulted).
+const overlayText = (key) => (projectMd().match(new RegExp(`^${key}:\\s*([\\w-]+)`, 'm')) || [])[1] || '';
 commands['spec-check'] = async () => {
   const no = (why) => { console.log('ok=false'); console.error(`spec-check: ${why}`); };
   const issue = await gh('GET', repo(`/issues/${args.issue}`));
   const labels = issue.labels.map((l) => l.name);
   if (labels.includes('needs-human')) return no('the issue needs Delmar');
+  // REQ-COORD-5: after the needs-human check (A7 sec-2 on blackjack#150), and never for these.
+  const never = labels.filter((l) => ['incident', 'security', 'circuit-breaker'].includes(l) || l.startsWith('cb:'));
+  const comments = (await all(repo(`/issues/${args.issue}/comments`))).map((c) => ({ id: c.id, login: c.user && c.user.login, body: c.body }));
+  if (!never.length && G.specApprovalDefaulted(comments, { hours: overlayNumber('ask_default_hours', 0), scope: overlayText('ask_default_scope') })) {
+    console.error('spec-check: approval settled by the ask default (REQ-COORD-5)');
+    console.log('ok=true');
+    return;
+  }
   if (labels.includes('tier:2')) return no('the issue is Tier 2');
   const specs = (await all(repo(`/issues/${args.issue}/comments`)))
     .filter((c) => c.user && c.user.login === 'clawworks-spec-writer[bot]' && /^\s*#*\s*Spec\b/m.test(c.body || ''));
@@ -664,6 +700,87 @@ commands['throttle-check'] = async () => {
   await gh('POST', repo('/issues'), { title: 'Throttled: Claude usage limit reached', labels: ['throttled'],
     body: `REQ-CB-4: a Claude job hit the subscription usage limit (${RUN_URL || 'run'}). New slices pause; in-flight reviews finish first; A0 closes this issue when a run succeeds again. Opened at ${new Date().toISOString()}.` });
   console.log('opened throttled issue');
+};
+
+// REQ-OPS-15 (team v2.16): a template re-render carries Delmar's template merge as its approval when it is
+// exactly the render of that commit. Runs on a key VM with no model (template-render.yml). TEMPLATE_TOKEN
+// reads the private template (a contents:read token for the template only). The template commit's own
+// render.js runs with an empty environment on a copy of the base branch; the PR head is compared by git
+// blob ids from its tree, so no PR file is ever executed. Posts `template-render` success or failure.
+commands['template-render'] = async () => {
+  const os = require('os');
+  const pr = await gh('GET', repo(`/pulls/${args.pr}`));
+  const head = pr.head.sha;
+  const fail = async (why) => { await setStatus(head, 'template-render', 'failure', why); console.log(`#${args.pr}: ${why}`); };
+  if (pr.head.repo.full_name !== REPO) return fail('not a branch of this repo');
+  const changed = await all(repo(`/pulls/${args.pr}/files`));
+  if (!changed.some((c) => c.filename === '.agents/TEAM_SOURCE')) { console.log('not a template re-render'); return; }
+  const tget = async (url) => {
+    const r = await fetch(`${API}/${url}`, { headers: { authorization: `Bearer ${process.env.TEMPLATE_TOKEN}`, accept: 'application/vnd.github+json' } });
+    if (!r.ok) throw new Error(`template ${url}: ${r.status}`);
+    return r;
+  };
+  const srcFile = await gh('GET', repo(`/contents/.agents/TEAM_SOURCE?ref=${head}`));
+  const src = Buffer.from(srcFile.content, 'base64').toString().trim();
+  if (!/^[0-9a-f]{40}$/.test(src)) return fail(`TEAM_SOURCE is "${src.slice(0, 20)}", not a template commit`);
+  // The owner merged that template commit, and it is on the template's main.
+  const merged = (await (await tget(`repos/${TEMPLATE}/commits/${src}/pulls`)).json()).find((p) => p.merge_commit_sha === src && p.merged_at);
+  if (!merged) return fail(`template ${src.slice(0, 7)} is not the merge of a template PR`);
+  const full = await (await tget(`repos/${TEMPLATE}/pulls/${merged.number}`)).json();
+  if (!full.merged_by || full.merged_by.login !== OWNER_LOGIN) return fail(`template #${merged.number} was merged by ${full.merged_by ? full.merged_by.login : 'nobody'}, not @${OWNER_LOGIN}`);
+  const cmp = await (await tget(`repos/${TEMPLATE}/compare/${src}...main`)).json();
+  if (!['ahead', 'identical'].includes(cmp.status)) return fail(`template ${src.slice(0, 7)} is not on the template's main`);
+  // Forward only (A7 sec-1 on home-automation#11): a render of an OLDER owner-merged commit would roll back later
+  // fixes under his approval. The new source must strictly descend from the base branch's TEAM_SOURCE.
+  let baseSrc = null;
+  try { baseSrc = Buffer.from((await gh('GET', repo(`/contents/.agents/TEAM_SOURCE?ref=${pr.base.sha}`))).content, 'base64').toString().trim(); } catch { baseSrc = null; }
+  const fwd = baseSrc && /^[0-9a-f]{40}$/.test(baseSrc) ? (await (await tget(`repos/${TEMPLATE}/compare/${baseSrc}...${src}`)).json()).status : null;
+  const dir = G.renderDirection(baseSrc, src, fwd);
+  if (!dir.ok) return fail(dir.why);
+  // Render that commit for this project, from a copy of the base branch (this checkout).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tplr-'));
+  let m;
+  try {   // the temp copy goes on every path, including an early failure or a throw (AI review Nit on blackjack#150)
+    const tdir = path.join(tmp, 'template'), pdir = path.join(tmp, 'project');
+    fs.mkdirSync(tdir); fs.mkdirSync(pdir);
+    fs.writeFileSync(path.join(tmp, 't.tgz'), Buffer.from(await (await tget(`repos/${TEMPLATE}/tarball/${src}`)).arrayBuffer()));
+    execFileSync('tar', ['-xzf', path.join(tmp, 't.tgz'), '-C', tdir, '--strip-components=1']);
+    execFileSync('bash', ['-c', 'git archive HEAD | tar -x -C "$1"', '_', pdir]);
+    const baseManifest = fs.existsSync(path.join(pdir, '.agents/TEAM_FILES')) ? fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter(Boolean) : [];
+    execFileSync('node', [path.join(tdir, 'scripts/team/render.js'), '--project', pdir, '--prune'], { env: { PATH: process.env.PATH, TEMPLATE_REPO: TEMPLATE }, stdio: ['ignore', 'ignore', 'pipe'] });
+    const manifest = fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter((p) => p && p !== '.agents/TEAM_SOURCE');
+    const rendered = {};
+    for (const p of manifest) {
+      const abs = path.join(pdir, p);
+      rendered[p] = { blob: G.gitBlobSha(fs.readFileSync(abs)), mode: (fs.statSync(abs).mode & 0o111) ? '100755' : '100644' };
+    }
+    const tree = await gh('GET', repo(`/git/trees/${head}?recursive=1`));
+    if (tree.truncated) m = { ok: false, why: 'the PR tree is too large to compare' };
+    else {
+      const headFiles = Object.fromEntries(tree.tree.filter((e) => e.type === 'blob').map((e) => [e.path, { blob: e.sha, mode: e.mode }]));
+      m = G.renderMatch({ changed: changed.map((c) => ({ filename: c.filename, status: c.status, previous_filename: c.previous_filename })), rendered, head: headFiles, baseManifest });
+    }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  if (!m.ok) return fail(m.why);
+  await setStatus(head, 'template-render', 'success', `Exact render of template ${src.slice(0, 7)} (#${merged.number}, merged by @${OWNER_LOGIN})`);
+  console.log(`#${args.pr}: exact render of template ${src.slice(0, 7)} (#${merged.number})`);
+};
+
+// REQ-FLOW-9 (team v2.18, blackjack#158): may a slice go to an implementer? Reads only its `Files:` line. Prints
+// exactly one line and exits 0 whatever the verdict; non-zero only on a bad argument or an API error. --apply
+// labels it (needs-human for policy paths, needs-replan for no Files: line) and comments once.
+commands['slice-check'] = async () => {
+  if (!/^[0-9]+$/.test(String(args.issue || ''))) throw new Error('slice-check needs --issue <number>');
+  const issue = await gh('GET', repo(`/issues/${args.issue}`));
+  const check = G.slicePolicyCheck(issue.body || '');
+  const line = G.sliceCheckResult(check);
+  console.log(line);
+  if (!args.apply || line === 'ok=true') return;
+  const comments = await all(repo(`/issues/${args.issue}/comments`));
+  const act = G.sliceCheckActions(check, { labels: issue.labels, comments });
+  if (act.addLabels.length) await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: act.addLabels });
+  for (const l of act.removeLabels) await gh('DELETE', repo(`/issues/${args.issue}/labels/${encodeURIComponent(l)}`));
+  if (act.comment) await gh('POST', repo(`/issues/${args.issue}/comments`), { body: act.comment });
 };
 
 // REQ-OPS-14: no token and no API call; a missing file still emits a no-result record (the run died early).
