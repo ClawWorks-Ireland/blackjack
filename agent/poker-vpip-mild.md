@@ -23,3 +23,5 @@ total wall time 45061 ms (1000 pairs, seed mild)
 - calling-station-mild: default 31.2%, full 53.0%, mild 53.9%, between: no
 - maniac-mild: default 31.2%, full 74.2%, mild 67.3%, between: yes
 - wall time under 3 minutes: yes
+
+Note: this record is measure-only, so the test asserts shape (style order, 2,000 hands per row) and does not enforce "between". calling-station-mild (53.9%) is above calling-station (53.0%), so AC3's "between" check fails for it. #112 owns the comparison assertions, and the test prints these `between` lines as diagnostics.

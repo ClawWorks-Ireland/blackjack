@@ -25,5 +25,14 @@ test('VPIP table, 1,000 pairs, seed mild (#10 AC3 record)', (t) => {
   for (const r of rows) {
     t.diagnostic(`${r.style.padEnd(24)} VPIP ${r.pct.toFixed(1).padStart(5)}%  (${r.vpipHands}/${r.hands})  ${r.ms} ms`);
   }
+  // AC3 "mild is between default and full" is reported, not asserted: this slice
+  // is measure-only (#151). The assertion belongs to #112 in this same file.
+  const pct = Object.fromEntries(rows.map((r) => [r.style, r.pct]));
+  for (const base of ['tight-passive', 'loose-aggressive', 'calling-station', 'maniac']) {
+    const lo = Math.min(pct.default, pct[base]);
+    const hi = Math.max(pct.default, pct[base]);
+    const mild = pct[`${base}-mild`];
+    t.diagnostic(`${base}-mild: default ${pct.default.toFixed(1)}%, full ${pct[base].toFixed(1)}%, mild ${mild.toFixed(1)}%, between: ${mild >= lo && mild <= hi ? 'yes' : 'no'}`);
+  }
   t.diagnostic(`total wall time ${ms} ms (1000 pairs, seed mild)`);
 });
