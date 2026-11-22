@@ -128,7 +128,7 @@
     /** Options: seed (required), smallBlind, bigBlind, seats (2-6). */
     constructor({ seed, smallBlind = 5, bigBlind = 10, seats = MAX_SEATS } = {}) {
       if (seed === undefined || seed === null || String(seed) === '') throw new PokerError('A poker table needs a seed');
-      if (!(bigBlind > 0) || !(smallBlind > 0) || smallBlind > bigBlind) throw new PokerError('Blinds must be positive, small at most big');
+      if (!(Number.isInteger(smallBlind) && smallBlind > 0 && Number.isInteger(bigBlind) && bigBlind > 0 && smallBlind <= bigBlind)) throw new PokerError('Blinds must be positive whole numbers, small at most big');
       if (!Number.isInteger(seats) || seats < 2 || seats > MAX_SEATS) throw new PokerError(`Seats must be 2 to ${MAX_SEATS}`);
       this.seed = String(seed);
       this.sb = smallBlind;
