@@ -409,8 +409,29 @@ function metricsRecord(text, ctx = {}) {
     cost: Math.round(n(r && r.total_cost_usd) * 1e4) / 1e4,
     ms: n(r && r.duration_ms),
     denials: r ? (Array.isArray(r.permission_denials) ? r.permission_denials.length : n(r.permission_denials_count)) : 0,
+    denied: deniedTools(r && r.permission_denials),
     tokens: { in: n(u.input_tokens), out: n(u.output_tokens), cacheRead: n(u.cache_read_input_tokens), cacheWrite: n(u.cache_creation_input_tokens) },
   };
+}
+
+/**
+ * Which tools a run was refused, counted by name (team v2.18.1): a tool name, and for Bash its first two words
+ * (`Bash(gh pr)`), so the waste check can say what to allow or stop asking for. No other argument is kept: a
+ * command line can hold anything. At most 20 names.
+ */
+function deniedTools(denials) {
+  if (!Array.isArray(denials)) return {};
+  const out = {};
+  for (const d of denials) {
+    const tool = /^[A-Za-z][\w-]{0,40}$/.test(String(d && d.tool_name)) ? d.tool_name : 'unknown';
+    let key = tool;
+    if (tool === 'Bash' && d.tool_input && typeof d.tool_input.command === 'string') {
+      const words = d.tool_input.command.trim().split(/\s+/).slice(0, 2).map((w) => w.replace(/[^\w./-]/g, '').slice(0, 30)).filter(Boolean);
+      key = `Bash(${words.join(' ')})`;
+    } else if (tool === 'mcp' || /^mcp__/.test(tool)) key = tool.slice(0, 60);
+    if (key in out || Object.keys(out).length < 20) out[key] = (out[key] || 0) + 1;
+  }
+  return out;
 }
 
 /** The record as a GitHub Actions notice titled team-metrics (one line; `%` escaped per the workflow-command rules). */
@@ -513,6 +534,59 @@ const POLICY_RE = /^(CLAUDE\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/|\.clau
 const changedPaths = (git, base, head = 'HEAD') =>
   [...new Set(git('diff', '--name-only', '--no-renames', base, head).split('\n').map((x) => x.trim()).filter(Boolean))];
 const policyViolations = (paths, re = POLICY_RE) => paths.filter((f) => re.test(f));
+
+/**
+ * Slice check (team v2.18, spec REQ-FLOW-9; blackjack#158). A slice names every file it will create, change or
+ * delete on one `Files:` line of backticked paths (planner.md). Only that line is read: other prose may mention
+ * policy paths as context (#132 named `scripts/gates/lib.js:574` under "Don't touch"). Returns
+ * { files, policy, missing }; a trailing `:line` or `:a-b` is stripped from each path.
+ */
+function slicePolicyCheck(body) {
+  const line = (/^Files:(.*)$/m.exec(String(body || '')) || [])[1] || '';
+  const files = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim().replace(/:\d+(?:-\d+)?$/, '')).filter(Boolean);
+  return { files, policy: policyViolations(files), missing: files.length === 0 };
+}
+
+/** The one line `gate.js slice-check` prints. A policy path wins over everything else. */
+function sliceCheckResult(check) {
+  if (check.policy.length) return `ok=false reason=policy paths=${check.policy.join(',')}`;
+  if (check.missing) return 'ok=false reason=no-files';
+  return 'ok=true';
+}
+
+/** Comments by these logins count as the team's own slice-check marker (the workflow token and the team Apps). */
+const SLICE_CHECK_BOTS = ['github-actions[bot]', 'clawworks-orchestrator[bot]', 'clawworks-spec-writer[bot]', 'clawworks-planner[bot]', 'clawworks-console[bot]'];
+
+/**
+ * What `slice-check --apply` does for a check: { addLabels, removeLabels, comment }. A policy slice waits for a
+ * human (A10 is suggested when every path is under evals/); a slice with no Files: line goes back to the planner
+ * (`needs-replan`, never `needs-human`). Labels already present aren't added again, and the comment is null when
+ * a team bot already posted that marker.
+ */
+function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHECK_BOTS } = {}) {
+  const have = labels.map((l) => (typeof l === 'string' ? l : l.name));
+  const posted = (marker) => comments.some((c) => c.user && bots.includes(c.user.login) && (c.body || '').includes(marker));
+  const add = (ls) => ls.filter((l) => !have.includes(l));
+  if (check.policy.length) {
+    const marker = '<!-- slice-check: policy -->';
+    const owner = check.policy.every((p) => p.startsWith('evals/')) ? 'A10 (Incident & Retro), with Delmar\'s approval' : `@${OWNER} or the console`;
+    return {
+      addLabels: add(['needs-human', 'status:awaiting-human']),
+      removeLabels: ['status:planned', 'status:in-progress'].filter((l) => have.includes(l)),
+      comment: posted(marker) ? null : `${marker}\n**Slice check:** this slice changes implementer policy paths, which no implementer may edit: ${check.policy.map((p) => `\`${p}\``).join(', ')}. Suggested owner: ${owner}.\n\n` +
+        `@${OWNER}, how should it be done?\n- **(A, recommended)** Delmar or the console makes the change as a Tier 2 PR (team files go to the template first, REQ-OPS-11).\n- **(B)** The planner re-slices so that only the non-policy part remains here.`,
+    };
+  }
+  if (check.missing) {
+    const marker = '<!-- slice-check: no-files -->';
+    return {
+      addLabels: add(['needs-replan']),
+      removeLabels: [],
+      comment: posted(marker) ? null : `${marker}\n**Slice check:** this slice has no \`Files:\` line, so it can't be checked against the implementer policy paths and isn't dispatched. Planner: add a \`Files:\` line naming every file it creates, changes or deletes.`,
+    };
+  }
+  return { addLabels: [], removeLabels: [], comment: null };
+}
 
 /**
  * Carry-over (gate.js carry-over) keeps an old verdict only if main didn't change the rules it was
@@ -634,18 +708,38 @@ function declaredSpecTier(specText) {
  * needs-human check before this path, and the watcher removes needs-human when it posts (A7 sec-2).
  * `comments` oldest first: [{ id, login, body }].
  */
-function specApprovalDefaulted(comments, overlay = {}) {
+function specApprovalDefaulted(comments, overlay = {}, owner = OWNER) {
   if (!(overlay.hours > 0) || overlay.scope !== 'all') return false;
   const isSpec = (c) => c.login === 'clawworks-spec-writer[bot]' && /^\s*#*\s*Spec\b/m.test(c.body || '');
   let s = -1;
   comments.forEach((c, i) => { if (isSpec(c)) s = i; });
   if (s < 0) return false;
   const after = comments.slice(s + 1);
-  const asks = new Set(after.filter((c) => c.login === 'clawworks-orchestrator[bot]' && /^DEFAULT-CHOICE: approve-spec\s*$/m.test(c.body || '')).map((c) => String(c.id)));
-  return after.some((c) => {
-    const m = /<!-- ask-default:(\d+) choice:approve-spec -->/.exec(c.body || '');
-    return c.login === 'clawworks-console[bot]' && m && asks.has(m[1]);
-  });
+  // Only the owner's LATEST ask counts, and only while he hasn't answered it (AI review round 2 on blackjack#150):
+  // a later ask, or any reply from him (or relayed for him), cancels an older default.
+  const isAsk = (c) => /\[bot\]$/.test(c.login || '') && !['clawworks-console[bot]', 'github-actions[bot]'].includes(c.login) && (c.body || '').includes(`@${owner}`);
+  let k = after.length - 1;
+  while (k >= 0 && !isAsk(after[k])) k--;
+  if (k < 0) return false;
+  const ask = after[k];
+  if (ask.login !== 'clawworks-orchestrator[bot]' || !/^DEFAULT-CHOICE: approve-spec\s*$/m.test(ask.body || '')) return false;
+  const later = after.slice(k + 1);
+  if (later.some((c) => c.login === owner || (c.login === 'clawworks-console[bot]' && /Posted by the console on Delmar's instruction/.test(c.body || '')))) return false;
+  return later.some((c) => c.login === 'clawworks-console[bot]' && (/<!-- ask-default:(\d+) choice:approve-spec -->/.exec(c.body || '') || [])[1] === String(ask.id));
+}
+
+/**
+ * REQ-OPS-15 forward-only rule (A7 sec-1 on home-automation#11): may a re-render to template commit `src` carry
+ * the owner's template approval, given the base branch's TEAM_SOURCE `baseSrc` and GitHub's compare status of
+ * `baseSrc...src`? Only when `src` strictly descends from `baseSrc`. A base with no recorded source (the first
+ * v2.16 render) or an unverified one gets no automatic approval. Returns { ok, why }.
+ */
+function renderDirection(baseSrc, src, compareStatus) {
+  if (!baseSrc) return { ok: false, why: 'the base records no template source: the first template-approved render needs the owner\'s review' };
+  if (!/^[0-9a-f]{40}$/.test(baseSrc)) return { ok: false, why: `the base's template source is "${String(baseSrc).slice(0, 20)}": needs the owner's review` };
+  if (baseSrc === src) return { ok: false, why: 'same template commit as the base: nothing to re-render' };
+  if (compareStatus !== 'ahead') return { ok: false, why: `template ${src.slice(0, 7)} is not newer than the base's ${baseSrc.slice(0, 7)} (${compareStatus || 'unknown'}): a downgrade or a side branch` };
+  return { ok: true, why: 'forward' };
 }
 
 /** A file's git blob id (what a tree lists), so rendered files compare with a PR's tree without downloading it. */
@@ -656,7 +750,9 @@ function gitBlobSha(content) {
 
 /**
  * REQ-OPS-15: is a PR exactly the render of a template commit? Pure; gate.js template-render fetches the facts.
- *  - changed: the PR's changed files [{ filename, status }]
+ *  - changed: the PR's changed files [{ filename, status, previous_filename }]; a rename is checked as the
+ *    removal of its old path plus the addition of its new one (A7 sec-1 on blackjack#150: a project file
+ *    "renamed" into a team file must not be deleted unseen)
  *  - rendered: { path: { blob, mode } } for every team file the template commit renders for this project
  *    (its manifest), TEAM_SOURCE excluded
  *  - head: { path: { blob, mode } } from the PR head's tree
@@ -665,7 +761,9 @@ function gitBlobSha(content) {
  * rendered file must be on the head with the same content and executable bit. Returns { ok, why }.
  */
 function renderMatch({ changed = [], rendered = {}, head = {}, baseManifest = [] }) {
-  for (const c of changed) {
+  const entries = changed.flatMap((c) => (c.status === 'renamed' && c.previous_filename
+    ? [{ filename: c.previous_filename, status: 'removed' }, { filename: c.filename, status: 'added' }] : [c]));
+  for (const c of entries) {
     const p = c.filename;
     if (p === '.agents/TEAM_SOURCE') continue;
     if (p in rendered) continue;
@@ -773,7 +871,7 @@ module.exports = {
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
-  ownerApproval, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch,
+  ownerApproval, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch, renderDirection,
   trustedStatuses, qaCoveredPrs, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, deniedTools, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, slicePolicyCheck, sliceCheckResult, sliceCheckActions, SLICE_CHECK_BOTS, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

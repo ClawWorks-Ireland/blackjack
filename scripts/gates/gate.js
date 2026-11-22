@@ -26,6 +26,7 @@
  *   gate.js publish --patch F --issue N --implementer local|claude [--pr N]   push a verified slice and open/update its PR (App token step)
  *   gate.js throttle-check --file F           REQ-CB-4: open the `throttled` issue if F shows a usage limit
  *   gate.js template-render --pr N            REQ-OPS-15: `template-render` status: is the PR exactly a render of an owner-merged template commit?
+ *   gate.js slice-check --issue N [--apply]  REQ-FLOW-9: may this slice go to an implementer? ok=true | ok=false reason=policy|no-files
  *   gate.js metrics --file F                  REQ-OPS-14: print F's team-metrics notice (env TM_ROLE, TM_SUBJECT, TM_SHA, TM_ATTEMPT, TM_ARGS)
  *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
  *
@@ -729,29 +730,57 @@ commands['template-render'] = async () => {
   if (!full.merged_by || full.merged_by.login !== OWNER_LOGIN) return fail(`template #${merged.number} was merged by ${full.merged_by ? full.merged_by.login : 'nobody'}, not @${OWNER_LOGIN}`);
   const cmp = await (await tget(`repos/${TEMPLATE}/compare/${src}...main`)).json();
   if (!['ahead', 'identical'].includes(cmp.status)) return fail(`template ${src.slice(0, 7)} is not on the template's main`);
+  // Forward only (A7 sec-1 on home-automation#11): a render of an OLDER owner-merged commit would roll back later
+  // fixes under his approval. The new source must strictly descend from the base branch's TEAM_SOURCE.
+  let baseSrc = null;
+  try { baseSrc = Buffer.from((await gh('GET', repo(`/contents/.agents/TEAM_SOURCE?ref=${pr.base.sha}`))).content, 'base64').toString().trim(); } catch { baseSrc = null; }
+  const fwd = baseSrc && /^[0-9a-f]{40}$/.test(baseSrc) ? (await (await tget(`repos/${TEMPLATE}/compare/${baseSrc}...${src}`)).json()).status : null;
+  const dir = G.renderDirection(baseSrc, src, fwd);
+  if (!dir.ok) return fail(dir.why);
   // Render that commit for this project, from a copy of the base branch (this checkout).
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tplr-'));
-  const tdir = path.join(tmp, 'template'), pdir = path.join(tmp, 'project');
-  fs.mkdirSync(tdir); fs.mkdirSync(pdir);
-  fs.writeFileSync(path.join(tmp, 't.tgz'), Buffer.from(await (await tget(`repos/${TEMPLATE}/tarball/${src}`)).arrayBuffer()));
-  execFileSync('tar', ['-xzf', path.join(tmp, 't.tgz'), '-C', tdir, '--strip-components=1']);
-  execFileSync('bash', ['-c', 'git archive HEAD | tar -x -C "$1"', '_', pdir]);
-  const baseManifest = fs.existsSync(path.join(pdir, '.agents/TEAM_FILES')) ? fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter(Boolean) : [];
-  execFileSync('node', [path.join(tdir, 'scripts/team/render.js'), '--project', pdir, '--prune'], { env: { PATH: process.env.PATH, TEMPLATE_REPO: TEMPLATE }, stdio: ['ignore', 'ignore', 'pipe'] });
-  const manifest = fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter((p) => p && p !== '.agents/TEAM_SOURCE');
-  const rendered = {};
-  for (const p of manifest) {
-    const abs = path.join(pdir, p);
-    rendered[p] = { blob: G.gitBlobSha(fs.readFileSync(abs)), mode: (fs.statSync(abs).mode & 0o111) ? '100755' : '100644' };
-  }
-  const tree = await gh('GET', repo(`/git/trees/${head}?recursive=1`));
-  if (tree.truncated) return fail('the PR tree is too large to compare');
-  const headFiles = Object.fromEntries(tree.tree.filter((e) => e.type === 'blob').map((e) => [e.path, { blob: e.sha, mode: e.mode }]));
-  const m = G.renderMatch({ changed: changed.map((c) => ({ filename: c.filename, status: c.status })), rendered, head: headFiles, baseManifest });
-  fs.rmSync(tmp, { recursive: true, force: true });
+  let m;
+  try {   // the temp copy goes on every path, including an early failure or a throw (AI review Nit on blackjack#150)
+    const tdir = path.join(tmp, 'template'), pdir = path.join(tmp, 'project');
+    fs.mkdirSync(tdir); fs.mkdirSync(pdir);
+    fs.writeFileSync(path.join(tmp, 't.tgz'), Buffer.from(await (await tget(`repos/${TEMPLATE}/tarball/${src}`)).arrayBuffer()));
+    execFileSync('tar', ['-xzf', path.join(tmp, 't.tgz'), '-C', tdir, '--strip-components=1']);
+    execFileSync('bash', ['-c', 'git archive HEAD | tar -x -C "$1"', '_', pdir]);
+    const baseManifest = fs.existsSync(path.join(pdir, '.agents/TEAM_FILES')) ? fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter(Boolean) : [];
+    execFileSync('node', [path.join(tdir, 'scripts/team/render.js'), '--project', pdir, '--prune'], { env: { PATH: process.env.PATH, TEMPLATE_REPO: TEMPLATE }, stdio: ['ignore', 'ignore', 'pipe'] });
+    const manifest = fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter((p) => p && p !== '.agents/TEAM_SOURCE');
+    const rendered = {};
+    for (const p of manifest) {
+      const abs = path.join(pdir, p);
+      rendered[p] = { blob: G.gitBlobSha(fs.readFileSync(abs)), mode: (fs.statSync(abs).mode & 0o111) ? '100755' : '100644' };
+    }
+    const tree = await gh('GET', repo(`/git/trees/${head}?recursive=1`));
+    if (tree.truncated) m = { ok: false, why: 'the PR tree is too large to compare' };
+    else {
+      const headFiles = Object.fromEntries(tree.tree.filter((e) => e.type === 'blob').map((e) => [e.path, { blob: e.sha, mode: e.mode }]));
+      m = G.renderMatch({ changed: changed.map((c) => ({ filename: c.filename, status: c.status, previous_filename: c.previous_filename })), rendered, head: headFiles, baseManifest });
+    }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   if (!m.ok) return fail(m.why);
   await setStatus(head, 'template-render', 'success', `Exact render of template ${src.slice(0, 7)} (#${merged.number}, merged by @${OWNER_LOGIN})`);
   console.log(`#${args.pr}: exact render of template ${src.slice(0, 7)} (#${merged.number})`);
+};
+
+// REQ-FLOW-9 (team v2.18, blackjack#158): may a slice go to an implementer? Reads only its `Files:` line. Prints
+// exactly one line and exits 0 whatever the verdict; non-zero only on a bad argument or an API error. --apply
+// labels it (needs-human for policy paths, needs-replan for no Files: line) and comments once.
+commands['slice-check'] = async () => {
+  if (!/^[0-9]+$/.test(String(args.issue || ''))) throw new Error('slice-check needs --issue <number>');
+  const issue = await gh('GET', repo(`/issues/${args.issue}`));
+  const check = G.slicePolicyCheck(issue.body || '');
+  const line = G.sliceCheckResult(check);
+  console.log(line);
+  if (!args.apply || line === 'ok=true') return;
+  const comments = await all(repo(`/issues/${args.issue}/comments`));
+  const act = G.sliceCheckActions(check, { labels: issue.labels, comments });
+  if (act.addLabels.length) await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: act.addLabels });
+  for (const l of act.removeLabels) await gh('DELETE', repo(`/issues/${args.issue}/labels/${encodeURIComponent(l)}`));
+  if (act.comment) await gh('POST', repo(`/issues/${args.issue}/comments`), { body: act.comment });
 };
 
 // REQ-OPS-14: no token and no API call; a missing file still emits a no-result record (the run died early).

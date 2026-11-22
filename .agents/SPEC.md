@@ -1,6 +1,6 @@
 # Claude Agent Delivery Team — Requirements & Design Spec
 
-**Version:** 0.41 · **Date:** 2026-11-22 · **Owner:** Delmar (sole human approver, "H")
+**Version:** 0.47 · **Date:** 2026-11-22 · **Owner:** Delmar (sole human approver, "H")
 **Status:** Control plane bootstrapped (Phase 2 + reboot test done). BlackJack setup open as ClawWorks-Ireland/blackjack#11 (Tier 2, Level 0). Next: its checklist, then merge (§13).
 
 ---
@@ -124,6 +124,7 @@ Issue → Spec → Plan (slices) → [Local implement (≤2) → Claude implemen
 - `REQ-FLOW-5` Nits never block; Pre-existing findings become new issues.
 - `REQ-FLOW-6` WIP limit: 3 open PRs per project (lowered from 5 for subscription-only usage).
 - `REQ-FLOW-7` Every local→Claude handoff is logged with the reason, so local-model success rate can be measured (§10).
+- `REQ-FLOW-9` **Slices that implementers can't build never reach them** (team v2.18; blackjack#158). Every slice names its files on one `Files:` line. `gate.js slice-check` (`lib.js slicePolicyCheck`, `sliceCheckActions`) reads only that line. A slice naming an implementer policy path gets `needs-human` (owner: A10 for `evals/` only, otherwise H or the console; team files are template work), and one with no `Files:` line gets `needs-replan`. The check runs at plan time in `spec-plan.yml` (model-free, frozen scripts), before every dispatch by the orchestrator, and as a backstop in `implement.yml`'s gate, which skips the implementers and spends no ladder attempt. A test keeps the guard's, `lib.js`'s and `implement.yml`'s policy lists in agreement.
 
 ---
 
@@ -226,9 +227,11 @@ How H works *on* the team (setup, spec changes, troubleshooting), as opposed to 
   - the commit is the merge of a template PR merged by H (`owner_login`), and it is on the template's main;
   - that commit's own `render.js`, run with an empty environment on a copy of the base branch, gives exactly the PR head's team files: git blob ids and executable bits, compared from the head's tree, so no PR file is executed;
   - the PR changes nothing but team files (rendered, or dropped ones it deletes);
+  - the commit strictly descends from the base branch's own `TEAM_SOURCE`, so a render never moves backwards (A7 sec-1 on home-automation#11);
   - then it posts a trusted `template-render` status.
 
   `tier-approval`, `tier2-cooling` and the release manager count that status as H's approval of the head. Any other change, or an edit after rendering, gets no such approval. The health watcher opens at most **one re-render PR per project per day** (`--metrics` run), carrying every template change since the last render, and closes older re-render PRs as superseded. This is the same human approval of the same bytes, given once; REQ-GATE-1 still holds.
+- `REQ-OPS-16` **Nothing in flight stays still for more than a day** (team v2.17). Hourly, the health watcher measures each in-flight issue's time since its last status change, a parent counting its slices ("Part of #N"), and each PR's time since its last push, gate status or review (`scripts/pc/health/aging.js`, tested). Every item past 24 h goes on the project's `team-aging` issue, with its likely reason and the playbook action. On every sweep, the orchestrator takes that action or says on the item why waiting is right (orchestrator.md 3d). An item past 72 h is a `[health]` issue for H.
 - `REQ-OPS-10` **Projects live in `ClawWorks-Ireland`.** The template repo, every project repo and each project's GitHub Project are owned by the organisation, so the agent Apps (§8.5) are installed once for the org with access to **all its repositories** (H's decision, 2026-11-15) and can reach org-owned Projects (user-owned Projects are closed to Apps). Each project's gates only watch that project, so every job requests its role's token **for its own repository only** (`repositories:` on the token request), and the first live run of every project checks that. `/setup-project` expects `ClawWorks-Ireland/<repo>` and asks H before using a repo anywhere else. The org called `clawworks` is unrelated and is never used. **One exception** (team v2.9, H-approved Tier 2): A10's publish step also mints an **issues-only** token for the template repo, to open `team-proposal` issues carrying team-file patches. It has no contents or pull-request rights there. The health watcher, as the console App, turns a proposal into a template PR only if its patch applies cleanly and touches only `team/` (not `team/.github/`) or the spec. Every change still reaches the template's `main` only through H's merge.
 - `REQ-OPS-6` The console is available 24x7 — the host never sleeps (REQ-CFG-4c). If unreachable, H uses break-glass SSH or waits; the team's queued work is unaffected.
 
@@ -423,6 +426,21 @@ sensitive_paths_extra: []
 ---
 
 ## 14. Changelog
+- **0.47 (2026-11-22):** **Template-approved renders only move forward** (team v2.18.3; A7 sec-1 on home-automation#11). `template-render` accepted any template commit H ever merged on the template's main. A re-render of an older commit would therefore have rolled back later fixes, including security fixes, under H's template approval. It now requires the commit to strictly descend from the base branch's `TEAM_SOURCE` (`lib.js renderDirection`). A base with no source, or an unverified one, gets no automatic approval. Affected: REQ-OPS-15; `gate.js template-render`, `lib.js`.
+- **0.46 (2026-11-22):** **Two trust-rule fixes from blackjack#150's reviews** (team v2.18.2).
+  - **Renames:** A7 sec-1 found that `renderMatch` checked only a renamed file's new path. A project file such as `RISK.md`, "renamed" into a team file, could be deleted under H's template approval. A rename is now checked as the removal of its old path plus the addition of its new one.
+  - **Latest ask:** the AI review (Important, 3/3) found that `specApprovalDefaulted` kept accepting a default after H's later reply or a newer ask. Now only H's latest ask counts, and any reply from him, or relayed for him, cancels the default.
+  - **Clean-up:** `gate.js template-render` removes its temporary copy on every path.
+  - **Affected:** REQ-OPS-15, REQ-COORD-5; `lib.js` `renderMatch` and `specApprovalDefaulted`, `gate.js template-render`.
+- **0.45 (2026-11-22):** **Waste check: no verifier false alarm, and refused tools named** (team v2.18.1). The first daily waste report (2026-11-22) had two problems:
+  - **A false alarm:** it raised eight "review-verify ran 3 times" findings, but the three verifiers vote by design. Each voter now has its own role (`review-verify-<n>`).
+  - **Refusals it couldn't name:** it counted 232 refused tool calls (orchestrator 122, implementer 52, planner 31, self-verifier 17, spec writer 10) without saying which tools. The metrics record now carries `denied`: refused tools by name, Bash with its first two words only, no other arguments. The denials finding lists the most refused tools, so the allowlist or the definition can be fixed.
+  - **Affected:** REQ-OPS-14; `review.yml`, `lib.js metricsRecord`/`deniedTools`, `waste.js`.
+- **0.44 (2026-11-22):** **Slice check** (team v2.18; blackjack#158, spec by A1, plan by A2, built by the console in the template on H's instruction, because every file it changes is a policy path and a team file). #132 spent four ladder attempts on a README under `evals/` that no implementer may edit. New REQ-FLOW-9.
+  - **Known differences:** the drift test documents two. The guard anchors `CLAUDE.md` and `scripts/rollback` exactly, while `lib.js` and the greps match a prefix (so they also block `CLAUDE.md.bak` and `scripts/rollback.sh`). The lists are unchanged, per the spec.
+  - **Affected:** REQ-FLOW-9; `lib.js`, `gate.js slice-check`, `implement.yml`, `spec-plan.yml`, `orchestrator.yml` (allowlist), `orchestrator.md`, `planner.md`, `lib.test.js`, `slice-check.test.js`.
+- **0.43 (2026-11-22):** **Aging work** (team v2.17; H: "the issue was open for days. There should be more action taken to unstuck issues and prs that remain open for more than a day"). New REQ-OPS-16. When added, BlackJack had 11 in-flight issues without progress for over a day: #111 and #118 releasing for 35–39 h, #113 and #59 blocked for 39–90 h, #99, #109 and #45 planned for 40+ h, and #48 for 91 h. Affected: REQ-OPS-13, REQ-OPS-16; `aging.js`, `team-health.js`, `install-pool.sh`, `orchestrator.md`.
+- **0.42 (2026-11-22):** **Asks answered by a PR** (team v2.16.1; H: "Why is blackjack#48 still needing human interaction"). The ask on #48 was to open a README PR. The console opened #159 and H approved it, but #48 stayed Awaiting human for 1.5 h, because the orchestrator only treats H's own comment as an answer and never re-read the issue. The orchestrator now checks each item waiting on H for an open closing PR (`Closes #N`): if H approved its head, or the ask was to have it opened, it moves the item to In review. The health watcher's new stuck rule flags such an item still waiting an hour after H's approval, and dispatches the orchestrator (`stuck.js closedIssues`, `askAnsweredByPr`). Affected: REQ-OPS-13, REQ-TRACK-1; `orchestrator.md`, `stuck.js`, `team-health.js`.
 - **0.41 (2026-11-22):** **One approval per team change** (team v2.16; H: "for blackjack ... why are there so many approvals needed from me?", choosing daily batched re-renders and template-approved re-renders). Of BlackJack's 58 PRs since 15 Nov, 31 were Tier 2, and 24 of those were team-file re-renders of template changes H had already approved. New REQ-OPS-15:
   - `.agents/TEAM_SOURCE`;
   - `template-render.yml` and `gate.js template-render`;

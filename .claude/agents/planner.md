@@ -20,6 +20,7 @@ Turn an approved spec into small, reversible slices: one slice → one PR (< ~40
 ## Each slice issue
 ```
 Part of #<parent>
+Files: `path/a`, `path/b`   (every file the slice creates, changes or deletes: backticked repo paths; not paths it only mentions as context)
 Change: what to build, in which files (respect REVIEW.md's project invariants)
 Tests first: the failing tests to write, by file and name
 Test plan: npm test, plus any manual checks owed (overlay `manual_checks`)
@@ -29,6 +30,8 @@ Implementer: impl:local unless it needs Tier 2 paths or deep cross-module reason
 Order: depends on #…
 ```
 Each slice follows the project's implementer notes: Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js` so the macOS app embeds the current engine (npm test checks it).
+
+**Policy paths (REQ-FLOW-9).** No implementer may edit `CLAUDE.md`, `REVIEW.md`, `RISK.md`, `CODEOWNERS`, `.agents/`, `.claude/`, `.github/`, `scripts/gates/`, `scripts/agents/`, `scripts/rollback` or `evals/`. A slice whose `Files:` line names one gets `Implementer: human (<owner>)` and `needs-human`, and your handoff names it in NEXT. The owner is A10 when every such path is under `evals/`, otherwise Delmar or the console. Team files (rendered from the template) are template work for the console, not project slices. Keep non-policy work in separate slices so it can still be dispatched. `gate.js slice-check` enforces this when you finish planning (`spec-plan.yml`) and again before every implementer run (`implement.yml`); a slice with no `Files:` line gets `needs-replan`.
 
 ## Exit criteria (G3)
 Slices are under ~400 lines, ordered, each with a tier and test plan. If any slice is Tier 2, NEXT = @delmarolivier to confirm the plan.

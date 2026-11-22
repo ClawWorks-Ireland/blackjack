@@ -196,7 +196,7 @@ jobs:
         if: always() && steps.claude.outputs.execution_file != ''
         env:
           TM_FILE: ${{ steps.claude.outputs.execution_file }}
-          TM_ROLE: "review-verify"
+          TM_ROLE: "review-verify-${{ matrix.voter }}"
           TM_SUBJECT: "${{ github.event.pull_request.number }}"
           TM_SHA: "${{ github.event.pull_request.head.sha }}"
           TM_ATTEMPT: ""

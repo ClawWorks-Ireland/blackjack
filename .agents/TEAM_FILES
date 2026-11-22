@@ -55,4 +55,5 @@ scripts/gates/lib.js
 scripts/gates/lib.test.js
 scripts/gates/package.json
 scripts/gates/runners.test.js
+scripts/gates/slice-check.test.js
 scripts/rollback
