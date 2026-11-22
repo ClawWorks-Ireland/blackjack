@@ -1677,11 +1677,16 @@
   els.reportDialog.addEventListener('close', () => { reportGraceUntil = 0; reportFocusBefore = null; gracePress = false; });
   // Grace window: Enter meant for Deal or Rebet, which the report covered, still deals (#109).
   els.reportDialog.addEventListener('keydown', (e) => {
-    if (!inReportGrace() || e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.target === els.repGuess && els.repGuess.value.trim() !== '') return; // submits the guess
+    const isX = e.key === 'x' || e.key === 'X';
+    if (!inReportGrace() || (e.key !== 'Enter' && !isX) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!isX && e.target === els.repGuess && els.repGuess.value.trim() !== '') return; // submits the guess
     e.preventDefault();
     if (e.repeat) return;
     const usable = (c) => !!c && !c.disabled && !c.hidden && !c.closest('[hidden]') && c.offsetParent !== null;
+    if (isX) { // Rebet ×2, which the report covered
+      if (usable(els.rebet2)) forwardGraceClick(els.rebet2);
+      return; // no target: stay open
+    }
     const before = [els.deal, els.rebet, els.rebet2].find((c) => c === reportFocusBefore);
     const target = usable(before) ? before : (usable(els.deal) ? els.deal : null);
     if (!target) return; // nothing to deal: stay open
