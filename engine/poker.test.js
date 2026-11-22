@@ -161,3 +161,16 @@ test('poker: random play over thousands of hands never creates or loses a chip',
     }
   }
 });
+
+test('poker: blinds must be positive whole numbers, small at most big', () => {
+  const bad = [[2.5, 5], [5, 7.5], ['5', 10], [5, '10'], [null, 10], [0, 10], [-5, 10], [NaN, 10], [5, Infinity], [1e-9, 10], [10, 5]];
+  for (const [smallBlind, bigBlind] of bad) {
+    assert.throws(() => new P.PokerTable({ seed: 'b', smallBlind, bigBlind }), P.PokerError, `${smallBlind}/${bigBlind}`);
+  }
+  for (const [smallBlind, bigBlind] of [[5, 10], [1, 2], [10, 10]]) {
+    assert.doesNotThrow(() => new P.PokerTable({ seed: 'b', smallBlind, bigBlind }));
+  }
+  const t = new P.PokerTable({ seed: 'b' });
+  assert.equal(t.sb, 5);
+  assert.equal(t.bb, 10);
+});
