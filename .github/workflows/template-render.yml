@@ -1,0 +1,38 @@
+# REQ-OPS-15 (team v2.16): a template re-render PR carries Delmar's template merge as its approval when it is
+# exactly the render of that template commit. This job proves it and posts the `template-render` status, which
+# tier-approval and the release manager count as his approval of the head. No model; reads the private template
+# with a contents:read token for the template only, minted from the risk classifier's App (installed org-wide).
+name: template-render
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths: ['.agents/TEAM_SOURCE']
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+concurrency:
+  group: template-render-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  check:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, vm-keyed]   # no model and no PR code: the base branch's gate scripts and the template's render.js
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4   # base branch: gate scripts and the overlay
+        with: { persist-credentials: false }
+      - id: tpl
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned
+        with:
+          app-id: ${{ secrets.A8_APP_ID }}
+          private-key: ${{ secrets.A8_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agent-team-template
+          permission-contents: read
+          permission-pull-requests: read
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TEMPLATE_TOKEN: ${{ steps.tpl.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: node scripts/gates/gate.js template-render --pr "$PR"
