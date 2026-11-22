@@ -291,17 +291,23 @@ class LiveTable {
 }
 
 class Hub {
-  constructor({ leaderboard = null, timing = {}, log = () => {} } = {}) {
+  constructor({ leaderboard = null, timing = {}, log = () => {}, maxTables = 20 } = {}) {
     this.tables = new Map();
+    this.maxTables = maxTables;
+    this.playerTables = 0;
     this.leaderboard = leaderboard;
     this.timing = timing;
     this.log = log;
     this.next = 1;
   }
 
-  create(opts = {}) {
+  create(opts = {}, { seeded = false } = {}) {
+    if (!seeded && this.playerTables >= this.maxTables) {
+      throw new HubError(`Table limit reached: ${this.maxTables} player tables are open. Join one of them instead.`, 409);
+    }
     const id = String(this.next++);
     const lt = new LiveTable(this, id, opts);
+    if (!seeded) this.playerTables++;
     this.tables.set(id, lt);
     return lt;
   }
