@@ -131,11 +131,28 @@ function ownerApproval(reviews, headSha, owner = OWNER) {
   return { approved: true, approvedAt: latest.submitted_at };
 }
 
-/** The tier-approval status for a PR. */
-function tierApprovalStatus({ tier, level, reviews, headSha }) {
+/**
+ * REQ-OPS-15 (team v2.16): a template re-render that the gate proved to be exactly the render of a template
+ * commit the owner merged carries that approval: a trusted (gate-bot) `template-render` success status on the
+ * head. Pass the head's statuses. Returns {approved, approvedAt}.
+ */
+function templateApproval(statuses = []) {
+  const t = trustedStatuses(statuses)['template-render'];
+  return t && t.state === 'success' ? { approved: true, approvedAt: t.updated_at || t.created_at } : { approved: false, approvedAt: null };
+}
+
+/** The owner's approval of this head: his review, or his template merge for an exact re-render. */
+function headApproval(reviews, headSha, statuses = []) {
+  const own = ownerApproval(reviews, headSha);
+  return own.approved ? own : templateApproval(statuses);
+}
+
+/** The tier-approval status for a PR. `statuses`: the head's statuses (for a template re-render). */
+function tierApprovalStatus({ tier, level, reviews, headSha, statuses = [] }) {
   const need = requiredApprovals(tier, level);
   if (need === 0) return { state: 'success', description: `Tier ${tier} at Level ${level}: no human approval needed` };
   const { approved } = ownerApproval(reviews, headSha);
+  if (!approved && templateApproval(statuses).approved) return { state: 'success', description: `Tier ${tier}: exact render of a template commit @${OWNER} merged (template-render)` };
   return approved
     ? { state: 'success', description: `Tier ${tier}: approved by @${OWNER} on ${headSha.slice(0, 7)}` }
     : { state: 'pending', description: `Tier ${tier} at Level ${level}: waiting for @${OWNER} to approve ${headSha.slice(0, 7)}` };
@@ -148,11 +165,11 @@ function tierApprovalStatus({ tier, level, reviews, headSha }) {
  * head; a new push needs a new approval, so it restarts the clock. A
  * `tier2-cancel` label (H cancelling during cooling) fails it.
  */
-function coolingStatus({ tier, reviews, headSha, labels = [], now = new Date(), hours = 24 }) {
+function coolingStatus({ tier, reviews, headSha, labels = [], now = new Date(), hours = 24, statuses = [] }) {
   if (tier < 2) return { state: 'success', description: 'Not Tier 2: no cooling period' };
   const names = labels.map((l) => (typeof l === 'string' ? l : l.name));
   if (names.includes('tier2-cancel')) return { state: 'failure', description: `Cancelled by @${OWNER} (tier2-cancel label)` };
-  const { approved, approvedAt } = ownerApproval(reviews, headSha);
+  const { approved, approvedAt } = headApproval(reviews, headSha, statuses);
   if (!approved) return { state: 'pending', description: `Tier 2: cooling starts when @${OWNER} approves ${headSha.slice(0, 7)}` };
   const ends = new Date(new Date(approvedAt).getTime() + hours * 3600e3);
   if (now >= ends) return { state: 'success', description: `Cooled ${hours}h since approval (${approvedAt})`, ends };
@@ -214,10 +231,10 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
   const ci = checkRuns.filter((c) => c.name === REQUIRED_CHECK && c.app && c.app.slug === 'github-actions' && c.head_sha === head);
   if (!ci.length) reasons.push('no "ci" check run on head');
   else if (!ci.every((c) => c.status === 'completed' && c.conclusion === 'success')) reasons.push('"ci" is not green');
-  const appr = tierApprovalStatus({ tier, level, reviews, headSha: head });
+  const appr = tierApprovalStatus({ tier, level, reviews, headSha: head, statuses });
   if (appr.state !== 'success') reasons.push(appr.description);
   if (tier === 2) {
-    const cool = coolingStatus({ tier, reviews, headSha: head, labels: pr.labels, now, hours: coolingHours });
+    const cool = coolingStatus({ tier, reviews, headSha: head, labels: pr.labels, now, hours: coolingHours, statuses });
     if (cool.state !== 'success') reasons.push(cool.description);
     const t2 = st['tier2-cooling'];
     if (!t2 || t2.state !== 'success') reasons.push('no trusted green "tier2-cooling" status');
@@ -273,6 +290,19 @@ function guardVerdict({ sha, guardActive, pr, headStatuses = [], exactRevertOf =
     return { allowed: true, why: `A9 merge of PR #${pr.number}` };
   }
   return { allowed: false, why: 'direct push: not an A9 merge or an exact revert' };
+}
+
+/**
+ * The PR number an A9 squash merge names in its subject ("Title (#N)", merge-execute's commit_title),
+ * or null. main-guard runs seconds after the merge, when GitHub's commit→PR index
+ * (/commits/{sha}/pulls) may not list the PR yet: that made a legitimate A9 merge a "direct push"
+ * and reverted it (incident home-automation#7). The number only picks which PR to fetch;
+ * guardVerdict still requires merged_by A9, merge_commit_sha === sha and trusted merge-evidence,
+ * so a forged subject gains nothing.
+ */
+function guardPrNumber(message) {
+  const m = /\(#(\d{1,7})\)\s*$/.exec(String(message || '').split('\n')[0]);
+  return m ? Number(m[1]) : null;
 }
 
 // ---------------------------------------------------------------- review (A5 → A6)
@@ -592,6 +622,65 @@ function declaredSpecTier(specText) {
   return all.length ? Math.max(...all) : null;
 }
 
+/**
+ * REQ-COORD-5 (team v2.15.2): did Delmar's ask default settle this spec's approval? True only when the overlay
+ * lets defaults cover everything (`ask_default_scope: all`, `ask_default_hours` > 0) and, after the spec
+ * writer's latest spec:
+ *  - the orchestrator asked Delmar with the machine-readable line `DEFAULT-CHOICE: approve-spec` (its
+ *    recommendation is to approve; any other recommendation carries no line, A7 sec-1 on blackjack#150), and
+ *  - the console App posted `<!-- ask-default:<that ask's id> choice:approve-spec -->` for it.
+ * The console identity is held by the PC's health watcher and the console session, which can already act for
+ * Delmar with his own login, so this adds no new power to any model (A7 sec-3). spec-check keeps its
+ * needs-human check before this path, and the watcher removes needs-human when it posts (A7 sec-2).
+ * `comments` oldest first: [{ id, login, body }].
+ */
+function specApprovalDefaulted(comments, overlay = {}) {
+  if (!(overlay.hours > 0) || overlay.scope !== 'all') return false;
+  const isSpec = (c) => c.login === 'clawworks-spec-writer[bot]' && /^\s*#*\s*Spec\b/m.test(c.body || '');
+  let s = -1;
+  comments.forEach((c, i) => { if (isSpec(c)) s = i; });
+  if (s < 0) return false;
+  const after = comments.slice(s + 1);
+  const asks = new Set(after.filter((c) => c.login === 'clawworks-orchestrator[bot]' && /^DEFAULT-CHOICE: approve-spec\s*$/m.test(c.body || '')).map((c) => String(c.id)));
+  return after.some((c) => {
+    const m = /<!-- ask-default:(\d+) choice:approve-spec -->/.exec(c.body || '');
+    return c.login === 'clawworks-console[bot]' && m && asks.has(m[1]);
+  });
+}
+
+/** A file's git blob id (what a tree lists), so rendered files compare with a PR's tree without downloading it. */
+function gitBlobSha(content) {
+  const buf = Buffer.isBuffer(content) ? content : Buffer.from(String(content));
+  return require('crypto').createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${buf.length}\0`), buf])).digest('hex');
+}
+
+/**
+ * REQ-OPS-15: is a PR exactly the render of a template commit? Pure; gate.js template-render fetches the facts.
+ *  - changed: the PR's changed files [{ filename, status }]
+ *  - rendered: { path: { blob, mode } } for every team file the template commit renders for this project
+ *    (its manifest), TEAM_SOURCE excluded
+ *  - head: { path: { blob, mode } } from the PR head's tree
+ *  - baseManifest: the team files listed on the base (a file the template dropped may be deleted)
+ * Every changed path must be a team file (rendered, or a dropped one now deleted) or TEAM_SOURCE, and every
+ * rendered file must be on the head with the same content and executable bit. Returns { ok, why }.
+ */
+function renderMatch({ changed = [], rendered = {}, head = {}, baseManifest = [] }) {
+  for (const c of changed) {
+    const p = c.filename;
+    if (p === '.agents/TEAM_SOURCE') continue;
+    if (p in rendered) continue;
+    if (c.status === 'removed' && baseManifest.includes(p)) continue;
+    return { ok: false, why: `${p} is not a team file this template commit renders` };
+  }
+  for (const [p, r] of Object.entries(rendered)) {
+    const h = head[p];
+    if (!h) return { ok: false, why: `${p} is missing from the PR head` };
+    if (h.blob !== r.blob) return { ok: false, why: `${p} differs from the template's render` };
+    if ((h.mode === '100755') !== (r.mode === '100755')) return { ok: false, why: `${p} has a different executable bit` };
+  }
+  return { ok: true, why: 'exact render' };
+}
+
 /** The coder Apps that open slice PRs (spec §8.5). */
 const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]'];
 /**
@@ -684,7 +773,7 @@ module.exports = {
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
-  ownerApproval, tierApprovalStatus, coolingStatus,
-  trustedStatuses, qaCoveredPrs, mergeVerdict, guardCommits, guardVerdict, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, isUsageLimited, execMessages, metricsRecord, metricsNotice, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  ownerApproval, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch,
+  trustedStatuses, qaCoveredPrs, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
 };

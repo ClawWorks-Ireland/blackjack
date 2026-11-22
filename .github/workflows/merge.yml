@@ -4,7 +4,7 @@
 name: merge
 on:
   workflow_run:
-    workflows: [ci, review, security, classify, tier-approval]
+    workflows: [ci, review, security, classify, tier-approval, template-render]
     types: [completed]
   schedule:
     - cron: '41 * * * *'

@@ -187,6 +187,20 @@ test('T15 main-guard: direct pushes are not allowed; A9 merges and exact reverts
   assert.equal(G.guardVerdict({ sha, guardActive: true, pr: null, exactRevertOf: null, message: 'Rollback-of: abc1234' }).allowed, false);
 });
 
+test('main-guard finds an A9 squash merge from its subject when the commit→PR index lags (incident home-automation#7)', () => {
+  assert.equal(G.guardPrNumber('Render the agent team from the template (team v2.10.2, spec v0.29) (#4)\n\nMerged-by: A9 merge.yml'), 4);
+  assert.equal(G.guardPrNumber('Fix the tariff band (#123)  '), 123);
+  assert.equal(G.guardPrNumber('Direct push with no PR'), null);
+  assert.equal(G.guardPrNumber('Mentions (#5) mid-subject only'), null, 'only the squash suffix counts');
+  assert.equal(G.guardPrNumber('Subject\n\nbody line (#9)'), null, 'the body is not the subject');
+  assert.equal(G.guardPrNumber(''), null);
+  // The subject only picks which PR to fetch: a direct push that names an A9-merged PR is still refused,
+  // because that PR's merge commit is not this sha.
+  const sha = 'e'.repeat(40);
+  const other = { number: 4, merged_at: 'x', merged_by: { login: G.MERGE_BOT }, merge_commit_sha: 'd'.repeat(40) };
+  assert.equal(G.guardVerdict({ sha, guardActive: true, pr: other, headStatuses: [status('merge-evidence', 'success')] }).allowed, false);
+});
+
 test('revert trailers and the Dublin digest hour', () => {
   assert.equal(G.revertTrailer('Revert "x"\n\nRollback-of: abc1234'), 'abc1234');
   assert.equal(G.revertTrailer('Main-guard-revert: 0123456789abcdef0123456789abcdef01234567').length, 40);
@@ -512,4 +526,51 @@ test('REQ-OPS-14 metrics record: built from the execution file, inputs validated
   // one line, % escaped for the workflow-command parser
   const notice = G.metricsNotice({ role: 'a', note: '100%\nx' });
   assert.ok(notice.startsWith('::notice title=team-metrics::') && !notice.includes('\n') && notice.includes('100%25'));
+});
+
+test('REQ-COORD-5: a spec approval settles by default only on an orchestrator ask that recommends approval, via the console', () => {
+  const spec = { id: 1, login: 'clawworks-spec-writer[bot]', body: '## Spec\nTIER: 2' };
+  const ask = { id: 2, login: 'clawworks-orchestrator[bot]', body: 'NEXT: @delmar, approve the spec? (A, recommended) yes\nDEFAULT-CHOICE: approve-spec' };
+  const dflt = { id: 3, login: 'clawworks-console[bot]', body: '<!-- ask-default:2 choice:approve-spec -->\nNo answer' };
+  const ON = { hours: 2, scope: 'all' };
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], ON), true);
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 2, scope: 'non-tier2' }), false, 'scope');
+  assert.equal(G.specApprovalDefaulted([spec, ask, dflt], { hours: 0, scope: 'all' }), false, 'off');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, login: 'clawworks-orchestrator[bot]' }], ON), false, 'forged by a model');
+  assert.equal(G.specApprovalDefaulted([ask, dflt, spec], ON), false, 'a newer spec needs a new answer');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, body: '<!-- ask-default:9 choice:approve-spec -->' }], ON), false, 'default for another ask');
+  // A7 sec-1 on blackjack#150: the recommendation was to send it back, so no machine-readable approve line
+  const reject = { ...ask, body: 'NEXT: @delmar, approve the spec? (A, recommended) No: rework the auth section first. (B) yes' };
+  assert.equal(G.specApprovalDefaulted([spec, reject, dflt], ON), false, 'recommended rejection');
+  assert.equal(G.specApprovalDefaulted([spec, ask, { ...dflt, body: '<!-- ask-default:2 -->' }], ON), false, 'default without the choice');
+  assert.equal(G.specApprovalDefaulted([spec, { ...ask, login: 'clawworks-spec-writer[bot]' }, dflt], ON), false, 'asked by another bot');
+});
+
+test('REQ-OPS-15: an exact template re-render carries the template approval; nothing else does', () => {
+  const head = 'c'.repeat(40);
+  const tr = (state, login = 'github-actions[bot]') => ({ context: 'template-render', state, creator: { login }, updated_at: '2026-11-22T01:00:00Z' });
+  assert.equal(G.tierApprovalStatus({ tier: 2, level: 4, reviews: [], headSha: head, statuses: [tr('success')] }).state, 'success');
+  assert.equal(G.tierApprovalStatus({ tier: 2, level: 4, reviews: [], headSha: head, statuses: [tr('failure')] }).state, 'pending');
+  assert.equal(G.tierApprovalStatus({ tier: 2, level: 4, reviews: [], headSha: head, statuses: [tr('success', 'clawworks-console[bot]')] }).state, 'pending', 'only the gate bot');
+  assert.equal(G.tierApprovalStatus({ tier: 2, level: 4, reviews: [], headSha: head }).state, 'pending');
+  // cooling starts at the template-render approval
+  const c = G.coolingStatus({ tier: 2, reviews: [], headSha: head, statuses: [tr('success')], hours: 0, now: new Date('2026-11-22T01:00:01Z') });
+  assert.equal(c.state, 'success');
+});
+
+test('REQ-OPS-15: renderMatch accepts only the exact render (content, executable bit, team files only)', () => {
+  const blob = (s) => G.gitBlobSha(s);
+  assert.equal(G.gitBlobSha('hello\n'), 'ce013625030ba8dba906f756967f9e9ca394464a', 'same id as git hash-object');
+  const rendered = { 'scripts/gates/gate.js': { blob: blob('a'), mode: '100644' }, 'scripts/rollback': { blob: blob('r'), mode: '100755' } };
+  const head = { 'scripts/gates/gate.js': { blob: blob('a'), mode: '100644' }, 'scripts/rollback': { blob: blob('r'), mode: '100755' }, 'web/app.js': { blob: blob('x'), mode: '100644' } };
+  const changed = [{ filename: 'scripts/gates/gate.js', status: 'modified' }, { filename: '.agents/TEAM_SOURCE', status: 'modified' }];
+  assert.deepEqual(G.renderMatch({ changed, rendered, head }), { ok: true, why: 'exact render' });
+  assert.equal(G.renderMatch({ changed: [...changed, { filename: 'web/app.js', status: 'modified' }], rendered, head }).ok, false, 'a project file rides along');
+  assert.equal(G.renderMatch({ changed, rendered, head: { ...head, 'scripts/gates/gate.js': { blob: blob('evil'), mode: '100644' } } }).ok, false, 'edited after render');
+  assert.equal(G.renderMatch({ changed, rendered, head: { ...head, 'scripts/rollback': { blob: blob('r'), mode: '100644' } } }).ok, false, 'mode');
+  const { 'scripts/rollback': _gone, ...partial } = head;
+  assert.equal(G.renderMatch({ changed, rendered, head: partial }).ok, false, 'missing file');
+  const dropped = [{ filename: '.github/workflows/tier2-cooling.yml', status: 'removed' }];
+  assert.equal(G.renderMatch({ changed: dropped, rendered, head, baseManifest: ['.github/workflows/tier2-cooling.yml'] }).ok, true, 'a dropped team file is pruned');
+  assert.equal(G.renderMatch({ changed: [{ filename: 'RISK.md', status: 'removed' }], rendered, head, baseManifest: [] }).ok, false, 'deleting a project file');
 });
