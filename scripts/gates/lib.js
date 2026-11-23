@@ -147,6 +147,20 @@ function headApproval(reviews, headSha, statuses = []) {
   return own.approved ? own : templateApproval(statuses);
 }
 
+/**
+ * Should the owner's review be requested on a PR? (team v2.22.3, spec §1.1) `request` while tier-approval waits for
+ * him; `unrequest` when it doesn't need him but he is still asked, typically by GitHub's automatic code-owner request
+ * when a PR opens (`* @owner` in CODEOWNERS, blackjack#173), so his review-requested list holds only real asks.
+ * Never on his own PRs. Returns 'request' | 'unrequest' | 'none'.
+ */
+function ownerReviewAction({ state, requested = [], author, owner = OWNER }) {
+  if (author === owner) return 'none';
+  const asked = requested.some((u) => (typeof u === 'string' ? u : u && u.login) === owner);
+  if (state === 'pending' && !asked) return 'request';
+  if (state === 'success' && asked) return 'unrequest';
+  return 'none';
+}
+
 /** The tier-approval status for a PR. `statuses`: the head's statuses (for a template re-render). */
 function tierApprovalStatus({ tier, level, reviews, headSha, statuses = [] }) {
   const need = requiredApprovals(tier, level);
@@ -192,20 +206,80 @@ function trustedStatuses(statuses) {
 /**
  * REQ-GATE-7 (team v2.11.3): the PRs a QA round on `sha` covers. A newer merge can replace a waiting round,
  * so a round reports to the PR merged at `sha` and to each PR merged at an earlier first-parent commit, back
- * to (not including) the last commit with a trusted `qa` status, at most `max` commits.
+ * to (not including) the last commit with a trusted `qa` **verdict** (`success` or `failure`), at most `max` commits.
+ * An `error` or `pending` round doesn't end the walk (blackjack#128): it gave no verdict, so the PRs it would have
+ * covered stay owed to the next round that does.
  * `commitAt(sha)` returns { sha, parents }, `statusesAt(sha)` the commit's statuses and `prsAt(sha)` its PRs.
  */
 async function qaCoveredPrs({ sha, commitAt, statusesAt, prsAt, max = 20 }) {
   const out = [];
   let cur = sha;
   for (let i = 0; i < max && cur; i++) {
-    if (i > 0 && trustedStatuses(await statusesAt(cur)).qa) break;
+    const qa = i > 0 && trustedStatuses(await statusesAt(cur)).qa;
+    if (qa && ['success', 'failure'].includes(qa.state)) break;
     const pr = ((await prsAt(cur)) || []).find((p) => p.merge_commit_sha === cur);
     if (pr) out.push(pr);
     const c = await commitAt(cur);
     cur = c && c.parents && c.parents[0] && c.parents[0].sha;
   }
   return out;
+}
+
+/**
+ * blackjack#128 (team v2.21): did a job lose its runner? It started (has steps) and didn't succeed, and one of the
+ * signs GitHub records without logs is there (the two real incidents, 2026-11-21):
+ *  - its failure annotation is "Process completed with exit code 143" (SIGTERM: the runner was shut down mid-step;
+ *    QA run 44897404491);
+ *  - a step was cancelled while the job itself ended `failure` (a person's cancel ends the job `cancelled`;
+ *    release run 44909048559);
+ *  - no runner is recorded, or a runner-loss message is annotated.
+ * A job that hit its timeout ("exceeded the maximum execution time") is not a lost runner, nor is a person's cancel.
+ */
+const RUNNER_LOST_RE = /runner has received a shutdown signal|lost communication with the server|exit code 143\b/i;
+const TIMEOUT_RE = /exceeded the maximum execution time/i;
+function runnerLost(job, annotations = []) {
+  if (!job || !(job.steps || []).length) return false;
+  if (job.conclusion === 'success' || job.conclusion === 'skipped') return false;
+  if (annotations.some((a) => TIMEOUT_RE.test(a.message || ''))) return false;
+  if (!job.runner_name) return true;
+  if (annotations.some((a) => RUNNER_LOST_RE.test(a.message || ''))) return true;
+  return job.conclusion === 'failure' && job.steps.some((st) => st.conclusion === 'cancelled');
+}
+
+/**
+ * Re-run a QA round once when its runner was lost (blackjack#128). `failed`: the run counts as failed (the report
+ * job decides before the run has finished). Only attempt 1, only a lost runner, only when the round itself didn't
+ * pass, and never when a newer round on main exists (it covers the same PRs). Returns { action, reason }.
+ */
+function qaRetryAction({ run, qaJob, annotations = [], newerMainRun = false, failed = null }) {
+  const isFailed = failed === null ? ['failure', 'cancelled'].includes(run.conclusion) : failed;
+  if (!isFailed) return { action: 'none', reason: `run ${run.conclusion || run.status}, not failed` };
+  if (Number(run.run_attempt) !== 1) return { action: 'none', reason: `attempt ${run.run_attempt}: retried once already` };
+  if (!runnerLost(qaJob, annotations)) return { action: 'none', reason: 'the qa job did not lose its runner (a real failure, a cancel, or it never started)' };
+  const round = ((qaJob && qaJob.steps) || []).find((s) => s.name === 'QA round');
+  if (round && round.conclusion === 'success') return { action: 'none', reason: 'the QA round step finished: its result stands' };
+  if (newerMainRun) return { action: 'none', reason: 'attempt 1 but a newer main qa run exists' };
+  return { action: 'rerun', reason: 'attempt 1 lost its runner mid-round' };
+}
+
+/** What qa-report posts for a result: { state, comment }. A runner-lost attempt 1 that will be retried posts pending, no comments. */
+function qaReportPlan({ result, retry = false }) {
+  if (result === 'pass') return { state: 'success', comment: true };
+  if (result === 'fail') return { state: 'failure', comment: true };
+  return retry ? { state: 'pending', comment: false } : { state: 'error', comment: true };
+}
+
+/**
+ * Re-run a release once when its verify job lost its runner (blackjack#128). Only push runs (a workflow_dispatch is a
+ * rollback, never retried), only attempt 1, only failed or cancelled runs. Returns { action, reason }.
+ */
+function releaseRetryAction({ run, jobs = [], annotations = [] }) {
+  if (run.event !== 'push') return { action: 'none', reason: `${run.event} run (a rollback is never retried)` };
+  if (!['failure', 'cancelled'].includes(run.conclusion)) return { action: 'none', reason: `run ${run.conclusion}` };
+  if (Number(run.run_attempt) !== 1) return { action: 'none', reason: `attempt ${run.run_attempt}: retried once already` };
+  const verify = jobs.find((j) => j.name === 'verify');
+  if (!runnerLost(verify, annotations)) return { action: 'none', reason: 'verify did not lose its runner (a real failure or a cancel)' };
+  return { action: 'rerun', reason: 'attempt 1: verify lost its runner' };
 }
 
 /**
@@ -395,6 +469,7 @@ function metricsRecord(text, ctx = {}) {
   const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   const u = (r && r.usage) || {};
   const effort = (/--effort (low|medium|high|xhigh|max)\b/.exec(ctx.args || '') || [])[1] || 'default';
+  const advisor = (/--advisor ([a-z0-9.-]{1,40})\b/.exec(ctx.args || '') || [])[1] || null;
   return {
     v: 1,
     role: clean(ctx.role, /^[a-z][a-z0-9-]{0,40}$/) || 'unknown',
@@ -403,6 +478,7 @@ function metricsRecord(text, ctx = {}) {
     attempt: clean(ctx.attempt, /^[0-9]{1,3}$/) ? Number(ctx.attempt) : null,
     model: clean(init && init.model, /^[A-Za-z0-9._:\[\]-]{1,60}$/) || clean((ctx.args || '').split(' ')[0], /^[a-z0-9.-]{1,60}$/),
     effort,
+    advisor,
     outcome: r ? clean(r.subtype, /^[a-z_]{1,40}$/) || 'unknown' : 'no-result',
     error: r ? r.is_error === true : true,
     turns: n(r && r.num_turns),
@@ -563,10 +639,21 @@ const SLICE_CHECK_BOTS = ['github-actions[bot]', 'clawworks-orchestrator[bot]', 
  * (`needs-replan`, never `needs-human`). Labels already present aren't added again, and the comment is null when
  * a team bot already posted that marker.
  */
-function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHECK_BOTS } = {}) {
+function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHECK_BOTS, teamFiles = [] } = {}) {
   const have = labels.map((l) => (typeof l === 'string' ? l : l.name));
   const posted = (marker) => comments.some((c) => c.user && bots.includes(c.user.login) && (c.body || '').includes(marker));
   const add = (ls) => ls.filter((l) => !have.includes(l));
+  // REQ-COORD-6 (team v2.20): team files (rendered from the template, listed in .agents/TEAM_FILES) and eval content
+  // are console work, not a decision for the owner: the console makes them (template first) and he reviews the PR.
+  // Only the project's own policy files (RISK.md, CLAUDE.md, REVIEW.md, CODEOWNERS, the overlay) still ask him.
+  if (check.policy.length && check.policy.every((p) => teamFiles.includes(p) || p.startsWith('evals/') || /^(\.github|\.claude|scripts\/gates|scripts\/agents)\//.test(p))) {
+    const marker = '<!-- slice-check: console -->';
+    return {
+      addLabels: add(['console-work']),
+      removeLabels: ['needs-human', 'status:awaiting-human', 'status:planned', 'status:in-progress'].filter((l) => have.includes(l)),
+      comment: posted(marker) ? null : `${marker}\n**Slice check:** this slice changes ${check.policy.map((p) => `\`${p}\``).join(', ')}, which no implementer may edit. Team files are made in the agent-team template first and reach this repo in the daily re-render; eval content is made directly. Either way it is **console work** (\`console-work\`, REQ-COORD-6): no decision is needed from \`${OWNER}\`, who reviews the resulting PR. Not dispatched.`,
+    };
+  }
   if (check.policy.length) {
     const marker = '<!-- slice-check: policy -->';
     const owner = check.policy.every((p) => p.startsWith('evals/')) ? 'A10 (Incident & Retro), with Delmar\'s approval' : `@${OWNER} or the console`;
@@ -742,6 +829,16 @@ function renderDirection(baseSrc, src, compareStatus) {
   return { ok: true, why: 'forward' };
 }
 
+/**
+ * May an owner's security waiver carry across a pure branch update? Only when main changed none of the files the PR
+ * changes (home-automation#5), so the waived code sits in the same surroundings he looked at. `prPaths`: the PR's
+ * changed paths at the waived head; `mainPaths`: what main changed since. Returns { ok, why }.
+ */
+function waiverCarries(prPaths = [], mainPaths = []) {
+  const touched = prPaths.filter((p) => mainPaths.includes(p));
+  return touched.length ? { ok: false, why: `main changed ${touched.slice(0, 3).join(', ')}, which this PR also changes: the waiver needs a fresh look` } : { ok: true, why: 'main touched none of the PR\'s files' };
+}
+
 /** A file's git blob id (what a tree lists), so rendered files compare with a PR's tree without downloading it. */
 function gitBlobSha(content) {
   const buf = Buffer.isBuffer(content) ? content : Buffer.from(String(content));
@@ -785,6 +882,47 @@ const CODER_BOTS = ['clawworks-local-coder[bot]', 'clawworks-claude-coder[bot]']
  * A fix round may only push to an agent-owned slice PR (A7 on #23): open, same repo, opened
  * by a coder App, on a branch named agent/<issue>-local|claude. Returns a reason, or '' if OK.
  */
+/**
+ * blackjack#131 (team v2.22): the open agent PRs a new slice PR supersedes. When the ladder moves a slice to its next
+ * attempt and opens a new PR, the earlier attempt's PR stays open and holds a WIP slot. These are the ones to close:
+ * open; not the new PR (`keep`); from this repo (a fork is never closed); on exactly the ladder's branch for this
+ * slice, `agent/<issue>-(local|claude)` (so another slice, a retro or a human branch never matches); opened by a
+ * coder App (never a person or another App); based on main. Pure: never throws, odd input gives [].
+ */
+function supersededSlicePrs(openPrs, { issue, keep, repo } = {}) {
+  if (!Array.isArray(openPrs) || !Number.isInteger(Number(issue)) || Number(issue) <= 0) return [];
+  const branch = new RegExp(`^agent/${String(Number(issue))}-(local|claude)$`);
+  return openPrs.filter((p) => p && p.state === 'open' && p.number !== keep
+    && p.head?.repo?.full_name === repo && branch.test(p.head?.ref || '')
+    && CODER_BOTS.includes(p.user?.login) && p.base?.ref === 'main');
+}
+
+/**
+ * Close the PRs a new slice PR supersedes (blackjack#131), with I/O injected so it is testable: `gh(method, url, body)`
+ * and `all(url)`. Comments, then closes, each one (the branch is kept); a failure is reported once on the slice issue
+ * and never thrown, because the new PR is already open. Returns the closed PR numbers.
+ */
+async function closeSuperseded({ gh, all, issue, implementer, newPr, repo, newBranch, owner = OWNER }) {
+  const closed = [], failed = [];
+  let open;
+  try { open = await all(`/repos/${repo}/pulls?state=open&base=main`); } catch (e) { failed.push({ n: null, why: e.message }); }
+  for (const p of open ? supersededSlicePrs(open, { issue, keep: newPr, repo }) : []) {
+    try {
+      await gh('POST', `/repos/${repo}/issues/${p.number}/comments`, { body: `Superseded by #${newPr} (${newBranch}): the ladder moved this slice to the next attempt, and this PR's work went to it as hand-off hints. Closed by the ladder (#131).` });
+      await gh('PATCH', `/repos/${repo}/pulls/${p.number}`, { state: 'closed' });
+      closed.push(p.number);
+    } catch (e) { failed.push({ n: p.number, why: e.message }); }
+  }
+  for (const f of failed) {
+    try {
+      const role = implementer === 'local' ? 'Local Coder (A3a)' : 'Claude Coder (A3b)';
+      const what = f.n ? `#${f.n}` : 'superseded PRs for this slice';
+      await gh('POST', `/repos/${repo}/issues/${issue}/comments`, { body: `ROLE: ${role}   ITEM: #${issue}   RESULT: needs-human\nWHAT CHANGED: Could not close ${what} automatically: ${String(f.why).slice(0, 300)}. It still counts toward WIP.\nEVIDENCE: new PR #${newPr}\nRISKS / ASSUMPTIONS: none\nNEXT: @${owner} close ${what}?` });
+    } catch { /* the new PR is open; never fail publish over this */ }
+  }
+  return closed;
+}
+
 function fixRoundRefusal(pr, repoFullName) {
   if (!pr || pr.state !== 'open') return 'PR is not open';
   if (!pr.head || !pr.head.repo || pr.head.repo.full_name !== repoFullName) return 'head is not in this repo';
@@ -871,7 +1009,7 @@ module.exports = {
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
-  ownerApproval, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch, renderDirection,
-  trustedStatuses, qaCoveredPrs, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, deniedTools, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, slicePolicyCheck, sliceCheckResult, sliceCheckActions, SLICE_CHECK_BOTS, CODER_BOTS, fixRoundRefusal, parseManualChecks, t3Verdict,
+  ownerApproval, ownerReviewAction, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch, renderDirection, waiverCarries,
+  trustedStatuses, qaCoveredPrs, runnerLost, qaRetryAction, qaReportPlan, releaseRetryAction, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, deniedTools, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, slicePolicyCheck, sliceCheckResult, sliceCheckActions, SLICE_CHECK_BOTS, CODER_BOTS, fixRoundRefusal, supersededSlicePrs, closeSuperseded, parseManualChecks, t3Verdict,
 };

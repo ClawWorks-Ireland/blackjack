@@ -36,9 +36,9 @@ function run(port, ...args) {
 }
 
 test('slice-check --apply on a policy slice labels and comments once', async () => {
-  const s = await stub({ number: 9, body: 'Part of #48\nFiles: `evals/review/README.md`', labels: [{ name: 'status:planned' }] });
+  const s = await stub({ number: 9, body: 'Part of #48\nFiles: `RISK.md`', labels: [{ name: 'status:planned' }] });
   const r = await run(s.port, '--issue', '9', '--apply');
-  assert.deepEqual([r.code, r.out], [0, 'ok=false reason=policy paths=evals/review/README.md']);
+  assert.deepEqual([r.code, r.out], [0, 'ok=false reason=policy paths=RISK.md']);
   const posts = s.reqs.filter((q) => q.method === 'POST');
   assert.ok(posts.some((q) => /labels$/.test(q.url) && q.body.labels.includes('needs-human')));
   assert.equal(posts.filter((q) => /comments$/.test(q.url) && q.body.body.includes('<!-- slice-check: policy -->')).length, 1);
@@ -73,5 +73,16 @@ test('slice-check rejects a bad issue argument and fails on an API error', async
   assert.notEqual((await run(s.port, '--issue', 'abc')).code, 0);
   assert.equal(s.reqs.length, 0);
   assert.notEqual((await run(s.port, '--issue', '9')).code, 0);
+  s.server.close();
+});
+
+test('slice-check --apply routes team-file and eval slices to console work, not the owner', async () => {
+  const s = await stub({ number: 9, body: 'Files: `evals/review/README.md`', labels: [{ name: 'needs-human' }] });
+  const r = await run(s.port, '--issue', '9', '--apply');
+  assert.deepEqual([r.code, r.out], [0, 'ok=false reason=policy paths=evals/review/README.md']);
+  const lab = s.reqs.find((q) => q.method === 'POST' && /labels$/.test(q.url));
+  assert.deepEqual(lab.body.labels, ['console-work']);
+  assert.ok(s.reqs.some((q) => q.method === 'DELETE' && q.url.endsWith('/labels/needs-human')));
+  assert.equal(s.reqs.filter((q) => q.method === 'POST' && /comments$/.test(q.url) && q.body.body.includes('<!-- slice-check: console -->')).length, 1);
   s.server.close();
 });
