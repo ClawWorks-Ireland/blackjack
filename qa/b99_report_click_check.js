@@ -23,8 +23,15 @@ async function freshPage(b, viewport) {
   await p.addInitScript(() => {
     // Page-side timing: when the shoe report opened, and when the press (pointerdown) landed.
     window.__reportOpenedAt = null;
-    window.__pressAt = null;
-    document.addEventListener('pointerdown', (e) => { window.__pressAt = e.timeStamp; }, true);
+    // Only the first press while the report is open counts, and its delay is fixed at that moment,
+    // so later clicks (playOut) and a reopened report cannot overwrite it.
+    window.__pressDelay = null;
+    document.addEventListener('pointerdown', (e) => {
+      const r = document.getElementById('report');
+      if (window.__pressDelay === null && r && r.open && typeof window.__reportOpenedAt === 'number') {
+        window.__pressDelay = e.timeStamp - window.__reportOpenedAt;
+      }
+    }, true);
     const watch = () => {
       const r = document.getElementById('report');
       if (!r) return;
@@ -47,8 +54,7 @@ async function freshPage(b, viewport) {
 
 /** ms from the report opening to the press landing in the page, or null if either is missing. */
 const pressTiming = (p) => p.evaluate(() => {
-  const a = window.__pressAt, o = window.__reportOpenedAt;
-  return { pressAt: typeof a === 'number' && typeof o === 'number' ? a - o : null };
+  return { pressAt: typeof window.__pressDelay === 'number' ? window.__pressDelay : null };
 });
 
 const GRACE_MS = 500;
@@ -64,7 +70,7 @@ async function graceCheck(name, b, attemptFn) {
     const r = await attemptFn((vp) => freshPage(b, vp));
     if (r.noPress) { put(name, r.pass, { ...r.detail, pressAt: null, attempts }); return r.p; }
     const { pressAt } = await pressTiming(r.p);
-    if (pressAt !== null && pressAt < GRACE_MS) {
+    if (pressAt !== null && pressAt >= 0 && pressAt < GRACE_MS) {
       put(name, r.pass, { ...r.detail, pressAt, attempts });
       return r.p;
     }
