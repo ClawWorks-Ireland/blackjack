@@ -1,6 +1,7 @@
 # A3a Local Implementer → A3b Claude Implementer ladder (REQ-FLOW-2, FLOW-7),
 # A4 Self-Verifier (G5), then publish as the Claude App (D11). Dispatched by A0
-# (new slices) and review.yml (fix rounds). Not in spec §8.1's list; required
+# (new slices) and review.yml (fix rounds). On churn (a second attempt, a hand-off from a failed attempt, or a
+# review fix round) the Claude coder and self-verifier run with Claude Code's advisor (REQ-FLOW-10, overlay advisor_model). Not in spec §8.1's list; required
 # by REQ-CFG-4 ("implementation jobs target that label").
 name: implement
 on:
@@ -106,7 +107,7 @@ jobs:
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: |
           { echo "Slice #$ISSUE (attempt $ATTEMPT of 2, local):"; gh issue view "$ISSUE" -R "$GITHUB_REPOSITORY" --json title,body -q '"\(.title)\n\n\(.body)"'
-            if [ -n "$FIX_PR" ]; then echo; echo "Fix round for PR #$FIX_PR. Open Important findings:"; gh pr view "$FIX_PR" -R "$GITHUB_REPOSITORY" --comments --json comments -q '[.comments[]|select(.body|startswith("<!-- ai-review"))]|last|.body'; fi
+            if [ -n "$FIX_PR" ]; then echo; echo "Fix round for PR #$FIX_PR. Open Important findings:"; gh pr view "$FIX_PR" -R "$GITHUB_REPOSITORY" --json comments -q '[.comments[]|select(.body|startswith("<!-- ai-review"))]|last|.body'; fi
             # Truncated: the local model has a 32k context (D12).
             if [ -s handoff/slice.patch ] || [ -s handoff/test.log ]; then
               echo; echo "The previous attempt failed. You start from a clean tree. Its work in progress and test output follow (hints only, often wrong; reuse what is right, don't apply it blindly)."
@@ -216,7 +217,7 @@ jobs:
             ${{ inputs.handoff_run != '' && 'The previous attempt failed. Its work in progress (committed or not) is handoff/slice.patch and its test output is handoff/test.log, if present. They are hints only, often wrong: you start from this clean tree, so reuse what is right and do not apply the patch blindly.' || '' }}
             Commit your change locally; do not push.
           claude_args: >-
-            --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet --max-turns 80
+            --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet ${{ (inputs.attempt == '2' || inputs.pr != '' || inputs.handoff_run != '') && '--effort high --advisor opus' || '' }} --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(npm test:*),Bash(node --test:*),Bash(node macos/scripts/embed-engine.js:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh pr view:*)"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
       - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
@@ -228,7 +229,7 @@ jobs:
           TM_SUBJECT: "${{ inputs.issue }}"
           TM_SHA: ""
           TM_ATTEMPT: "${{ inputs.attempt }}"
-          TM_ARGS: "sonnet"
+          TM_ARGS: "sonnet ${{ (inputs.attempt == '2' || inputs.pr != '' || inputs.handoff_run != '') && '--effort high --advisor opus' || '' }}"
         run: node "$RUNNER_TEMP/frozen/scripts/gates/gate.js" metrics --file "$TM_FILE"   # the copy frozen before the model started
       - name: Attempt = implement + full suite; no policy paths
         id: t
@@ -297,7 +298,7 @@ jobs:
             Self-verify slice #${{ env.ISSUE }} before its PR opens. The implementer's diff is ./slice.diff and is applied to this checkout.
             Read the slice with `gh issue view ${{ env.ISSUE }}`. You have no context from the implementer (REQ-ROLE-2).
           claude_args: >-
-            --append-system-prompt-file .claude/agents/self-verifier.md --model sonnet --max-turns 40
+            --append-system-prompt-file .claude/agents/self-verifier.md --model sonnet ${{ (inputs.attempt == '2' || inputs.pr != '' || inputs.handoff_run != '') && '--effort high --advisor opus' || '' }} --max-turns 40
             --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(node --test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
             --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
             --json-schema '${{ steps.s.outputs.schema }}'
@@ -310,7 +311,7 @@ jobs:
           TM_SUBJECT: "${{ inputs.issue }}"
           TM_SHA: ""
           TM_ATTEMPT: "${{ inputs.attempt }}"
-          TM_ARGS: "sonnet"
+          TM_ARGS: "sonnet ${{ (inputs.attempt == '2' || inputs.pr != '' || inputs.handoff_run != '') && '--effort high --advisor opus' || '' }}"
         run: node "$RUNNER_TEMP/frozen/scripts/gates/gate.js" metrics --file "$TM_FILE"   # the copy frozen before the model started
       - id: v
         env: { OUT: "${{ steps.claude.outputs.structured_output }}" }

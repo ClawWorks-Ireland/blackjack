@@ -18,6 +18,7 @@ Spec: §4 (A3a), §5 G4, REQ-FLOW-2, REQ-FLOW-7, REQ-CFG-2, REQ-CFG-4/4a–e, RE
 local attempt 1 ─fail→ local attempt 2 ─fail→ Claude (A3b) attempt 1 ─fail→ Claude attempt 2 ─fail→ A2 re-slice (label needs-replan)
        └─ pass ─────────────┴─ pass ──────────────┴─ pass ────────────────────┴─ pass → A4 self-verify → publish PR
 ```
+- When a later attempt opens its PR, `publish` closes the earlier attempt's open PR for the slice, with a "Superseded by" comment and the branch kept, so it stops holding a WIP slot (#131).
 - An **attempt** = implement + the full `npm test` suite on the result. A4 finding an Important issue also fails the attempt.
 - Every local→Claude handoff posts a §9 handoff comment with the reason, and carries the failing test output and the local diff as a workflow artifact (REQ-FLOW-7). The `impl:local` / `impl:claude` label on the slice records who finished it (§10.1).
 - If the `local-llm` runner is offline, local attempts **queue**. They don't fall back to Claude (REQ-CFG-4, T14). The gaming pause stops this runner only (REQ-CFG-4d).

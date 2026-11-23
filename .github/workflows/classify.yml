@@ -14,6 +14,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   classify:
+    if: github.event.pull_request.base.ref == 'main'   # PRs to main only (A7 sec-1 on blackjack#194)
     runs-on: [self-hosted, claude-jobs]
     timeout-minutes: 15
     env:
@@ -21,7 +22,7 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4   # base branch only (REQ-CFG-3)
-        with: { persist-credentials: false, clean: true }
+        with: { ref: main, persist-credentials: false, clean: true }
       - uses: actions/checkout@v4   # PR head as data, never executed
         with: { ref: "${{ github.event.pull_request.head.sha }}", path: pr-head, persist-credentials: false }
       - name: Floor from RISK.md (base)

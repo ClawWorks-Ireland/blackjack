@@ -17,13 +17,13 @@ jobs:
     # Label events matter only for the labels the gate reads: tier:N and tier2-cancel (team v2.13).
     if: >-
       github.event_name != 'pull_request_target' ||
-      !contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) ||
-      startsWith(github.event.label.name, 'tier')
+      (github.event.pull_request.base.ref == 'main' &&
+       (!contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) || startsWith(github.event.label.name, 'tier')))
     runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4   # base branch: RISK.md and PROJECT.md (REQ-CFG-3)
-        with: { persist-credentials: false }
+        with: { ref: main, persist-credentials: false }
       - name: PR number
         id: pr
         env:
