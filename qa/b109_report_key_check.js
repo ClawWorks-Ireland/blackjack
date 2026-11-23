@@ -149,6 +149,10 @@ async function reach(names, opts) {
       }
     }
     // AC6: the session report (opened by hand) has no grace window.
+    // Enter on the focused Close button closes the report (standard dialog
+    // behaviour, #189 Q1 a), so x goes first while the report is open. A round
+    // counts as dealt once in-hand is set or the bankroll moves, not only when
+    // it finishes (#stat-rounds counts finished rounds).
     {
       const p = await freshPage(b);
       await p.fill('#bet', '10');
@@ -156,13 +160,39 @@ async function reach(names, opts) {
       await playOut(p);
       await p.waitForTimeout(100);
       const before = await rounds(p);
+      const bank0 = await bankroll(p);
+      const rebet2Usable = await enabled(p, '#rebet-2');
+      const dealUsable = await enabled(p, '#deal');
       await p.click('#report-open');
       const opened = await reportOpen(p);
-      await p.keyboard.press('Enter');
+      const focusOnOpen = await active(p);
       await p.keyboard.press('x');
       await p.waitForTimeout(150);
+      const openAfterX = await reportOpen(p);
+      const inHandAfterX = await inHand(p);
+      const bankAfterX = await bankroll(p);
+      let focusBeforeEnter = null;
+      let inHandAfterEnter = null;
+      let bankAfterEnter = null;
+      let openAfterEnter = null;
+      if (openAfterX) {
+        focusBeforeEnter = await active(p);
+        await p.keyboard.press('Enter');
+        await p.waitForTimeout(150);
+        inHandAfterEnter = await inHand(p);
+        bankAfterEnter = await bankroll(p);
+        openAfterEnter = await reportOpen(p);
+      }
+      await playOut(p);
       const dealt = (await rounds(p)) - before;
-      put('AC6 session report has no grace window', opened && dealt === 0, { opened, dealt });
+      const pass = rebet2Usable && dealUsable && opened && openAfterX &&
+        inHandAfterX === false && bankAfterX === bank0 &&
+        inHandAfterEnter === false && bankAfterEnter === bank0 && dealt === 0;
+      put('AC6 session report has no grace window', pass, {
+        rebet2Usable, dealUsable, opened, focusOnOpen, openAfterX, inHandAfterX,
+        focusBeforeEnter, inHandAfterEnter, openAfterEnter,
+        bankBefore: bank0, bankAfterX, bankAfterEnter, dealt,
+      });
       await p.close();
     }
     // AC7: a held Enter (auto-repeat) deals exactly one round.
