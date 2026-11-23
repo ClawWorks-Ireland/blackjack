@@ -10,6 +10,7 @@ const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { pagePath, hasFile } = require('./lib/layout');
+const { judgeUnitTests, judgeReport } = require('./lib/judge');
 
 const QA = __dirname;
 const REPO = path.resolve(QA, '..');
@@ -78,23 +79,8 @@ function run(cmd, argv, cwd) {
 
 // Pull pass/fail out of a step's output: node --test totals, or the JSON
 // report most checks print ({checks: {name: {pass}}, errors: [...]}).
-function judge(name, { code, text }) {
-  if (name === 'unit tests') {
-    return require('./lib/judge').judgeUnitTests({ code, text });
-  }
-  let json = null;
-  const start = text.indexOf('{');
-  if (start !== -1) { try { json = JSON.parse(text.slice(start)); } catch (_) { /* not JSON */ } }
-  if (!json) return { ok: code === 0, detail: code === 0 ? 'exit 0' : `exit ${code}: ${text.trim().split('\n').slice(-3).join(' | ').slice(0, 300)}` };
-  const failed = [];
-  if (json.checks) for (const [k, v] of Object.entries(json.checks)) if (v && v.pass === false) failed.push(k);
-  for (const key of ['failed', 'invariantViolations', 'errors', 'problems', 'consoleErrors', 'findings']) {
-    const v = json[key];
-    if (Array.isArray(v) && v.length && key !== 'failed') failed.push(`${key}: ${JSON.stringify(v).slice(0, 200)}`);
-    if (v && !Array.isArray(v) && typeof v === 'object' && Object.keys(v).length) failed.push(`${key}: ${JSON.stringify(v).slice(0, 200)}`);
-  }
-  const total = json.checks ? Object.keys(json.checks).length : null;
-  return { ok: code === 0 && !failed.length, detail: total ? `${total - failed.length}/${total} checks` : `exit ${code}`, failed };
+function judge(name, res) {
+  return name === 'unit tests' ? judgeUnitTests(res) : judgeReport(res);
 }
 
 (async () => {
