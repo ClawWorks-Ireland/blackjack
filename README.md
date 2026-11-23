@@ -237,7 +237,7 @@ bb/100 ± 95%:
 | Calling station | +1005 ± 381 | +855 ± 369 | −150 ± 279 |
 | Maniac | +654 ± 389 | +290 ± 461 | −365 ± 412 |
 
-The scout read every style right, with high confidence, and wrote sensible
+In that run the scout read every style right, with high confidence, and wrote sensible
 notes, but the scouted player did not win more: no difference is outside the
 noise, and all of them lean the wrong way. Two reasons it can't show much
 yet. These bots are extreme, so the cold player learns them almost at once:
@@ -273,6 +273,41 @@ Only complete sessions count. `report` prints, per style:
 for each kind of main move (bluff, thin, value, call, fold), overall and in the
 first 10 hands; the call-down rate (river calls ÷ river bets faced); and how
 often a river call that reached showdown won.
+
+Results (#59, 23 Nov 2026, main c0df694; 40 sessions × 30 hands per hero and style),
+bb/100 ± 95%:
+
+| Opponent | Scout read | Cold | Scouted | Scouted − cold (per session) | Scouted − cold, hands 1-10 |
+|---|---|---|---|---|---|
+| Tight-passive | tight-passive | +34 ± 87 | +34 ± 87 | +0 ± 0 | +0 ± 0 |
+| Loose-aggressive | **maniac** (misread) | +437 ± 291 | +447 ± 293 | +10 ± 28 | +0 ± 0 |
+| Calling station | calling station | +206 ± 92 | +314 ± 110 | +108 ± 32 | +254 ± 91 |
+| Maniac | maniac | +898 ± 322 | +877 ± 320 | −21 ± 39 | −60 ± 92 |
+| Tight-passive-mild | **tight-aggressive** (misread) | +11 ± 158 | +9 ± 157 | −2 ± 5 | +0 ± 0 |
+| Loose-aggressive-mild | loose-aggressive | +333 ± 274 | +331 ± 274 | −2 ± 12 | +0 ± 0 |
+| Calling-station-mild | calling station | −119 ± 159 | −28 ± 173 | +91 ± 31 | +146 ± 78 |
+| Maniac-mild | **loose-aggressive** (misread) | +659 ± 311 | +624 ± 309 | −35 ± 36 | −43 ± 73 |
+
+Only the calling station and calling-station-mild differences are outside the
+noise (+108 ± 32 and +91 ± 31). That edge is largest in hands 1-10 (calling
+station +254 ± 91, then +64 ± 31 in hands 11-20 and +5 ± 6 in hands 21-30;
+mild +146 ± 78, +105 ± 68, +23 ± 25), so scouting helps against a calling
+station only until the cold player has worked it out. Every other style is
+within the noise. Tight-passive shows +0 ± 0 in every window: the scouted and
+cold players made the same moves. The scout misread three styles (loose-aggressive
+as maniac, tight-passive-mild as tight-aggressive, maniac-mild as
+loose-aggressive), and none of them moved the result.
+
+The `--diagnose` ledgers for the maniac and loose-aggressive styles reject "the
+scouted player calls down too much from hand one". Scouted and cold call down
+at the same rate (maniac 46% cold vs 45% scouted; loose-aggressive 47% vs 47%),
+and their river calls win at showdown about equally often (maniac 40% vs 38%;
+loose-aggressive 46% vs 46%). The bb per move matches too: maniac call −12.1
+vs −12.0 /move overall, and in the first hands 60 calls vs 62 at −13.4 vs
+−13.2 /move. The money goes elsewhere. Against the maniac, value bets carry the
+result (+61 vs +59 /move) and calls lose about 12 bb/move. Against the
+loose-aggressive style, thin bets lose about 12 bb/move (−12.2 cold, −11.8
+scouted; −15.9 in the first hands for both).
 
 ## Test it
 
