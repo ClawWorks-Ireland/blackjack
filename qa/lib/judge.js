@@ -21,4 +21,38 @@ function judgeUnitTests({ code, text }) {
   return { ok, detail };
 }
 
-module.exports = { judgeUnitTests };
+const EXTRA_KEYS = ['invariantViolations', 'errors', 'problems', 'consoleErrors', 'findings'];
+
+// Judge any other step from the JSON report most checks print
+// ({checks: {name: {pass}}, errors: [...]}); non-JSON output is judged by exit code.
+function judgeReport({ code, text }) {
+  text = String(text || '');
+  let json = null;
+  const start = text.indexOf('{');
+  if (start !== -1) { try { json = JSON.parse(text.slice(start)); } catch (_) { /* not JSON */ } }
+  if (!json || typeof json !== 'object') {
+    return { ok: code === 0, detail: code === 0 ? 'exit 0' : `exit ${code}: ${text.trim().split('\n').slice(-3).join(' | ').slice(0, 300)}` };
+  }
+  const failed = [];
+  const checks = json.checks && typeof json.checks === 'object' ? json.checks : {};
+  const entries = Object.entries(checks);
+  let passed = 0;
+  for (const [k, v] of entries) {
+    if (v && v.pass === false) failed.push(k); else passed++;
+  }
+  const suffixes = [];
+  for (const key of EXTRA_KEYS) {
+    const v = json[key];
+    let n = 0;
+    if (Array.isArray(v)) n = v.length;
+    else if (v && typeof v === 'object') n = Object.keys(v).length;
+    if (!n) continue;
+    failed.push(`${key}: ${JSON.stringify(v).slice(0, 200)}`);
+    suffixes.push(`${key}: ${n}`);
+  }
+  let detail = entries.length ? `${passed}/${entries.length} checks` : `exit ${code}`;
+  if (suffixes.length) detail += ', ' + suffixes.join(', ');
+  return { ok: code === 0 && !failed.length, detail, failed };
+}
+
+module.exports = { judgeUnitTests, judgeReport };
