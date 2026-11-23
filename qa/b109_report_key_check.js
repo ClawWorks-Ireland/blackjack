@@ -156,13 +156,30 @@ async function reach(names, opts) {
       await playOut(p);
       await p.waitForTimeout(100);
       const before = await rounds(p);
+      const bank0 = await bankroll(p);
       await p.click('#report-open');
       const opened = await reportOpen(p);
-      await p.keyboard.press('Enter');
+      // Press x, wait 150 ms, record state. If still open, press Enter only if needed.
       await p.keyboard.press('x');
       await p.waitForTimeout(150);
-      const dealt = (await rounds(p)) - before;
-      put('AC6 session report has no grace window', opened && dealt === 0, { opened, dealt });
+      const openAfterX = await reportOpen(p);
+      const inHandAfterX = await inHand(p);
+      const bankAfterX = await bankroll(p);
+      // If report still open, press Enter (it has the Close button focused, standard dialog closes on Enter).
+      let inHandAfterEnter = null;
+      let bankAfterEnter = null;
+      if (openAfterX) {
+        await p.keyboard.press('Enter');
+        await p.waitForTimeout(150);
+        inHandAfterEnter = await inHand(p);
+        bankAfterEnter = await bankroll(p);
+      }
+      // Deal with playOut and count rounds.
+      await playOut(p);
+      const dealt = await rounds(p) - before;
+      // Pass: opened by hand, x didn't close it, Enter (if sent) closed it, no deal occurred.
+      const pass = opened && openAfterX && !inHandAfterX && bankAfterX === bank0 && inHandAfterEnter === false && bankAfterEnter === bank0 && dealt === 0;
+      put('AC6 session report has no grace window', pass, { opened, openAfterX, inHandAfterX, inHandAfterEnter, bankBefore: bank0, bankAfterX, bankAfterEnter, dealt });
       await p.close();
     }
     // AC7: a held Enter (auto-repeat) deals exactly one round.
