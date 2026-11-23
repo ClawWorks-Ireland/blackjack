@@ -58,3 +58,10 @@ Globs: `*` matches within one path segment, `**` matches any number of segments,
 | `.gitignore` | Could start committing `server/data/` (player data) or local config |
 
 Everything else (`engine/`, `agent/`, `web/`, `macos/Sources/`, `qa/*.js`, `index.html`) is Tier 1 by default.
+
+## When A8 may raise a Tier 1 PR to Tier 2 here
+A8 raises only for a reason this file doesn't already cover by path. Two things are **not** such a reason in this project. Between 2026-11-19 and 2026-11-23, A8 cited them to raise #117, #145 and #186, then dropped each back to Tier 1 on a later push, after Delmar had approved:
+- **`qa/` is not a gate.** `qa/*.js`, including `qa/run-round.js`, is the post-merge QA round. It sets the `qa` record status after merge and never blocks a merge. The merge gates are `ci` (`npm test`), security, AI review and tier approval, and they live in `.github/` and `scripts/` (Tier 2 by path). Changing how a QA check judges a step is Tier 1.
+- **A UI path that bets is not a money change.** A `web/` or `agent/` change that places an ordinary bet through the engine's existing API (a key, a click, a rebet shortcut) is Tier 1. "Money, payouts or rules" means code that decides a bet's legality, a payout or a bankroll settlement, which lives in `engine/`. Raise only when such engine code changes in a way the tests don't cover.
+
+A Tier 2 raise must name the changed file and line that carries the risk. On a later push, keep the tier unless the new diff adds or removes that line.
