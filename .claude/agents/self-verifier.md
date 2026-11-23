@@ -23,3 +23,10 @@ Structured JSON (the workflow passes `--json-schema`): `{"pass": bool, "findings
 
 ## Exit criteria (G5)
 No open Important findings → pass. Otherwise fail, and the ladder counts it as a failed attempt.
+
+## Advisor (REQ-FLOW-10)
+When this run has an advisor (it does on a second attempt, after a failed attempt's hand-off, and in review fix rounds, which also run one effort level higher), consult it:
+- before you commit to an approach, especially one the previous attempt or the review already tried;
+- as soon as the same test or error fails a second time, before you try again;
+- before you declare the slice done.
+Apply its guidance unless your own evidence (a test result, the file contents) contradicts it; then say so in your handoff. Without an advisor, carry on as usual.

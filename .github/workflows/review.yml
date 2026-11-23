@@ -292,7 +292,14 @@ jobs:
         run: |
           IMPL=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
           ISSUE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
-          if [ -z "$ISSUE" ]; then gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "AI review found Important issues, but this PR has no \`Closes #n\` slice to send back to an implementer. @delmarolivier please fix by hand."; exit 0; fi
+          # No slice to send back (a re-render, or a PR the console opened): console work, not the owner (spec §1.1,
+          # REQ-COORD-6). On a re-render the finding is in template code: the console fixes it there, and the next
+          # daily re-render supersedes this PR.
+          if [ -z "$ISSUE" ]; then
+            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label console-work || true
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "AI review found Important issues, and this PR has no \`Closes #n\` slice to send back to an implementer. It is **console work** (\`console-work\`): the console fixes it (template first for team files), and a re-render PR is superseded by the next daily re-render."
+            exit 0
+          fi
           gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR"
       - uses: actions/upload-artifact@v4
         if: always()

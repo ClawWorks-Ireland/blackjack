@@ -121,12 +121,21 @@ test('merge verdict: a stale stored tier-approval does not block when the live l
 
 test('CI retry: only jobs that never started are re-run, once (team v2.8)', () => {
   const never = { conclusion: 'failure', steps: [] };
-  const ran = { conclusion: 'failure', steps: [{ name: 'npm test' }] };
+  const ran = { conclusion: 'failure', runner_name: 'r', steps: [{ name: 'npm test', status: 'completed', conclusion: 'failure' }] };
   assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [never]), 'rerun');
   assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 2 }, [never]), 'none', 'once only');
   assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [ran]), 'none', 'a real test failure is not retried');
   assert.equal(G.ciRetryAction({ conclusion: 'success', attempt: 1 }, [never]), 'none');
   assert.equal(G.ciRetryAction(null, [never]), 'none');
+});
+
+test('CI/classify retry: a job whose runner was lost mid-run is re-run once (team v2.23.2, PC restart 2026-11-23)', () => {
+  const lost = { id: 7, conclusion: 'failure', runner_name: 'agent-vm-1-1', steps: [{ name: 'npm test', status: 'in_progress', conclusion: null }] };
+  const ann = { 7: [{ message: 'The self-hosted runner lost communication with the server. Verify the machine is running' }] };
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [lost], ann), 'rerun');
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 2 }, [lost], ann), 'none', 'once only');
+  const failed = { id: 8, conclusion: 'failure', runner_name: 'r', steps: [{ name: 'npm test', status: 'completed', conclusion: 'failure' }] };
+  assert.equal(G.ciRetryAction({ conclusion: 'failure', attempt: 1 }, [failed], { 8: [{ message: 'Process completed with exit code 1.' }] }), 'none', 'a real failure is not retried');
 });
 
 test('T16 missing approval: all checks green but no H approval (or only a bot approval) → refused', () => {
@@ -514,7 +523,7 @@ test('REQ-OPS-14 metrics record: built from the execution file, inputs validated
       permission_denials: [{ tool_name: 'Bash' }, { tool_name: 'Edit' }], usage: { input_tokens: 10, output_tokens: 2000, cache_read_input_tokens: 90000, cache_creation_input_tokens: 5000 } },
   ]);
   const r = G.metricsRecord(exec, { role: 'orchestrator', subject: '43', sha: 'abc1234', args: 'opus --effort high' });
-  assert.deepEqual(r, { v: 1, role: 'orchestrator', subject: 43, sha: 'abc1234', attempt: null, model: 'claude-opus-5-5', effort: 'high',
+  assert.deepEqual(r, { v: 1, role: 'orchestrator', subject: 43, sha: 'abc1234', attempt: null, model: 'claude-opus-5-5', effort: 'high', advisor: null,
     outcome: 'success', error: false, turns: 29, cost: 0.71, ms: 125643, denials: 2, denied: { Bash: 1, Edit: 1 }, tokens: { in: 10, out: 2000, cacheRead: 90000, cacheWrite: 5000 } });
   // the stream-json variant reports a count; a max-turns stop is an error outcome
   const lines = [JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, num_turns: 50, total_cost_usd: 1.2, permission_denials_count: 6 })].join('\n');
@@ -595,22 +604,37 @@ test('slicePolicyCheck reports a missing Files line (AC3)', () => {
   assert.equal(G.sliceCheckResult(G.slicePolicyCheck('')), 'ok=false reason=no-files');
 });
 
-test('sliceCheckActions labels, comments once, and suggests the owner', () => {
-  const pol = G.slicePolicyCheck('Files: `evals/review/README.md`');
-  const a = G.sliceCheckActions(pol, { labels: [{ name: 'status:planned' }], comments: [] });
-  assert.deepEqual([a.addLabels, a.removeLabels], [['needs-human', 'status:awaiting-human'], ['status:planned']]);
-  assert.match(a.comment, /<!-- slice-check: policy -->/);
-  assert.match(a.comment, /A10/);
-  const again = G.sliceCheckActions(pol, { labels: ['needs-human', 'status:awaiting-human'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
+test('sliceCheckActions: team files and evals are console work; project policy files ask the owner (REQ-COORD-6)', () => {
+  const evals = G.slicePolicyCheck('Files: `evals/review/README.md`');
+  const a = G.sliceCheckActions(evals, { labels: [{ name: 'status:planned' }, { name: 'needs-human' }], comments: [] });
+  assert.deepEqual([a.addLabels, a.removeLabels], [['console-work'], ['needs-human', 'status:planned']]);
+  assert.match(a.comment, /<!-- slice-check: console -->/);
+  assert.doesNotMatch(a.comment, /@/, 'no @-mention of the owner for console work');
+  const team = G.sliceCheckActions(G.slicePolicyCheck('Files: `scripts/gates/lib.js`, `.github/workflows/qa.yml`'), { teamFiles: ['scripts/gates/lib.js'] });
+  assert.deepEqual(team.addLabels, ['console-work']);
+  const again = G.sliceCheckActions(evals, { labels: ['console-work'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
   assert.deepEqual([again.addLabels, again.comment], [[], null]);
-  const forged = G.sliceCheckActions(pol, { comments: [{ user: { login: 'someone' }, body: a.comment }] });
+  // a project policy file is the owner's decision
+  const risk = G.sliceCheckActions(G.slicePolicyCheck('Files: `RISK.md`, `engine/x.js`'), { labels: [{ name: 'status:planned' }] });
+  assert.deepEqual([risk.addLabels, risk.removeLabels], [['needs-human', 'status:awaiting-human'], ['status:planned']]);
+  assert.match(risk.comment, /<!-- slice-check: policy -->/);
+  const forged = G.sliceCheckActions(G.slicePolicyCheck('Files: `RISK.md`'), { comments: [{ user: { login: 'someone' }, body: risk.comment }] });
   assert.ok(forged.comment, 'a marker from a non-bot does not count');
-  assert.doesNotMatch(G.sliceCheckActions(G.slicePolicyCheck('Files: `evals/a.md`, `scripts/gates/lib.js`')).comment, /A10/);
   const nf = G.sliceCheckActions(G.slicePolicyCheck('no files'), {});
   assert.deepEqual(nf.addLabels, ['needs-replan']);
   assert.match(nf.comment, /<!-- slice-check: no-files -->/);
+  // CODEOWNERS is his wherever GitHub reads it, even under .github/ (blackjack#174 ai-review)
+  for (const f of ['.github/CODEOWNERS', 'CODEOWNERS']) {
+    const co = G.sliceCheckActions(G.slicePolicyCheck(`Files: \`${f}\``), {});
+    assert.deepEqual(co.addLabels, ['needs-human', 'status:awaiting-human'], f);
+  }
+  // mixed evals and project policy: the owner is asked, and no A10 text (finance-insights#43 ai-review)
+  const mixed = G.sliceCheckActions(G.slicePolicyCheck('Files: `evals/review/README.md`, `RISK.md`'), {});
+  assert.deepEqual(mixed.addLabels, ['needs-human', 'status:awaiting-human']);
+  assert.doesNotMatch(mixed.comment, /A10/);
   assert.deepEqual(G.sliceCheckActions(G.slicePolicyCheck('Files: `engine/x.js`')), { addLabels: [], removeLabels: [], comment: null });
 });
+
 
 test('policy lists agree: the guard, lib.js and both implement.yml greps (AC4)', () => {
   const fs = require('fs');
@@ -681,4 +705,162 @@ test('REQ-OPS-15: template-approved renders only move forward (A7 sec-1 on home-
   assert.equal(G.renderDirection(a, a, 'identical').ok, false, 'no change');
   assert.equal(G.renderDirection(null, b, null).ok, false, 'first render');
   assert.equal(G.renderDirection('unverified', b, null).ok, false, 'unverified base');
+});
+
+test('REQ-FLOW-10: metrics record the advisor a run had', () => {
+  const exec = JSON.stringify([{ type: 'result', subtype: 'success' }]);
+  assert.equal(G.metricsRecord(exec, { role: 'implement', args: 'sonnet --advisor opus' }).advisor, 'opus');
+  assert.equal(G.metricsRecord(exec, { role: 'implement', args: 'sonnet ' }).advisor, null);
+});
+
+// ---- blackjack#128: QA and release retries after a lost runner (team v2.21)
+const ok = (sha) => ({ context: 'qa', state: sha, creator: { login: 'github-actions[bot]' }, updated_at: '2026-11-21T10:00:00Z' });
+async function walk(states) {
+  // chain d -> c -> b -> a; states maps a commit to its qa state
+  const parent = { d: 'c', c: 'b', b: 'a', a: null };
+  return (await G.qaCoveredPrs({ sha: 'd',
+    commitAt: async (x) => ({ sha: x, parents: parent[x] ? [{ sha: parent[x] }] : [] }),
+    statusesAt: async (x) => (states[x] ? [typeof states[x] === 'string' ? ok(states[x]) : states[x]] : []),
+    prsAt: async (x) => [{ number: x, merge_commit_sha: x }] })).map((p) => p.number);
+}
+test('qaCoveredPrs: an error round on an earlier merge does not end the walk (#128)', async () => {
+  assert.deepEqual(await walk({ c: 'error', a: 'success' }), ['d', 'c', 'b']);
+});
+test('qaCoveredPrs: a pending round on an earlier merge does not end the walk (#128)', async () => {
+  assert.deepEqual(await walk({ c: 'pending', a: 'success' }), ['d', 'c', 'b']);
+});
+test('qaCoveredPrs: still stops at an earlier failure; an untrusted error is ignored (#128)', async () => {
+  assert.deepEqual(await walk({ b: 'failure' }), ['d', 'c']);
+  assert.deepEqual(await walk({ c: { context: 'qa', state: 'success', creator: { login: 'someone' } }, b: 'success' }), ['d', 'c']);
+});
+
+const step = (name, conclusion) => ({ name, conclusion });
+// Modelled on the real incidents: QA run 44897404491 (runner recorded, annotation "exit code 143") and release
+// run 44909048559 (runner recorded, job failure with a cancelled step).
+const lostJob = { name: 'qa', runner_name: 'agent-vm-1-1795257187', conclusion: 'failure', steps: [step('Set up job', 'success'), step('QA round', 'failure'), step('Complete job', 'success')] };
+const exit143 = [{ annotation_level: 'warning', message: 'Node.js 20 is deprecated.' }, { annotation_level: 'failure', message: 'Process completed with exit code 143.' }];
+test('runnerLost: the real signs, but not a cancel, a timeout, a never-started job or a success', () => {
+  assert.equal(G.runnerLost(lostJob, exit143), true, 'QA run 44897404491');
+  const verify = { name: 'verify', runner_name: 'agent-vm-1-1795268019', conclusion: 'failure', steps: [step('Set up job', 'success'), step('Run : no install_command in the overlay', 'cancelled')] };
+  assert.equal(G.runnerLost(verify, [{ message: 'The operation was canceled.' }]), true, 'release run 44909048559');
+  assert.equal(G.runnerLost({ ...lostJob, runner_name: null }), true, 'no runner recorded');
+  assert.equal(G.runnerLost(lostJob, [{ message: 'The runner has received a shutdown signal.' }]), true);
+  assert.equal(G.runnerLost({ ...verify, conclusion: 'cancelled' }, [{ message: 'The operation was canceled.' }]), false, "a person's cancel");
+  assert.equal(G.runnerLost(lostJob, [{ message: 'The job running on runner x has exceeded the maximum execution time of 60 minutes.' }, ...exit143]), false, 'a timeout');
+  assert.equal(G.runnerLost(lostJob, [{ message: 'Process completed with exit code 1.' }]), false, 'a real test failure');
+  assert.equal(G.runnerLost({ ...lostJob, steps: [] }), false);
+  assert.equal(G.runnerLost({ ...lostJob, conclusion: 'success' }, exit143), false);
+});
+test('qaRetryAction: reruns a runner-lost round on attempt 1, and only then', () => {
+  const run = { run_attempt: 1, conclusion: 'failure' };
+  assert.equal(G.qaRetryAction({ run, qaJob: lostJob, annotations: exit143 }).action, 'rerun');
+  assert.equal(G.qaRetryAction({ run: { ...run, conclusion: 'cancelled' }, qaJob: lostJob, annotations: exit143 }).action, 'rerun');
+  assert.equal(G.qaRetryAction({ run: { ...run, run_attempt: 2 }, qaJob: lostJob, annotations: exit143 }).action, 'none');
+  assert.equal(G.qaRetryAction({ run, qaJob: { ...lostJob, conclusion: 'cancelled' }, annotations: [{ message: 'The operation was canceled.' }] }).action, 'none');
+  assert.equal(G.qaRetryAction({ run, qaJob: { ...lostJob, steps: [step('Set up job', 'success'), step('QA round', 'success')] }, annotations: exit143 }).action, 'none');
+  assert.equal(G.qaRetryAction({ run, qaJob: { ...lostJob, steps: [] }, annotations: exit143 }).action, 'none');
+  assert.match(G.qaRetryAction({ run, qaJob: lostJob, annotations: exit143, newerMainRun: true }).reason, /newer main qa run/);
+  assert.equal(G.qaRetryAction({ run: { run_attempt: 1, conclusion: null, status: 'in_progress' }, qaJob: lostJob, annotations: exit143, failed: true }).action, 'rerun', 'report decides before the run ends');
+});
+test('qaReportPlan: a retried runner-lost round posts pending and no comments (AC4)', () => {
+  assert.deepEqual(G.qaReportPlan({ result: 'error', retry: true }), { state: 'pending', comment: false });
+  assert.deepEqual(G.qaReportPlan({ result: 'error' }), { state: 'error', comment: true });
+  assert.deepEqual(G.qaReportPlan({ result: 'pass', retry: true }), { state: 'success', comment: true });
+  assert.deepEqual(G.qaReportPlan({ result: 'fail' }), { state: 'failure', comment: true });
+});
+test('releaseRetryAction: reruns a push release whose verify lost its runner, never a rollback or a real failure (AC2)', () => {
+  const verify = { name: 'verify', runner_name: 'agent-vm-1-1795268019', conclusion: 'failure', steps: [step('Set up job', 'success'), step('Run : no install_command in the overlay', 'cancelled')] };
+  const run = { event: 'push', conclusion: 'failure', run_attempt: 1 };
+  assert.equal(G.releaseRetryAction({ run, jobs: [verify] }).action, 'rerun');
+  assert.equal(G.releaseRetryAction({ run: { ...run, conclusion: 'failure' }, jobs: [{ ...verify, runner_name: 'agent-vm-1-1', conclusion: 'failure', steps: [step('npm test', 'failure')] }] }).action, 'none');
+  assert.equal(G.releaseRetryAction({ run: { ...run, run_attempt: 2 }, jobs: [verify] }).action, 'none');
+  assert.equal(G.releaseRetryAction({ run: { ...run, event: 'workflow_dispatch' }, jobs: [verify] }).action, 'none');
+});
+
+test('waiverCarries: only when main touched none of the PR\'s files (home-automation#5)', () => {
+  assert.deepEqual(G.waiverCarries(['.agents/PROJECT.md'], ['web/app.js', 'README.md']).ok, true);
+  const r = G.waiverCarries(['.agents/PROJECT.md', 'scripts/x.js'], ['scripts/x.js']);
+  assert.equal(r.ok, false);
+  assert.match(r.why, /scripts\/x\.js/);
+});
+
+// ---- blackjack#131: superseded slice PRs (team v2.22)
+const spr = (o) => ({ number: 1, state: 'open', head: { ref: 'agent/121-local', repo: { full_name: 'o/r' } }, user: { login: 'clawworks-local-coder[bot]' }, base: { ref: 'main' }, ...o });
+test("supersededSlicePrs: the other implementer's open PR for the slice is superseded (#131)", () => {
+  const prs = [spr({ number: 126 }), spr({ number: 129, head: { ref: 'agent/121-claude', repo: { full_name: 'o/r' } }, user: { login: 'clawworks-claude-coder[bot]' } })];
+  assert.deepEqual(G.supersededSlicePrs(prs, { issue: 121, keep: 129, repo: 'o/r' }).map((p) => p.number), [126]);
+});
+test('supersededSlicePrs: never another slice, a fork, a human, a closed PR, the kept PR, a retro or a non-main base (#131)', () => {
+  const none = (o) => assert.deepEqual(G.supersededSlicePrs([spr(o)], { issue: 121, keep: 999, repo: 'o/r' }), [], JSON.stringify(o));
+  none({ head: { ref: 'agent/12-local', repo: { full_name: 'o/r' } } });
+  none({ head: { ref: 'agent/1211-local', repo: { full_name: 'o/r' } } });
+  none({ head: { ref: 'agent/121-local', repo: { full_name: 'fork/r' } } });
+  none({ user: { login: 'delmarolivier' } });
+  none({ user: { login: 'clawworks-orchestrator[bot]' } });
+  none({ state: 'closed' });
+  none({ number: 999 });
+  none({ head: { ref: 'agent/retro-2026-11-21-1', repo: { full_name: 'o/r' } } });
+  none({ base: { ref: 'release' } });
+  assert.deepEqual(G.supersededSlicePrs([spr()], { issue: '1.*', keep: 2, repo: 'o/r' }), [], 'no regex injection');
+});
+test('supersededSlicePrs: empty or odd input gives an empty list and never throws (#131)', () => {
+  for (const x of [[], undefined, null, 'x', [null], [{ state: 'open' }], [spr({ head: { ref: 'agent/121-local', repo: null } })], [spr({ user: undefined })], [spr({ head: undefined })], [spr({ base: undefined })]]) {
+    assert.deepEqual(G.supersededSlicePrs(x, { issue: 121, keep: 2, repo: 'o/r' }), []);
+  }
+});
+function fakeGh(fail = {}) {
+  const calls = [];
+  return { calls,
+    gh: async (m, u, b) => { calls.push([m, u, b]); if (fail[m] && u.includes(fail.on)) throw new Error('HTTP 403'); return {}; },
+    all: async (u) => { if (fail.list) throw new Error('HTTP 500'); calls.push(['LIST', u]); return [spr({ number: 126 }), spr({ number: 140, head: { ref: 'agent/121-claude', repo: { full_name: 'o/r' } }, user: { login: 'clawworks-claude-coder[bot]' } })]; } };
+}
+test('closeSuperseded: comments then closes each superseded PR, keeps the branch (#131)', async () => {
+  const f = fakeGh();
+  const closed = await G.closeSuperseded({ ...f, issue: 121, implementer: 'claude', newPr: 140, repo: 'o/r', newBranch: 'agent/121-claude' });
+  assert.deepEqual(closed, [126]);
+  const mine = f.calls.filter((c) => c[0] !== 'LIST');
+  assert.deepEqual(mine.map((c) => [c[0], c[1]]), [['POST', '/repos/o/r/issues/126/comments'], ['PATCH', '/repos/o/r/pulls/126']]);
+  assert.match(mine[0][2].body, /^Superseded by #140 \(agent\/121-claude\)/);
+  assert.deepEqual(mine[1][2], { state: 'closed' });
+  assert.ok(!f.calls.some((c) => /git\/refs/.test(c[1] || '')), 'the branch is never deleted');
+});
+test('closeSuperseded: a failed close is reported on the slice and does not throw (#131)', async () => {
+  const f = fakeGh({ PATCH: true, on: '/pulls/126' });
+  const closed = await G.closeSuperseded({ ...f, issue: 121, implementer: 'local', newPr: 140, repo: 'o/r', newBranch: 'agent/121-local', owner: 'delmar' });
+  assert.deepEqual(closed, []);
+  const report = f.calls.find((c) => c[1] === '/repos/o/r/issues/121/comments');
+  assert.match(report[2].body, /Local Coder \(A3a\).*RESULT: needs-human[\s\S]*Could not close #126 automatically: HTTP 403/);
+});
+test('closeSuperseded: a failed listing is reported and does not throw (#131)', async () => {
+  const f = fakeGh({ list: true });
+  assert.deepEqual(await G.closeSuperseded({ ...f, issue: 121, implementer: 'claude', newPr: 140, repo: 'o/r', newBranch: 'agent/121-claude' }), []);
+  assert.match(f.calls.find((c) => c[1] === '/repos/o/r/issues/121/comments')[2].body, /superseded PRs for this slice/);
+});
+
+test('ownerReviewAction: ask while waiting, withdraw the code-owner request when not needed (blackjack#173)', () => {
+  const o = 'delmar';
+  assert.equal(G.ownerReviewAction({ state: 'pending', requested: [], author: 'bot', owner: o }), 'request');
+  assert.equal(G.ownerReviewAction({ state: 'pending', requested: [{ login: o }], author: 'bot', owner: o }), 'none');
+  assert.equal(G.ownerReviewAction({ state: 'success', requested: [{ login: o }], author: 'bot', owner: o }), 'unrequest');
+  assert.equal(G.ownerReviewAction({ state: 'success', requested: [{ login: 'someone' }], author: 'bot', owner: o }), 'none');
+  assert.equal(G.ownerReviewAction({ state: 'pending', requested: [], author: o, owner: o }), 'none', 'never on his own PR');
+});
+
+test('mergeVerdict: behind main with only ai-review failing is a stale-review update (finance-insights#39)', () => {
+  const p = readyPr();
+  p.statuses = p.statuses.map((x) => (x.context === 'ai-review' ? { ...x, state: 'failure', description: 'Round 3: 2 Important finding(s)' } : x));
+  assert.equal(G.mergeVerdict({ ...p, behindBy: 2 }).staleReview, true);
+  assert.equal(G.mergeVerdict({ ...p, behindBy: 0 }).staleReview, false, 'up to date: the finding stands');
+  const q = { ...p, behindBy: 2, statuses: p.statuses.map((x) => (x.context === 'security' ? { ...x, state: 'failure' } : x)) };
+  assert.equal(G.mergeVerdict(q).staleReview, false, 'another gate failing: not just a stale review');
+  assert.equal(G.mergeVerdict({ ...readyPr(), behindBy: 2 }).staleReview, false, 'all green: the plain behind case');
+});
+
+test('renderMatch: inherited Object keys are not team files (home-automation#12 ai-review)', () => {
+  const blob = { blob: 'b', mode: '100644' };
+  for (const p of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+    const v = G.renderMatch({ changed: [{ filename: 'a', status: 'modified' }, { filename: p, status: 'added' }], rendered: { a: blob }, head: { a: blob } });
+    assert.equal(v.ok, false, p);
+  }
+  assert.equal(G.renderMatch({ changed: [{ filename: 'a', status: 'modified' }], rendered: { a: blob }, head: { a: blob } }).ok, true);
 });

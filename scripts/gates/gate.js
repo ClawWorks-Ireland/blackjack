@@ -18,6 +18,8 @@
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
  *   gate.js qa-report --sha S --result pass|fail|error --dir D   QA status and PR comment (qa.yml)
  *   gate.js ladder-resume --issue N              resume a paused ladder attempt from the team's own marker
+ *   gate.js qa-retry --run R [--dry]          re-run a QA round once when its runner was lost (blackjack#128)
+ *   gate.js release-retry --run R [--dry]     re-run a release once when verify lost its runner (blackjack#128)
  *   gate.js ci-retry --run R                     re-run a CI run whose jobs never started, once
  *   gate.js pure-update --pr N --sha S               pure=true if the head only merged the base branch in
  *   gate.js review-retry --run ID --context C [--dry]   retry a review that failed on infrastructure, once
@@ -161,11 +163,14 @@ const commands = {
     const s = G.tierApprovalStatus({ tier: f.tier, level: await level(), reviews: f.reviews, headSha: f.pr.head.sha,
       statuses: await all(repo(`/commits/${f.pr.head.sha}/statuses`)) });
     await setStatus(f.pr.head.sha, 'tier-approval', s.state, s.description);
-    // Waiting for H: request his review, so the PR is in github.com/pulls/review-requested (team v2.12).
-    if (s.state === 'pending' && f.pr.user && f.pr.user.login !== OWNER_LOGIN
-      && !(f.pr.requested_reviewers || []).some((u) => u.login === OWNER_LOGIN)) {
-      try { await gh('POST', repo(`/pulls/${args.pr}/requested_reviewers`), { reviewers: [OWNER_LOGIN] }); console.log(`#${args.pr}: review requested from @${OWNER_LOGIN}`); }
-      catch (e) { console.log(`#${args.pr}: could not request a review (${String(e.message).slice(0, 80)})`); }
+    // His review-requested list holds only real asks (team v2.12, v2.22.3): request his review while the PR waits
+    // for him, and withdraw GitHub's automatic code-owner request when it doesn't (blackjack#173).
+    const act = G.ownerReviewAction({ state: s.state, requested: f.pr.requested_reviewers || [], author: f.pr.user && f.pr.user.login, owner: OWNER_LOGIN });
+    if (act !== 'none') {
+      try {
+        await gh(act === 'request' ? 'POST' : 'DELETE', repo(`/pulls/${args.pr}/requested_reviewers`), { reviewers: [OWNER_LOGIN] });
+        console.log(`#${args.pr}: review ${act === 'request' ? 'requested from' : 'request withdrawn for'} @${OWNER_LOGIN}`);
+      } catch (e) { console.log(`#${args.pr}: could not ${act} a review (${String(e.message).slice(0, 80)})`); }
     }
     console.log(`#${args.pr} tier ${f.tier}: tier-approval ${s.state} — ${s.description}`);
   },
@@ -186,7 +191,7 @@ const commands = {
     const prs = (await all(repo('/pulls?state=open&base=main'))).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     const results = [];
     for (const p of prs) results.push(await verdictFor(p.number, lvl, true, true));
-    const next = results.find((r) => r.ok) || results.find((r) => r.behind);
+    const next = results.find((r) => r.ok) || results.find((r) => r.behind) || results.find((r) => r.staleReview);
     console.log(JSON.stringify({ level: lvl, action: next ? (next.ok ? 'merge' : 'update') : 'none',
       pr: next ? next.number : null, sha: next ? next.sha : null, results }, null, 2));
   },
@@ -360,15 +365,25 @@ commands['carry-over'] = async () => {
     .filter((x) => x.context === args.context && x.creator && x.creator.login === 'github-actions[bot]')
     .sort((x, y) => (y.updated_at > x.updated_at ? 1 : -1))[0];
   if (!st || st.state !== 'success') return say(false, `no green ${args.context} on ${prev.slice(0, 7)}`);
-  if (/^Waived by/.test(st.description || '')) return say(false, 'a waiver applies to the reviewed head only');
+  const waived = /^Waived by|^Waiver carried/.test(st.description || '');
   // The rules the verdict was judged by must not have changed on main (A7 sec-1 on blackjack#63).
   const base = await gh('GET', repo(`/compare/${pr.base.ref}...${prev}`));
   const since = await gh('GET', repo(`/compare/${base.merge_base_commit.sha}...${mainParent}`));
   if ((since.files || []).length >= 300) return say(false, 'too many changes on main to check');
-  const refusal = G.carryOverRefusal((since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)));
+  const mainPaths = (since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
+  const refusal = G.carryOverRefusal(mainPaths);
   if (refusal) return say(false, refusal);
+  // A waiver is the owner's decision about this PR's changes in their context (home-automation#5, 2026-11-22: an
+  // automatic branch update discarded one). It carries only while main touched none of the files the PR changes.
+  if (waived) {
+    // GitHub's compare lists at most 300 files: an incomplete list could hide an overlap (blackjack#174 sec-1).
+    if ((base.files || []).length >= 300) return say(false, 'too many changed files to check the waiver');
+    const prPaths = (base.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
+    const w = G.waiverCarries(prPaths, mainPaths);
+    if (!w.ok) return say(false, w.why);
+  }
   if (args.dry) return say(true, `dry run: would carry ${args.context} over from ${prev.slice(0, 7)}`);
-  await setStatus(args.sha, args.context, 'success', `Carried over from ${prev.slice(0, 7)}: same changes, only ${pr.base.ref} moved`, st.target_url || RUN_URL);
+  await setStatus(args.sha, args.context, 'success', waived ? `Waiver carried from ${prev.slice(0, 7)}: same changes, ${pr.base.ref} touched none of its files` : `Carried over from ${prev.slice(0, 7)}: same changes, only ${pr.base.ref} moved`, st.target_url || RUN_URL);
   return say(true);
 };
 
@@ -386,6 +401,34 @@ commands['pure-update'] = async () => {
 
 // Browser QA round result (qa.yml, team v2.8): a `qa` status on the commit and a comment on the PR merged
 // there, plus a pointer on each PR merged since the last round (team v2.11.3). The output is the project's QA command's own summary; it is printed, never executed.
+// blackjack#128: the facts for a QA round's retry decision (lib.js qaRetryAction).
+async function qaRetryFacts(runId) {
+  const run = await gh('GET', repo(`/actions/runs/${runId}`));
+  const jobs = (await gh('GET', repo(`/actions/runs/${runId}/attempts/${run.run_attempt}/jobs`))).jobs || [];
+  const qaJob = jobs.find((j) => j.name === 'qa') || null;
+  const annotations = qaJob ? await gh('GET', repo(`/check-runs/${qaJob.id}/annotations`)).catch(() => []) : [];
+  const newer = ((await gh('GET', repo('/actions/workflows/qa.yml/runs?branch=main&per_page=20'))).workflow_runs || [])
+    .some((r) => r.id !== run.id && new Date(r.created_at) > new Date(run.created_at));
+  return { run, qaJob, annotations, newerMainRun: newer };
+}
+
+commands['qa-retry'] = async () => {
+  const f = await qaRetryFacts(args.run);
+  const d = G.qaRetryAction(f);
+  console.log(`qa-retry: run ${args.run} (attempt ${f.run.run_attempt}, ${f.run.conclusion}): ${d.action}: ${d.reason}`);
+  if (!args.dry && d.action === 'rerun') await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {});
+};
+
+commands['release-retry'] = async () => {
+  const run = await gh('GET', repo(`/actions/runs/${args.run}`));
+  const jobs = (await gh('GET', repo(`/actions/runs/${args.run}/attempts/${run.run_attempt}/jobs`))).jobs || [];
+  const verify = jobs.find((j) => j.name === 'verify');
+  const annotations = verify ? await gh('GET', repo(`/check-runs/${verify.id}/annotations`)).catch(() => []) : [];
+  const d = G.releaseRetryAction({ run, jobs, annotations });
+  console.log(`release-retry: run ${args.run} (${run.event}, attempt ${run.run_attempt}, ${run.conclusion}): ${d.action}: ${d.reason}`);
+  if (!args.dry && d.action === 'rerun') await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {});
+};
+
 commands['qa-report'] = async () => {
   if (!/^(pass|fail|error)$/.test(args.result || '')) throw new Error('qa-report needs --result pass|fail|error');
   const c = await gh('GET', repo(`/commits/${args.sha}`));
@@ -393,7 +436,19 @@ commands['qa-report'] = async () => {
   const dir = args.dir || 'qa-out';
   const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } };
   const out = read('qa-output.txt').split('\n').filter((l) => l.trim()).slice(-40).join('\n');
-  const state = args.result === 'pass' ? 'success' : args.result === 'fail' ? 'failure' : 'error';
+  // blackjack#128: a round that lost its runner on attempt 1 is re-run by review-retry.yml; hold its error back
+  // (status pending, no PR comments) so a lost runner doesn't read as a QA failure.
+  let retry = false;
+  if (args.result === 'error' && /^[0-9]+$/.test(String(args.run || ''))) {
+    try { retry = G.qaRetryAction({ ...(await qaRetryFacts(args.run)), failed: true }).action === 'rerun'; } catch (e) { console.log(`qa-report: retry check failed (${e.message}); reporting the error`); }
+  }
+  const plan = G.qaReportPlan({ result: args.result, retry });
+  if (!plan.comment) {
+    await setStatus(sha, 'qa', plan.state, `runner lost, retrying QA round on ${sha.slice(0, 7)}`);
+    console.log(`qa-report: runner lost on attempt 1; status pending, retry follows (run ${args.run})`);
+    return;
+  }
+  const state = plan.state;
   const words = { pass: 'QA round passed', fail: 'QA round found failures', error: 'QA round could not run' }[args.result];
   // Before setting this round's status: a newer merge can replace a waiting round, so report to every PR
   // merged since the last round (team v2.11.3).
@@ -441,11 +496,14 @@ commands['ladder-resume'] = async () => {
   await gh('DELETE', repo(`/issues/${n}/labels/ladder-paused`));
 };
 
-// CI that failed on infrastructure (jobs that never started): re-run its failed jobs once (lib.js ciRetryAction).
+// CI or classify that failed on infrastructure (a job that never started, or lost its runner): re-run its failed
+// jobs once (lib.js ciRetryAction).
 commands['ci-retry'] = async () => {
   const run = await gh('GET', repo(`/actions/runs/${args.run}`));
   const jobs = (await gh('GET', repo(`/actions/runs/${args.run}/attempts/${run.run_attempt}/jobs`))).jobs || [];
-  const action = G.ciRetryAction({ conclusion: run.conclusion, attempt: run.run_attempt }, jobs);
+  const annotationsByJob = {};
+  for (const j of jobs.filter((x) => x.conclusion === 'failure')) annotationsByJob[j.id] = await gh('GET', repo(`/check-runs/${j.id}/annotations`)).catch(() => []);
+  const action = G.ciRetryAction({ conclusion: run.conclusion, attempt: run.run_attempt }, jobs, annotationsByJob);
   console.log(`ci-retry: run ${args.run} (attempt ${run.run_attempt}, ${run.conclusion}): ${action}`);
   if (!args.dry && action === 'rerun') await gh('POST', repo(`/actions/runs/${args.run}/rerun-failed-jobs`), {});
 };
@@ -595,7 +653,12 @@ commands.publish = async () => {
   const pr = await gh('POST', repo('/pulls'), { title: `${issue.title} (#${args.issue})`, head: branch, base: 'main', body });
   await gh('POST', repo(`/issues/${pr.number}/labels`), { labels: [`impl:${args.implementer}`] });
   await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: [`impl:${args.implementer}`, 'status:in-review'] });
-  console.log(`opened #${pr.number} from ${branch}`);
+  // blackjack#131: close the earlier attempt's PR for this slice, which would otherwise hold a WIP slot.
+  let closed = [];
+  try {
+    closed = await G.closeSuperseded({ gh, all, issue: Number(args.issue), implementer: args.implementer, newPr: pr.number, repo: REPO, newBranch: branch, owner: OWNER_LOGIN });
+  } catch (e) { console.error(`publish: closing superseded PRs failed: ${e.message}`); }
+  console.log(`opened #${pr.number} from ${branch}${closed.length ? `; closed superseded ${closed.map((n) => `#${n}`).join(', ')}` : ''}`);
 };
 
 /**
@@ -713,7 +776,12 @@ commands['template-render'] = async () => {
   const head = pr.head.sha;
   const fail = async (why) => { await setStatus(head, 'template-render', 'failure', why); console.log(`#${args.pr}: ${why}`); };
   if (pr.head.repo.full_name !== REPO) return fail('not a branch of this repo');
-  const changed = await all(repo(`/pulls/${args.pr}/files`));
+  if (pr.base.ref !== 'main') return fail(`base is ${pr.base.ref}, not main`);
+  // Pinned to the exact base and head this check judges (A7 sec-1 on home-automation#11): /pulls/N/files follows
+  // whatever the PR points at when it's read, which a push or a base change can move under us.
+  const pinned = await gh('GET', repo(`/compare/${pr.base.sha}...${head}`));
+  if ((pinned.files || []).length >= 300) return fail('too many changed files to compare');
+  const changed = pinned.files || [];
   if (!changed.some((c) => c.filename === '.agents/TEAM_SOURCE')) { console.log('not a template re-render'); return; }
   const tget = async (url) => {
     const r = await fetch(`${API}/${url}`, { headers: { authorization: `Bearer ${process.env.TEMPLATE_TOKEN}`, accept: 'application/vnd.github+json' } });
@@ -762,7 +830,7 @@ commands['template-render'] = async () => {
     }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   if (!m.ok) return fail(m.why);
-  await setStatus(head, 'template-render', 'success', `Exact render of template ${src.slice(0, 7)} (#${merged.number}, merged by @${OWNER_LOGIN})`);
+  await setStatus(head, 'template-render', 'success', `Exact render of template ${src.slice(0, 7)} (#${merged.number}, by @${OWNER_LOGIN}) onto main ${pr.base.sha.slice(0, 7)}`);
   console.log(`#${args.pr}: exact render of template ${src.slice(0, 7)} (#${merged.number})`);
 };
 
@@ -777,7 +845,9 @@ commands['slice-check'] = async () => {
   console.log(line);
   if (!args.apply || line === 'ok=true') return;
   const comments = await all(repo(`/issues/${args.issue}/comments`));
-  const act = G.sliceCheckActions(check, { labels: issue.labels, comments });
+  let teamFiles = [];
+  try { teamFiles = readPolicy('.agents/TEAM_FILES').split('\n').filter(Boolean); } catch { /* no manifest */ }
+  const act = G.sliceCheckActions(check, { labels: issue.labels, comments, teamFiles });
   if (act.addLabels.length) await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: act.addLabels });
   for (const l of act.removeLabels) await gh('DELETE', repo(`/issues/${args.issue}/labels/${encodeURIComponent(l)}`));
   if (act.comment) await gh('POST', repo(`/issues/${args.issue}/comments`), { body: act.comment });
