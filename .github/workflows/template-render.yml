@@ -5,7 +5,7 @@
 name: template-render
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]   # edited: a base change re-checks (A7 sec-1 on home-automation#11)
     paths: ['.agents/TEAM_SOURCE']
 permissions:
   contents: read
@@ -16,12 +16,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Only PRs to main (A7 sec-1 on blackjack#194): a status posted for another base would carry to a PR to main.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main'
     runs-on: [self-hosted, vm-keyed]   # no model and no PR code: the base branch's gate scripts and the template's render.js
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4   # base branch: gate scripts and the overlay
-        with: { persist-credentials: false }
+        with: { ref: main, persist-credentials: false }
       - id: tpl
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2, pinned
         with:

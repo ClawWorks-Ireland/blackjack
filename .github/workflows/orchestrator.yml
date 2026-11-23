@@ -38,7 +38,7 @@ jobs:
     env: { GITHUB_TOKEN: "${{ github.token }}" }
     steps:
       - uses: actions/checkout@v4
-        with: { persist-credentials: false, clean: true }
+        with: { ref: main, persist-credentials: false, clean: true }
       - id: w
         run: |
           # If the digest issue can't be read, skip the digest this run rather than rewrite it blindly.

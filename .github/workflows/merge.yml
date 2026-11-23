@@ -38,7 +38,7 @@ jobs:
       - id: p
         run: |
           node scripts/gates/gate.js merge-plan > plan.json
-          node -e 'const p=require("./plan.json");for(const r of p.results)console.log(`#${r.number} tier ${r.tier}: ${r.ok?"READY":r.behind?"behind main":r.reasons.join("; ")}`)'
+          node -e 'const p=require("./plan.json");for(const r of p.results)console.log(`#${r.number} tier ${r.tier}: ${r.ok?"READY":r.behind?"behind main":r.staleReview?"behind main, review may be stale: updating":r.reasons.join("; ")}`)'
           for k in action pr sha; do echo "$k=$(node -p "require('./plan.json').$k ?? ''")" >> "$GITHUB_OUTPUT"; done
       - if: steps.p.outputs.action == 'merge'
         run: node scripts/gates/gate.js merge-evidence --pr "${{ steps.p.outputs.pr }}" --sha "${{ steps.p.outputs.sha }}"

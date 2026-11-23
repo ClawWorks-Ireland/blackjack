@@ -1,11 +1,12 @@
 # Review retry (team v2.1): a review or security run that fails before giving a verdict (its status
 # is still pending) is an infrastructure failure. Retry its failed jobs once; if it fails again, set
 # the status to error so the digest shows it. CI too (team v2.8): a ci run whose jobs never started is
-# re-run once. No model; reads gate.js from main.
+# re-run once. QA rounds and releases too (team v2.21, blackjack#128): when their runner was lost on attempt 1,
+# re-run them once. No model; reads gate.js from main.
 name: review-retry
 on:
   workflow_run:
-    workflows: [review, security, ci]
+    workflows: [review, security, ci, classify, qa, release]
     types: [completed]
 permissions:
   contents: read
@@ -13,7 +14,9 @@ permissions:
   statuses: write    # mark a twice-failed review as an error
 jobs:
   retry:
-    if: github.event.workflow_run.conclusion == 'failure'
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' ||
+      (contains(fromJSON('["qa", "release"]'), github.event.workflow_run.name) && github.event.workflow_run.conclusion == 'cancelled')
     runs-on: [self-hosted, vm-keyed]
     timeout-minutes: 5
     steps:
@@ -26,7 +29,9 @@ jobs:
           WF: ${{ github.event.workflow_run.name }}
         run: |
           case "$WF" in
-            ci) node scripts/gates/gate.js ci-retry --run "$RUN"; exit 0 ;;
+            ci|classify) node scripts/gates/gate.js ci-retry --run "$RUN"; exit 0 ;;
+            qa) node scripts/gates/gate.js qa-retry --run "$RUN"; exit 0 ;;
+            release) node scripts/gates/gate.js release-retry --run "$RUN"; exit 0 ;;
             review) C=ai-review ;; security) C=security ;; *) echo "not a retried workflow: $WF"; exit 0 ;;
           esac
           node scripts/gates/gate.js review-retry --run "$RUN" --context "$C"
