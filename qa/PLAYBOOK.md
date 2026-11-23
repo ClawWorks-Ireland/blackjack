@@ -58,3 +58,4 @@ startup (T2).
 
 - A bug still open after 3 fix attempts goes to Delmar rather than another try.
 - If fixes land but no issue changes across two rounds, flag it.
+- B99 grace-window checks (`qa/b99_report_click_check.js`) measure `pressAt` (press time minus report-open time) in the page and retry a late press (500 ms or more) up to 3 times on fresh pages; 3 late presses fail with `precondition: 'press outside grace window'`.

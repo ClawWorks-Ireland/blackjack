@@ -20,6 +20,27 @@ const center = (p, s) => p.$eval(s, (e) => { const r = e.getBoundingClientRect()
 async function freshPage(b, viewport) {
   const p = await b.newPage({ viewport: viewport || VIEWPORT });
   p.on('pageerror', (e) => errors.push(e.stack || String(e)));
+  await p.addInitScript(() => {
+    // Page-side timing: when the shoe report opened, and when the press (pointerdown) landed.
+    window.__reportOpenedAt = null;
+    // Only the first press while the report is open counts, and its delay is fixed at that moment,
+    // so later clicks (playOut) and a reopened report cannot overwrite it.
+    window.__pressDelay = null;
+    document.addEventListener('pointerdown', (e) => {
+      const r = document.getElementById('report');
+      if (window.__pressDelay === null && r && r.open && typeof window.__reportOpenedAt === 'number') {
+        window.__pressDelay = e.timeStamp - window.__reportOpenedAt;
+      }
+    }, true);
+    const watch = () => {
+      const r = document.getElementById('report');
+      if (!r) return;
+      const stamp = () => { if (r.open) window.__reportOpenedAt = performance.now(); };
+      new MutationObserver(stamp).observe(r, { attributes: true, attributeFilter: ['open'] });
+      stamp();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();
+  });
   await p.goto(URL_);
   await p.evaluate(() => {
     localStorage.clear();
@@ -31,6 +52,37 @@ async function freshPage(b, viewport) {
   return p;
 }
 
+/** ms from the report opening to the press landing in the page, or null if either is missing. */
+const pressTiming = (p) => p.evaluate(() => {
+  return { pressAt: typeof window.__pressDelay === 'number' ? window.__pressDelay : null };
+});
+
+const GRACE_MS = 500;
+/**
+ * Run attemptFn(freshPage) up to 3 times, each on a fresh page. It returns { p, pass, detail }
+ * (plus noPress: true when it never pressed, so the verdict stands). A press that landed
+ * after the grace window is inconclusive and retried; three late presses fail.
+ * Returns the final attempt's page (left open) so a later check can read from it.
+ */
+async function graceCheck(name, b, attemptFn) {
+  const late = [];
+  for (let attempts = 1; attempts <= 3; attempts++) {
+    const r = await attemptFn((vp) => freshPage(b, vp));
+    if (r.noPress) { put(name, r.pass, { ...r.detail, pressAt: null, attempts }); return r.p; }
+    const { pressAt } = await pressTiming(r.p);
+    if (pressAt !== null && pressAt >= 0 && pressAt < GRACE_MS) {
+      put(name, r.pass, { ...r.detail, pressAt, attempts });
+      return r.p;
+    }
+    late.push(pressAt);
+    if (attempts === 3) {
+      put(name, false, { ...r.detail, precondition: 'press outside grace window', pressAt, pressAts: late, attempts });
+      return r.p;
+    }
+    await r.p.close();
+  }
+}
+
 async function playOut(p) {
   for (let s = 0; s < 40 && (await inHand(p)); s++) {
     const target = (await enabled(p, '#no-insure')) ? '#no-insure' : '#stand';
@@ -40,17 +92,20 @@ async function playOut(p) {
 }
 
 /** Deal and play rounds until the shoe report opens by itself between rounds. */
-async function reachReport(p) {
+async function reachReport(p, pre) {
+  let read;
   for (let i = 0; i < 80; i++) {
-    if (await reportOpen(p)) return true;
+    if (await reportOpen(p)) { if (pre && read === undefined) read = await pre(p); return pre ? { read } : true; }
     if (await enabled(p, '#deal')) {
       await p.fill('#bet', '10');
       await p.click('#deal');
     }
     await playOut(p);
+    // Hand over, report not open yet: read what the caller needs now, so nothing is read after it opens.
+    if (pre) read = await pre(p);
     try {
       await p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: 1000 });
-      return true;
+      return pre ? { read } : true;
     } catch (e) { /* no cut card yet */ }
   }
   return false;
@@ -90,20 +145,24 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   try {
     // AC1 + AC2: Deal clicked just as the report opens.
     {
-      const p = await freshPage(b);
-      if (!(await reachReport(p))) throw new Error('no shoe report appeared');
-      const first = await reportText(p);
-      const before = await rounds(p);
-      const rec = await hitRecord(p, '#deal');
-      const at = rec.point;
-      await p.mouse.click(at.x, at.y);
-      await p.waitForTimeout(100);
-      const closed = !(await reportOpen(p));
-      await playOut(p);
-      const dealt = (await rounds(p)) - before;
-      put('AC1 deal click in grace window deals one round',
-        rec.hit === 'panel' && closed && dealt === 1,
-        { ...rec, closed, dealt, precondition: rec.hit === 'panel' ? 'ok' : 'deal centre is not under the panel' });
+      let first, closed;
+      const p = await graceCheck('AC1 deal click in grace window deals one round', b, async (mk) => {
+        const p = await mk();
+        if (!(await reachReport(p))) throw new Error('no shoe report appeared');
+        first = await reportText(p);
+        const before = await rounds(p);
+        const rec = await hitRecord(p, '#deal');
+        const at = rec.point;
+        await p.mouse.click(at.x, at.y);
+        await p.waitForTimeout(100);
+        closed = !(await reportOpen(p));
+        await playOut(p);
+        const dealt = (await rounds(p)) - before;
+        return {
+          p, pass: rec.hit === 'panel' && closed && dealt === 1,
+          detail: { ...rec, closed, dealt, precondition: rec.hit === 'panel' ? 'ok' : 'deal centre is not under the panel' },
+        };
+      });
       let reopened = false;
       try { await p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: 1500 }); reopened = true; } catch (e) { /* stays closed */ }
       const again = reopened ? await reportText(p) : null;
@@ -114,41 +173,46 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     }
     // AC1b: a point over #deal that is backdrop also deals in the grace window.
     {
-      let used = null;
-      for (const vp of [VIEWPORT, { width: 1280, height: 1000 }, { width: 1600, height: 1000 }, { width: 900, height: 1200 }]) {
-        const p = await freshPage(b, vp);
-        if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC1b)');
-        const pt = await backdropPointOver(p, '#deal');
-        if (pt) {
-          const before = await rounds(p);
-          await p.mouse.click(pt.x, pt.y);
-          await p.waitForTimeout(100);
-          const closed = !(await reportOpen(p));
-          await playOut(p);
-          const dealt = (await rounds(p)) - before;
-          used = { viewport: vp, point: pt, closed, dealt };
-          put('AC1b backdrop point over deal in grace window deals one round', closed && dealt === 1, used);
+      const name = 'AC1b backdrop point over deal in grace window deals one round';
+      const vp = await graceCheck(name, b, async (mk) => {
+        for (const vp of [VIEWPORT, { width: 1280, height: 1000 }, { width: 1600, height: 1000 }, { width: 900, height: 1200 }]) {
+          const p = await mk(vp);
+          if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC1b)');
+          const pt = await backdropPointOver(p, '#deal');
+          if (pt) {
+            const before = await rounds(p);
+            await p.mouse.click(pt.x, pt.y);
+            await p.waitForTimeout(100);
+            const closed = !(await reportOpen(p));
+            await playOut(p);
+            const dealt = (await rounds(p)) - before;
+            return { p, pass: closed && dealt === 1, detail: { viewport: vp, point: pt, closed, dealt } };
+          }
           await p.close();
-          break;
         }
-        await p.close();
-      }
-      if (!used) put('AC1b backdrop point over deal in grace window deals one round', true, { skipped: 'no backdrop point over #deal' });
+        return { p: null, noPress: true, pass: true, detail: { skipped: 'no backdrop point over #deal' } };
+      });
+      if (vp) await vp.close();
     }
     // AC3: Rebet clicked in the grace window.
     {
-      const p = await freshPage(b);
-      if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC3)');
-      const before = await rounds(p);
-      const rebetOk = await enabled(p, '#rebet-1');
-      const at = await center(p, '#rebet-1');
-      await p.mouse.click(at.x, at.y);
-      await p.waitForTimeout(100);
-      const closed = !(await reportOpen(p));
-      await playOut(p);
-      const dealt = (await rounds(p)) - before;
-      const bet = await p.$eval('#bet', (e) => e.value);
-      put('AC3 rebet click in grace window deals one round at the last bet', rebetOk && closed && dealt === 1 && bet === '10', { rebetOk, closed, dealt, bet });
+      const p = await graceCheck('AC3 rebet click in grace window deals one round at the last bet', b, async (mk) => {
+        const p = await mk();
+        // Everything is read while the hand is over and the report is not open yet;
+        // once it opens, the press is the very next CDP call.
+        const got = await reachReport(p, async (pg) => ({
+          before: await rounds(pg), rebetOk: await enabled(pg, '#rebet-1'), at: await center(pg, '#rebet-1').catch(() => null),
+        }));
+        if (!got) throw new Error('no shoe report appeared (AC3)');
+        const { before, rebetOk, at } = got.read;
+        if (at) await p.mouse.click(at.x, at.y);
+        await p.waitForTimeout(100);
+        const closed = !(await reportOpen(p));
+        await playOut(p);
+        const dealt = (await rounds(p)) - before;
+        const bet = await p.$eval('#bet', (e) => e.value);
+        return { p, pass: !!at && rebetOk && closed && dealt === 1 && bet === '10', detail: { rebetOk, closed, dealt, bet } };
+      });
       await p.close();
     }
     // AC4: after the grace window a click on Deal only closes the report.
@@ -164,20 +228,24 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       const stillOpen = await reportOpen(p);
       const hand = await inHand(p);
       const dealt = (await rounds(p)) - before;
+      const { pressAt } = await pressTiming(p);
       put('AC4 deal click after grace window only closes the report',
-        !hand && dealt === 0 && (rec.hit === 'backdrop' ? !stillOpen : stillOpen), { ...rec, stillOpen, hand, dealt });
+        pressAt !== null && pressAt >= GRACE_MS && !hand && dealt === 0 && (rec.hit === 'backdrop' ? !stillOpen : stillOpen),
+        { ...rec, stillOpen, hand, dealt, pressAt });
       await p.close();
     }
     // AC5: a backdrop click off the controls in the grace window is ignored.
     {
-      const p = await freshPage(b);
-      if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC5)');
-      const before = await rounds(p);
-      await p.mouse.click(4, 4);
-      await p.waitForTimeout(100);
-      const stillOpen = await reportOpen(p);
-      const dealt = (await rounds(p)) - before;
-      put('AC5 backdrop click off the controls in grace window is ignored', stillOpen && dealt === 0, { stillOpen, dealt });
+      const p = await graceCheck('AC5 backdrop click off the controls in grace window is ignored', b, async (mk) => {
+        const p = await mk();
+        if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC5)');
+        const before = await rounds(p);
+        await p.mouse.click(4, 4);
+        await p.waitForTimeout(100);
+        const stillOpen = await reportOpen(p);
+        const dealt = (await rounds(p)) - before;
+        return { p, pass: stillOpen && dealt === 0, detail: { stillOpen, dealt } };
+      });
       await p.close();
     }
     // AC6: the session report (opened by hand) has no grace window.
@@ -203,25 +271,24 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     }
     // AC5b: a panel button clicked in the grace window does not act, and the report stays open.
     {
-      const p = await freshPage(b);
-      if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC5b)');
-      const dr = [];
-      for (const d of ['#deal', '#rebet-1', '#rebet-2']) if (await enabled(p, d)) dr.push(await rectOf(p, d));
-      const btns = await p.evaluate(() => [...document.querySelectorAll('#report button')]
-        .filter((e) => !e.disabled && e.offsetParent !== null)
-        .map((e) => { const r = e.getBoundingClientRect(); return { id: e.id, left: r.left, top: r.top, right: r.right, bottom: r.bottom }; }));
-      const clear = btns.find((r) => !dr.some((d) => r.left < d.right && r.right > d.left && r.top < d.bottom && r.bottom > d.top));
-      if (!clear) {
-        put('AC5b panel button in grace window does not act', false, { precondition: 'no panel button clear of the deal controls', btns, dr });
-      } else {
+      const p = await graceCheck('AC5b panel button in grace window does not act', b, async (mk) => {
+        const p = await mk();
+        if (!(await reachReport(p))) throw new Error('no shoe report appeared (AC5b)');
+        const dr = [];
+        for (const d of ['#deal', '#rebet-1', '#rebet-2']) if (await enabled(p, d)) dr.push(await rectOf(p, d));
+        const btns = await p.evaluate(() => [...document.querySelectorAll('#report button')]
+          .filter((e) => !e.disabled && e.offsetParent !== null)
+          .map((e) => { const r = e.getBoundingClientRect(); return { id: e.id, left: r.left, top: r.top, right: r.right, bottom: r.bottom }; }));
+        const clear = btns.find((r) => !dr.some((d) => r.left < d.right && r.right > d.left && r.top < d.bottom && r.bottom > d.top));
+        if (!clear) return { p, noPress: true, pass: false, detail: { precondition: 'no panel button clear of the deal controls', btns, dr } };
         const before = await rounds(p);
         await p.mouse.click((clear.left + clear.right) / 2, (clear.top + clear.bottom) / 2);
         await p.waitForTimeout(100);
         const stillOpen = await reportOpen(p);
         const dealt = (await rounds(p)) - before;
         const hand = await inHand(p);
-        put('AC5b panel button in grace window does not act', stillOpen && dealt === 0 && !hand, { button: clear.id, stillOpen, dealt, hand });
-      }
+        return { p, pass: stillOpen && dealt === 0 && !hand, detail: { button: clear.id, stillOpen, dealt, hand } };
+      });
       await p.close();
     }
   } catch (e) {
