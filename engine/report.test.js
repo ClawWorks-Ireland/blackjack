@@ -149,3 +149,68 @@ test('B15: a move that is neither the advice nor the index play is still a mista
   assert.equal(Rep.moveCorrect(advice, { play: 'stand' }, 'double'), false);
   assert.equal(Rep.moveCorrect(null, null, 'hit'), false);
 });
+
+// ---- Coach note at index spots (#175): why the QA coach-note check was flaky. ----
+
+const card = (rank, suit = '♠') => ({ rank, suit });
+const allowedOf = (game) => ({ canDouble: game.canDouble(), canSplit: game.canSplit(), canSurrender: game.canSurrender(), canHit: game.canHit() });
+const legalMoves = (a) => ['hit', 'stand', 'double', 'surrender', 'split'].filter((m) => ({
+  hit: a.canHit, stand: true, double: a.canDouble, surrender: a.canSurrender, split: a.canSplit,
+})[m]);
+
+/** 12 v 4 at a negative true count: basic stands, the Hi-Lo index hits. */
+function twelveVsFour() {
+  const game = new BJ.Game({ bankroll: 1e9, decks: 2, rng: seededRng(7) });
+  let gone = 0;
+  // Take tens out of the unseen cards so the true count is clearly negative.
+  const filler = BJ.createShoe(2).filter((x) => !(x.rank === 'K' && gone++ < 6));
+  // Deal order: player, player, dealer up, dealer hole.
+  game.shoe = filler.concat([card('K'), card('2'), card('4'), card('10')].reverse());
+  game.deal(UNIT);
+  return game;
+}
+
+test('B15 trap: basic advice with count hidden grades the index play correct', () => {
+  const game = twelveVsFour();
+  assert.equal(game.phase, 'player');
+  assert.ok(K.countState(game).trueCount < 0, 'true count is negative');
+  const basic = S.recommend(game.currentHand.cards, game.dealer[0], allowedOf(game), game.rules);
+  assert.equal(basic.action, 'stand');
+  const spot = Rep.countSpot(game);
+  assert.ok(spot, '12 v 4 is an index spot');
+  assert.equal(spot.play, 'hit');
+  assert.equal(Rep.moveCorrect(basic, spot, 'hit'), true);
+});
+
+test('count advice: no other legal move is graded correct at the same spot', () => {
+  const game = twelveVsFour();
+  const allowed = allowedOf(game);
+  const basic = S.recommend(game.currentHand.cards, game.dealer[0], allowed, game.rules);
+  const advice = K.countPlay(game.currentHand.cards, game.dealer[0], allowed, basic, K.countState(game).trueCount, game.rules);
+  const spot = Rep.countSpot(game);
+  assert.equal(advice.action, 'hit');
+  for (const m of legalMoves(allowed)) {
+    if (m !== advice.action) assert.equal(Rep.moveCorrect(advice, spot, m), false, m);
+  }
+});
+
+test('full seeded shoe: count advice leaves no second correct move', () => {
+  const game = new BJ.Game({ bankroll: 1e9, rng: seededRng(11) });
+  let spots = 0;
+  do {
+    game.deal(UNIT);
+    while (game.phase === 'insurance' || game.phase === 'player') {
+      if (game.phase === 'insurance') { game.declineInsurance(); continue; }
+      const allowed = allowedOf(game);
+      const basic = S.recommend(game.currentHand.cards, game.dealer[0], allowed, game.rules);
+      const advice = K.countPlay(game.currentHand.cards, game.dealer[0], allowed, basic, K.countState(game).trueCount, game.rules);
+      const spot = Rep.countSpot(game);
+      if (spot) spots++;
+      for (const m of legalMoves(allowed)) {
+        assert.equal(Rep.moveCorrect(advice, spot, m), m === advice.action, `${m} at ${game.currentHand.cards.map((x) => x.rank)} v ${game.dealer[0].rank}`);
+      }
+      game[advice.action]();
+    }
+  } while (!game.cutCardReached);
+  assert.ok(spots > 0, 'the shoe had index spots');
+});

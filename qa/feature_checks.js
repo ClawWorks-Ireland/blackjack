@@ -56,7 +56,17 @@ const serve = () => new Promise((r) => {
   }
 
   if (await has('#hint')) {
-    await dealToDecision();
+    const decision = await dealToDecision();
+    // Count on, so the hint and the coach agree with the index play graded correct (#175).
+    const countPressed = () => page.$eval('#count-toggle', (e) => e.getAttribute('aria-pressed')).catch(() => null);
+    let turnedCountOn = false;
+    if ((await has('#count-toggle')) && (await countPressed()) !== 'true') {
+      await page.click('#count-toggle');
+      turnedCountOn = true;
+    }
+    const cardLabels = (sel) => page.$$eval(sel + ' .card', (els) => els.map((e) => e.getAttribute('aria-label') || e.textContent.trim())).catch(() => []);
+    const playerCards = decision ? await cardLabels('#player-hands .player-hand') : [];
+    const dealerCards = decision ? await cardLabels('#dealer-cards') : [];
     await page.click('#hint');
     const hint = await txt('#hint-text');
     const suggested = await page.$$eval('.suggested', (els) => els.map((e) => e.id));
@@ -66,13 +76,18 @@ const serve = () => new Promise((r) => {
     const opts = [];
     for (const id of ['hit', 'stand', 'double', 'surrender']) if (id !== suggested[0] && (await enabled('#' + id))) opts.push(id);
     const accBefore = await txt('#stat-accuracy');
-    await page.click('#' + opts[0]);
-    const coach = (await visible('#coach')) ? await txt('#coach') : null;
-    ok('off-chart move produces a coach note', !!coach && /basic strategy/i.test(coach), { chose: opts[0], coach });
+    const chose = opts[0];
+    if (chose) await page.click('#' + chose);
+    const coach = chose && (await visible('#coach')) ? await txt('#coach') : null;
+    const noteDetail = { chose, suggested: suggested[0], coach, playerCards, dealerCards };
+    const noteReason = !decision ? 'no decision' : !suggested.length ? 'no suggestion' : !chose ? 'no off-chart move' : null;
+    ok('off-chart move produces a coach note', !noteReason && !!coach && /basic strategy says|the count says/i.test(coach), noteReason ? { reason: noteReason, ...noteDetail } : noteDetail);
     ok('accuracy stat updates after a scored move', (await txt('#stat-accuracy')) !== accBefore, { before: accBefore, after: await txt('#stat-accuracy') });
     ok('hint clears after acting', !(await visible('#hint-text')));
     await page.screenshot({ path: path.join(out, 'f2-coach-note.png') });
     while (await enabled('#stand')) await page.click('#stand');
+    // Put the count back, so the later checks start as before.
+    if (turnedCountOn && (await countPressed()) === 'true') await page.click('#count-toggle');
   }
 
   if (await has('#coach-toggle')) {
