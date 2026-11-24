@@ -5,6 +5,7 @@
 // Usage: node qa/b109_report_key_check.js <url>
 const { chromium } = require('./lib/browser');
 const { reachReport } = require('./lib/reach');
+const { runGraceCheck } = require('./lib/grace');
 
 const URL_ = process.argv[2];
 const checks = {};
@@ -19,9 +20,32 @@ const reportText = (p) => p.evaluate(() => ({ title: document.getElementById('re
 const bankroll = (p) => p.$eval('#bankroll', (e) => Number(e.textContent.replace(/[^\d]/g, '')));
 const active = (p) => p.evaluate(() => document.activeElement && document.activeElement.id);
 
+// Harness recorder, installed before the page's own scripts. window.__b109 holds
+// when #report last opened (openedAt) and the first keydown since (keyAt), both
+// on the page's own clock, so pressMs does not include any Playwright latency.
+function installRecorder() {
+  const rec = { openedAt: null, keyAt: null };
+  window.__b109 = rec;
+  window.addEventListener('keydown', (e) => {
+    if (rec.openedAt !== null && rec.keyAt === null) rec.keyAt = e.timeStamp;
+  }, true);
+  document.addEventListener('DOMContentLoaded', () => {
+    const dlg = document.getElementById('report');
+    if (!dlg) return;
+    const opened = () => { rec.openedAt = performance.now(); rec.keyAt = null; };
+    if (dlg.open) opened();
+    let was = dlg.open;
+    new MutationObserver(() => {
+      if (dlg.open && !was) opened();
+      was = dlg.open;
+    }).observe(dlg, { attributes: true, attributeFilter: ['open'] });
+  });
+}
+
 async function freshPage(b) {
   const p = await b.newPage();
   p.on('pageerror', (e) => errors.push(e.stack || String(e)));
+  await p.addInitScript(installRecorder);
   await p.goto(URL_);
   await p.evaluate(() => {
     localStorage.clear();
@@ -59,15 +83,67 @@ const ops = {
   waitReport: (p, ms) => p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: ms }).then(() => true, () => false),
 };
 
+const reachFailure = (r) => {
+  const detail = { reason: r.reason, tables: r.tables, rounds: r.rounds, bankroll: r.bankroll, broke: r.broke };
+  if (r.reason === 'no-report') detail.note = 'game defect: shoe passed the cut card without a report';
+  return detail;
+};
+
 /** Reach a shoe report, or fail every named check with the diagnosis and return null. */
 async function reach(names, opts) {
   const r = await reachReport(ops, opts);
   if (r.ok) return r;
-  const detail = { reason: r.reason, tables: r.tables, rounds: r.rounds, bankroll: r.bankroll, broke: r.broke };
-  if (r.reason === 'no-report') detail.note = 'game defect: shoe passed the cut card without a report';
+  const detail = reachFailure(r);
   for (const n of names) put(n, false, detail);
   return null;
 }
+
+// One round trip just before the key press: everything slow comes after it.
+const snapshot = (p) => p.evaluate(() => {
+  const num = (id) => Number(document.getElementById(id).textContent.replace(/[^\d]/g, ''));
+  return {
+    open: document.getElementById('report').open,
+    rounds: num('stat-rounds'),
+    title: document.getElementById('report-title').textContent,
+    sub: document.getElementById('report-sub').textContent,
+    focus: document.activeElement && document.activeElement.id,
+    bank: num('bankroll'),
+  };
+});
+
+/** The page's own timing of the press: { pressMs, openedAt, keyAt } (pressMs null if either is missing). */
+const pressRecord = (p) => p.evaluate(() => {
+  const { openedAt, keyAt } = window.__b109 || {};
+  const ok = typeof openedAt === 'number' && typeof keyAt === 'number';
+  return { pressMs: ok ? keyAt - openedAt : null, openedAt: openedAt ?? null, keyAt: keyAt ?? null };
+});
+
+/**
+ * Reach a report, press a key, and judge it with runGraceCheck (late presses are
+ * retried on a fresh table). press(page, snap) -> { extraOk, detail }.
+ * The page of the final attempt is returned open, with its snapshot.
+ */
+async function graceCheck(press, o = ops) {
+  let page = null;
+  let snap = null;
+  const res = await runGraceCheck(async () => {
+    if (page) { await page.close().catch(() => {}); page = null; }
+    const r = await reachReport(o);
+    if (!r.ok) return { ok: false, detail: { ...reachFailure(r), reachReason: r.reason } };
+    page = r.table;
+    snap = await snapshot(page);
+    const { extraOk, detail } = await press(page, snap);
+    const { pressMs } = await pressRecord(page);
+    await playOut(page);
+    const dealt = (await rounds(page)) - snap.rounds;
+    return { open: snap.open, pressMs, dealt, extraOk, detail: { ...detail, dealt, tables: r.tables } };
+  });
+  return { res, page, snap };
+}
+
+const record = (name, res) => put(name, res.pass, {
+  ...res.detail, pressMs: res.pressMs, outcome: res.outcome, attempts: res.attempts, history: res.history, reason: res.reason,
+});
 
 (async () => {
   const b = await chromium.launch({ headless: true });
@@ -75,18 +151,18 @@ async function reach(names, opts) {
   try {
     // AC1 + AC2: Enter pressed just as the report opens.
     {
-      const r = await reach(['AC1 Enter in grace window deals one round', 'AC2 held report reopens for the same shoe between rounds']);
-      if (r) {
-      const p = r.table;
-      const first = await reportText(p);
-      const before = await rounds(p);
-      const focus = await active(p);
-      await p.keyboard.press('Enter');
-      await p.waitForTimeout(100);
-      const closed = !(await reportOpen(p));
-      await playOut(p);
-      const dealt = (await rounds(p)) - before;
-      put('AC1 Enter in grace window deals one round', closed && dealt === 1, { focus, closed, dealt, tables: r.tables });
+      const { res, page: p, snap } = await graceCheck(async (pg, s) => {
+        await pg.keyboard.press('Enter');
+        await pg.waitForTimeout(100);
+        const closed = !(await reportOpen(pg));
+        return { extraOk: closed, detail: { focus: s.focus, closed } };
+      });
+      record('AC1 Enter in grace window deals one round', res);
+      if (res.reason === 'no-report') {
+        put('AC2 held report reopens for the same shoe between rounds', false, res.detail);
+      } else {
+      const first = { title: snap.title, sub: snap.sub };
+      const r = { tables: res.detail.tables };
       let reopened = false;
       try { await p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: 1500 }); reopened = true; } catch (e) { /* stays closed */ }
       const again = reopened ? await reportText(p) : null;
@@ -98,22 +174,16 @@ async function reach(names, opts) {
     }
     // AC3: x in the grace window deals one round at twice the last bet.
     {
-      const r = await reach(['AC3 x in grace window deals one round at twice the last bet']);
-      if (r) {
-      const p = r.table;
-      const before = await rounds(p);
-      const bank = await bankroll(p);
-      await p.keyboard.press('x');
-      await p.waitForTimeout(100);
-      const closed = !(await reportOpen(p));
-      const bet = await p.$eval('#bet', (e) => e.value);
-      const guess = await p.$eval('#rep-guess', (e) => e.value);
-      await playOut(p);
-      const dealt = (await rounds(p)) - before;
-      put('AC3 x in grace window deals one round at twice the last bet',
-        closed && dealt === 1 && bet === '20' && !/x/i.test(guess), { closed, dealt, bet, guess, bank, tables: r.tables });
-      await p.close();
-      }
+      const { res, page: p } = await graceCheck(async (pg, s) => {
+        await pg.keyboard.press('x');
+        await pg.waitForTimeout(100);
+        const closed = !(await reportOpen(pg));
+        const bet = await pg.$eval('#bet', (e) => e.value);
+        const guess = await pg.$eval('#rep-guess', (e) => e.value);
+        return { extraOk: closed && bet === '20' && !/x/i.test(guess), detail: { closed, bet, guess, bank: s.bank } };
+      });
+      record('AC3 x in grace window deals one round at twice the last bet', res);
+      if (p) await p.close();
     }
     // AC4: x with Rebet x2 disabled keeps the report open and deals nothing.
     {
@@ -197,21 +267,28 @@ async function reach(names, opts) {
     }
     // AC7: a held Enter (auto-repeat) deals exactly one round.
     {
-      const r = await reach(['AC7 held Enter deals exactly one round']);
-      if (r) {
-      const p = r.table;
-      const before = await rounds(p);
-      const cdp = await p.context().newCDPSession(p);
-      const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' };
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key, autoRepeat: true });
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key, autoRepeat: true });
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
-      await playOut(p);
-      const dealt = (await rounds(p)) - before;
-      put('AC7 held Enter deals exactly one round', dealt === 1, { dealt, tables: r.tables });
-      await p.close();
-      }
+      // The CDP session is opened with the page, before the report is reached, so it
+      // adds nothing to pressMs.
+      const cdps = new WeakMap();
+      const opsCdp = {
+        ...ops,
+        freshTable: async () => {
+          const pg = await freshPage(browser);
+          cdps.set(pg, await pg.context().newCDPSession(pg));
+          return pg;
+        },
+      };
+      const { res, page: p } = await graceCheck(async (pg) => {
+        const cdp = cdps.get(pg);
+        const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' };
+        await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+        await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key, autoRepeat: true });
+        await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key, autoRepeat: true });
+        await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+        return { extraOk: true, detail: {} };
+      }, opsCdp);
+      record('AC7 held Enter deals exactly one round', res);
+      if (p) await p.close();
     }
   } catch (e) {
     errors.push('HARNESS ' + (e.stack || e.message).split('\n').slice(0, 3).join(' | '));
