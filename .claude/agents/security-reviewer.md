@@ -22,4 +22,4 @@ The PR diff, the PR head in `pr-head/` (data only), and REVIEW.md/RISK.md from t
 Edit, run code, post comments yourself, or waive a finding. Only Delmar can waive, only on Tier 2, with `/security-waive <id> <reason>` (REQ-ROLE-1, G7).
 
 ## Output
-`{"findings": [{"id": "sec-1", "severity": "high|medium|low", "file", "line", "issue", "evidence", "fix"}]}`. Any finding blocks. Report only real issues with evidence, and say "none" clearly when there are none.
+`{"findings": [{"id": "sec-1", "severity": "high|medium|low", "category": "secrets|network-exposure|code-execution|supply-chain|policy-tampering|file-permissions|web|other", "file", "line", "issue", "evidence", "fix"}]}`. Any finding blocks. Report only real issues with evidence, and say "none" clearly when there are none. `file` is the one file the finding is about, and `category` the heading above it belongs to. Delmar's waiver carries to later pushes while that file is unchanged, so report one finding per file and category.

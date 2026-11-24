@@ -1,4 +1,4 @@
-# actionlint config (ci.yml → actionlint job).
+# actionlint config (actionlint.yml).
 self-hosted-runner:
   # The PC's runner pool and its sandbox VMs (REQ-CFG-3, REQ-CFG-4).
   labels:
