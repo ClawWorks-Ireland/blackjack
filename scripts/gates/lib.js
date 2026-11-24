@@ -650,7 +650,8 @@ function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHE
   const add = (ls) => ls.filter((l) => !have.includes(l));
   // REQ-COORD-6 (team v2.20): team files (rendered from the template, listed in .agents/TEAM_FILES) and eval content
   // are console work, not a decision for the owner: the console makes them (template first) and he reviews the PR.
-  // Only the project's own policy files (RISK.md, CLAUDE.md, REVIEW.md, CODEOWNERS, the overlay) still ask him.
+  // Only the project's own policy files (RISK.md, CLAUDE.md, REVIEW.md, CODEOWNERS) still ask him. The overlay is a
+  // team file since team v2.24 (listed in TEAM_FILES): it is changed in the template's projects/, so console work.
   // CODEOWNERS is the project's own policy file wherever GitHub reads it (.github/, docs/ or the root): never console work.
   const consoleFile = (p) => !/(^|\/)CODEOWNERS$/.test(p) && (teamFiles.includes(p) || p.startsWith('evals/') || /^(\.github|\.claude|scripts\/gates|scripts\/agents)\//.test(p));
   if (check.policy.length && check.policy.every(consoleFile)) {
@@ -685,10 +686,16 @@ function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHE
  * Carry-over (gate.js carry-over) keeps an old verdict only if main didn't change the rules it was
  * judged by: any policy path (REVIEW.md, RISK.md, the agents, the gates, the workflows) changed on
  * main since the reviewed head's merge base means a fresh review (A7 sec-1 on blackjack#63).
+ * For the `security` verdict (team v2.23.8), only what A7 judges by counts: its definition, its workflow, the
+ * project's policy and instruction files and the gate scripts. A change to other agents, other workflows or the
+ * evals can't change A7's verdict, and resetting on it threw away the owner's waivers three times on
+ * home-automation#18 (2026-11-23). Code changes on main never reset any verdict, as before.
  * Returns the refusal reason, or null if carrying over is allowed.
  */
-function carryOverRefusal(mainChangedPaths) {
-  const hit = (mainChangedPaths || []).find((f) => POLICY_RE.test(f));
+const SECURITY_INPUTS_RE = /^(CLAUDE\.md|AGENTS\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/PROJECT\.md|\.claude\/agents\/security-reviewer\.md|\.claude\/settings[^/]*\.json|\.github\/workflows\/security\.yml|scripts\/gates\/)/;
+function carryOverRefusal(mainChangedPaths, context = 'ai-review') {
+  const re = context === 'security' ? SECURITY_INPUTS_RE : POLICY_RE;
+  const hit = (mainChangedPaths || []).find((f) => re.test(f));
   return hit ? `main changed policy since the review (${hit})` : null;
 }
 

@@ -612,6 +612,9 @@ test('sliceCheckActions: team files and evals are console work; project policy f
   assert.doesNotMatch(a.comment, /@/, 'no @-mention of the owner for console work');
   const team = G.sliceCheckActions(G.slicePolicyCheck('Files: `scripts/gates/lib.js`, `.github/workflows/qa.yml`'), { teamFiles: ['scripts/gates/lib.js'] });
   assert.deepEqual(team.addLabels, ['console-work']);
+  // team v2.24: the overlay is rendered from the template (listed in TEAM_FILES), so changing it is console work
+  const ovl = G.sliceCheckActions(G.slicePolicyCheck('Files: `.agents/PROJECT.md`'), { teamFiles: ['.agents/PROJECT.md'] });
+  assert.deepEqual(ovl.addLabels, ['console-work']);
   const again = G.sliceCheckActions(evals, { labels: ['console-work'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
   assert.deepEqual([again.addLabels, again.comment], [[], null]);
   // a project policy file is the owner's decision
@@ -881,4 +884,16 @@ test('pull_request_target workflows run main\'s code on PRs to main only (A7 sec
   for (const f of ['template-render.yml', 'tier-approval.yml', 'classify.yml', 'review.yml', 'security.yml']) {
     assert.ok(fs.readFileSync(path.join(dir, f), 'utf8').includes("github.event.pull_request.base.ref == 'main'"), `${f} acts on PRs to main only`);
   }
+});
+
+test('carry-over for security resets only on what A7 judges by (home-automation#18)', () => {
+  // home-automation#18: A10's push-guard fix (scripts/agents/, evals/) reset the security verdict and the owner's waivers
+  assert.equal(G.carryOverRefusal(['scripts/agents/push-guard.js', 'evals/review/12-x/case.md', '.claude/agents/planner.md', '.github/workflows/review.yml'], 'security'), null);
+  for (const p of ['REVIEW.md', 'RISK.md', 'CLAUDE.md', 'AGENTS.md', 'CODEOWNERS', '.agents/PROJECT.md', '.claude/agents/security-reviewer.md',
+    '.claude/settings.json', '.github/workflows/security.yml', 'scripts/gates/lib.js']) {
+    assert.match(G.carryOverRefusal(['web/app.js', p], 'security'), /main changed policy/, p);
+  }
+  // the AI review keeps the wide rule
+  assert.match(G.carryOverRefusal(['scripts/agents/push-guard.js']), /main changed policy/);
+  assert.match(G.carryOverRefusal(['evals/review/12-x/case.md'], 'ai-review'), /main changed policy/);
 });
