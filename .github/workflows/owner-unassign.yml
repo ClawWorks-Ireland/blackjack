@@ -1,0 +1,29 @@
+# Owner unassign (team v2.28.2; H: "if I should not action it, it should not be assigned to me"). When an ask
+# label comes off an issue (A0 acting on his answer, an ask default, the ask gate), unassign Delmar at once
+# instead of at the health watcher's next hourly run. Only an assignment the console App made, and only when
+# nothing on the issue still asks him (lib.js ownerUnassign). No model; reads gate.js from main.
+name: owner-unassign
+on:
+  issues:
+    types: [unlabeled]
+permissions:
+  contents: read
+  issues: write      # remove the assignee
+jobs:
+  unassign:
+    if: >-
+      contains(fromJSON('["needs-human", "status:awaiting-human"]'), github.event.label.name) &&
+      contains(github.event.issue.assignees.*.login, 'delmarolivier')
+    concurrency:
+      group: owner-unassign-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: [self-hosted, vm-keyed]   # runs no model or repo code beyond the gate scripts on main
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, persist-credentials: false }
+      - name: Unassign the owner if the ask ended
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: node scripts/gates/gate.js owner-unassign --issue "$ISSUE"
