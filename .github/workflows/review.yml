@@ -47,13 +47,6 @@ jobs:
           if [ "$ROUND" -gt 3 ]; then
             echo "capped=true" >> "$GITHUB_OUTPUT"
             node scripts/gates/gate.js status --sha "$SHA" --context ai-review --state failure --description "Round cap (3) reached: escalated (REQ-FLOW-1)"
-            # No slice behind the PR (a re-render, or one the console opened): there is nothing to re-slice, so it is
-            # console work, not a question for the owner (spec §1.1; home-automation#15, 2026-11-23).
-            if ! gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q .body | grep -qiE 'closes #[0-9]+'; then
-              gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label console-work
-              gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Round cap (3) reached on a PR with no slice to re-slice. It is **console work** (\`console-work\`): the console opens a fresh PR with the open findings fixed and closes this one."
-              exit 0
-            fi
             gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label needs-human
             gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "ROLE: AI review (A5/A6)   ITEM: #$PR   RESULT: needs-human
           WHAT CHANGED: nothing; a 4th review round was requested.
