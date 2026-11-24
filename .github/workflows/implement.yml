@@ -219,7 +219,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/claude-implementer.md --model sonnet ${{ (inputs.attempt == '2' || inputs.pr != '' || inputs.handoff_run != '') && '--effort high --advisor opus' || '' }} --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(npm test:*),Bash(node --test:*),Bash(node macos/scripts/embed-engine.js:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(git log:*),Bash(gh issue view:*),Bash(gh pr view:*)"
-            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*)"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Bash(git push:*),Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh api:*),SendMessage,ListAgents"
       - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
         continue-on-error: true   # a metric never fails the job
         if: always() && steps.claude.outputs.execution_file != ''
@@ -300,7 +300,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/self-verifier.md --model sonnet ${{ (inputs.attempt == '2' || inputs.pr != '' || inputs.handoff_run != '') && '--effort high --advisor opus' || '' }} --max-turns 40
             --allowedTools "Read,Grep,Glob,Bash(npm test:*),Bash(node --test:*),Bash(git diff:*),Bash(git log:*),Bash(gh issue view:*)"
-            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*)"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Bash(git push:*),Bash(git commit:*),SendMessage,ListAgents"
             --json-schema '${{ steps.s.outputs.schema }}'
       - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
         continue-on-error: true   # a metric never fails the job

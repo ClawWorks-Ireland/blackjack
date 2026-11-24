@@ -33,6 +33,7 @@
  *   gate.js slice-check --issue N [--apply]  REQ-FLOW-9: may this slice go to an implementer? ok=true | ok=false reason=policy|no-files
  *   gate.js metrics --file F                  REQ-OPS-14: print F's team-metrics notice (env TM_ROLE, TM_SUBJECT, TM_SHA, TM_ATTEMPT, TM_ARGS)
  *   gate.js a10-publish --dir out [--incident N]   publish A10's output folder (no model in this step)
+ *   gate.js owner-unassign --issue N         unassign the owner once an issue's ask ends, if the console assigned him
  *
  * Token: GITHUB_TOKEN or GH_TOKEN. Repo: GITHUB_REPOSITORY (owner/name).
  * Policy (RISK.md, .agents/PROJECT.md) is read from the working directory,
@@ -57,14 +58,15 @@ const RUN_URL = process.env.GITHUB_RUN_ID
 const POLICY_DIR = process.env.GATE_POLICY_DIR || process.cwd();
 
 async function gh(method, url, body) {
-  const res = await fetch(url.startsWith('http') ? url : `${API}${url}`, {
+  // Transient 502/503/504s and network errors are retried for safe calls only (G.withRetry; never a merge).
+  const res = await G.withRetry(() => fetch(url.startsWith('http') ? url : `${API}${url}`, {
     method,
     headers: {
       authorization: `Bearer ${method === 'GET' ? READ_TOKEN : TOKEN}`, accept: 'application/vnd.github+json',
       'x-github-api-version': '2022-11-28', 'content-type': 'application/json', 'user-agent': 'agent-team-gates',
     },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }), { method, url, log: console.error });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) throw new Error(`${method} ${url} → ${res.status}: ${data && data.message}`);
@@ -84,7 +86,7 @@ async function all(url) {
 const repo = (p) => `/repos/${REPO}${p}`;
 // Calls the API with another token (A10's issues-only token for the template). Same error handling as gh().
 async function ghWith(token, method, url, body) {
-  const r = await fetch(`https://api.github.com${url}`, { method, headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'agent-team-gates' }, body: body ? JSON.stringify(body) : undefined });
+  const r = await G.withRetry(() => fetch(`https://api.github.com${url}`, { method, headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'agent-team-gates' }, body: body ? JSON.stringify(body) : undefined }), { method, url, log: console.error });
   if (!r.ok) throw new Error(`${method} ${url}: ${r.status} ${(await r.text()).slice(0, 300)}`);
   return r.status === 204 ? {} : r.json();
 }
@@ -193,7 +195,8 @@ const commands = {
     const prs = (await all(repo('/pulls?state=open&base=main'))).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     const results = [];
     for (const p of prs) results.push(await verdictFor(p.number, lvl, true, true));
-    const next = results.find((r) => r.ok) || results.find((r) => r.behind) || results.find((r) => r.staleReview);
+    const next = results.find((r) => r.ok) || results.find((r) => r.behind) || results.find((r) => r.staleReview)
+      || results.find((r) => r.staleCi);
     console.log(JSON.stringify({ level: lvl, action: next ? (next.ok ? 'merge' : 'update') : 'none',
       pr: next ? next.number : null, sha: next ? next.sha : null, results }, null, 2));
   },
@@ -217,6 +220,7 @@ const commands = {
   },
   async 'update-branch'() {
     const pr = await gh('GET', repo(`/pulls/${args.pr}`));
+    if (pr.state !== 'open' || pr.merged_at) throw new Error(`#${args.pr} is ${pr.merged_at ? 'merged' : pr.state}: not updating it`);
     await gh('PUT', repo(`/pulls/${args.pr}/update-branch`), { expected_head_sha: pr.head.sha });
     console.log(`#${args.pr}: update-branch requested (gates will re-run on the new head)`);
   },
@@ -632,9 +636,8 @@ async function securityVerdict(pr, sha, current, comments, waivable) {
 // gate.js security-decide --pr N --sha S --file a7.json --head pr-head
 commands['security-decide'] = async () => {
   const out = JSON.parse(fs.readFileSync(args.file, 'utf8'));
-  // Each id once, so one waiver line can never clear two findings that share an id.
-  const seen = new Set();
-  const findings = (Array.isArray(out.findings) ? out.findings : []).filter((f) => !seen.has(String(f.id)) && seen.add(String(f.id)));
+  // Each id once, so one waiver line can never clear two findings that share an id; a repeat is renamed, not dropped.
+  const findings = G.uniqueFindingIds(Array.isArray(out.findings) ? out.findings : []);
   const current = { sha: args.sha, findings: findings.map((f) => ({ id: String(f.id), category: String(f.category || 'other'), file: String(f.file || ''), blob: blobAt(args.head, f.file) })) };
   const waivable = (await prFacts(args.pr)).tier === 2;
   const st = G.securityWaiverState({ comments: await prComments(args.pr), current, owner: OWNER_LOGIN, waivable });
@@ -659,7 +662,16 @@ commands['security-waive'] = async () => {
   const pr = await gh('GET', repo(`/pulls/${args.pr}`));
   const sha = pr.head.sha;
   const comments = await prComments(args.pr);
-  const current = comments.filter((c) => c.login === 'github-actions[bot]').map((c) => G.readSecurityMarker(c.body)).filter((m) => m && m.sha === sha).pop();
+  // A7's newest list for this head, and only as posted: an edited marker could have dropped findings (A7 sec-1 on
+  // SecurityClaw#32). If the newest was edited, fail: an older list for the same head may be one A7 replaced.
+  const newest = comments.filter((c) => c.login === 'github-actions[bot]').map((c) => ({ m: G.readSecurityMarker(c.body), edited: c.edited }))
+    .filter((x) => x.m && x.m.sha === sha).pop();
+  const current = newest && !newest.edited ? newest.m : null;
+  if (newest && newest.edited) {
+    await setStatus(sha, 'security', 'failure', 'A7\'s findings comment was edited after it was posted: re-run A7');
+    await gh('POST', repo(`/issues/${args.pr}/comments`), { body: `Not applied: A7's findings comment for ${sha.slice(0, 7)} was edited after it was posted, so its findings list can't be trusted. Re-run the \`security\` job for this head, then post the waiver again.` });
+    return;
+  }
   if (!current) {
     // A waiver names a finding in the latest list posted before it, so one posted now can't cover this head's.
     await gh('POST', repo(`/issues/${args.pr}/comments`), { body: `Not applied: A7 hasn't posted findings for ${sha.slice(0, 7)} (it is still reviewing, or this head kept an earlier head's verdict). Post the waiver again once A7 has posted its findings for this head.` });
@@ -929,6 +941,18 @@ commands['slice-check'] = async () => {
   if (act.addLabels.length) await gh('POST', repo(`/issues/${args.issue}/labels`), { labels: act.addLabels });
   for (const l of act.removeLabels) await gh('DELETE', repo(`/issues/${args.issue}/labels/${encodeURIComponent(l)}`));
   if (act.comment) await gh('POST', repo(`/issues/${args.issue}/comments`), { body: act.comment });
+};
+
+// Team v2.28.2: an ask label came off an issue. Unassign the owner now if the console made the assignment and
+// nothing asks him there any more (lib.js ownerUnassign); the watcher would otherwise do it up to an hour later.
+commands['owner-unassign'] = async () => {
+  if (!/^[0-9]+$/.test(String(args.issue || ''))) throw new Error('owner-unassign needs --issue <number>');
+  const issue = await gh('GET', repo(`/issues/${args.issue}`));
+  if (issue.state !== 'open') return console.log(`#${args.issue}: closed, left as history`);
+  const timeline = await all(repo(`/issues/${args.issue}/timeline`));
+  const d = G.ownerUnassign({ isPr: !!issue.pull_request, labels: issue.labels, timeline });
+  if (d.unassign) await gh('DELETE', repo(`/issues/${args.issue}/assignees`), { assignees: [OWNER_LOGIN] });
+  console.log(`#${args.issue}: ${d.unassign ? 'unassigned' : 'kept'}: ${d.why}`);
 };
 
 // REQ-OPS-14: no token and no API call; a missing file still emits a no-result record (the run died early).
