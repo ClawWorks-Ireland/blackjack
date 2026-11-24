@@ -120,5 +120,12 @@ jobs:
           SHA=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)
           if [ "$TIER" != "2" ]; then gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Security waivers apply to Tier 2 PRs only (G7). This PR is Tier $TIER: fix the finding instead."; exit 0; fi
           REASON=$(printf '%s' "$BODY" | head -1 | cut -c17-)
+          # Waive only a verdict the owner has seen (home-automation#18, 2026-11-23): while A7 is still running, a waiver
+          # would cover findings not yet posted, and A7's verdict would then overwrite it anyway.
+          CUR=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/statuses?per_page=100" -q '[.[]|select(.context=="security" and .creator.login=="github-actions[bot]")][0].state')
+          if [ "$CUR" != "failure" ]; then
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Not waived: the security review of ${SHA:0:7} is ${CUR:-not started}, so there is no verdict to waive yet. Post \`/security-waive\` again once A7 has posted its findings for this commit."
+            exit 0
+          fi
           node scripts/gates/gate.js status --sha "$SHA" --context security --state success --description "Waived by @delmarolivier: $REASON"
           gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Security finding waived by @delmarolivier on ${SHA:0:7}: $REASON. A new push re-runs A7."

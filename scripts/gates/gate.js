@@ -371,7 +371,7 @@ commands['carry-over'] = async () => {
   const since = await gh('GET', repo(`/compare/${base.merge_base_commit.sha}...${mainParent}`));
   if ((since.files || []).length >= 300) return say(false, 'too many changes on main to check');
   const mainPaths = (since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
-  const refusal = G.carryOverRefusal(mainPaths);
+  const refusal = G.carryOverRefusal(mainPaths, args.context);
   if (refusal) return say(false, refusal);
   // A waiver is the owner's decision about this PR's changes in their context (home-automation#5, 2026-11-22: an
   // automatic branch update discarded one). It carries only while main touched none of the files the PR changes.
@@ -815,7 +815,12 @@ commands['template-render'] = async () => {
     execFileSync('tar', ['-xzf', path.join(tmp, 't.tgz'), '-C', tdir, '--strip-components=1']);
     execFileSync('bash', ['-c', 'git archive HEAD | tar -x -C "$1"', '_', pdir]);
     const baseManifest = fs.existsSync(path.join(pdir, '.agents/TEAM_FILES')) ? fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter(Boolean) : [];
-    execFileSync('node', [path.join(tdir, 'scripts/team/render.js'), '--project', pdir, '--prune'], { env: { PATH: process.env.PATH, TEMPLATE_REPO: TEMPLATE }, stdio: ['ignore', 'ignore', 'pipe'] });
+    // --repo (team v2.24): the overlay rendered is this repo's, whatever the base overlay's `repo:` key says.
+    try {
+      execFileSync('node', [path.join(tdir, 'scripts/team/render.js'), '--project', pdir, '--repo', REPO, '--prune'], { env: { PATH: process.env.PATH, TEMPLATE_REPO: TEMPLATE }, stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (e) {
+      return fail(`render.js failed for ${REPO} at template ${src.slice(0, 7)}: ${String(e.stderr || e.message).trim().split('\n').pop().slice(0, 120)}`);
+    }
     const manifest = fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter((p) => p && p !== '.agents/TEAM_SOURCE');
     const rendered = {};
     for (const p of manifest) {
