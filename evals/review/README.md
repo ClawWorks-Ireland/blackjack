@@ -1,6 +1,6 @@
 # Reviewer eval set (spec §10.2, REQ-IMP-1/2, T3)
 
-17 planted bugs specific to BlackJack, each a real patch: cases 01–10 are patches against `main` at e284836 (2026-11-14), and later cases name their own base in their row. A10 adds a case after every revert or incident (REQ-IMP-1). Any change to a reviewer prompt (`.claude/agents/bug-hunter-*.md`, `finding-verifier.md`) or to `REVIEW.md` must replay this set and show recall didn't drop (REQ-IMP-2). This directory is Tier 2 (RISK.md).
+18 planted bugs specific to BlackJack, each a real patch: cases 01–10 are patches against `main` at e284836 (2026-11-14), and later cases name their own base in their row. A10 adds a case after every revert or incident (REQ-IMP-1). Any change to a reviewer prompt (`.claude/agents/bug-hunter-*.md`, `finding-verifier.md`) or to `REVIEW.md` must replay this set and show recall didn't drop (REQ-IMP-2). This directory is Tier 2 (RISK.md).
 
 | Case | Bug | Caught by `npm test` today |
 |---|---|---|
@@ -21,8 +21,9 @@
 | 15-schema-apostrophe | an apostrophe in `.agents/schemas/hunter.json` ends the single-quoted `--json-schema '…'` argument, so every hunter fails and no review completes (incident #46, rollback of #37; patch against main after the rollback) | **no** |
 | 16-owner-merge-allowed | main-guard accepts a merge by the owner when the head's gates are green, bypassing A9's merge-time checks and REQ-GATE-2 (incident #66; patch against main after the revert efc1bb0) | **no** |
 | 17-break-glass-owner-merge | main-guard accepts the owner's hand merge when its commit message carries a self-written `Break-glass:` trailer, with no gate checked (incident #80; patch against main at dc35831) | **no** |
+| 18-security-carry-codeowners | the `security` carry-over list anchors `CODEOWNERS` at the root, so a `.github/CODEOWNERS` change on main no longer resets a carried A7 verdict or waiver (incident #207, the carry-over part of #205; patch against main at b6770fe) | **no** |
 
-CI already catches 13 of 17; it misses 07, 15, 16 and 17. The set still measures **reviewer** recall: reviewers see only the diff (REQ-COMMS-2), and future bugs won't all be covered by tests. The next cases A10 adds should be ones the tests miss, like 07, 15, 16 and 17.
+CI already catches 13 of 18; it misses 07, 15, 16, 17 and 18. The set still measures **reviewer** recall: reviewers see only the diff (REQ-COMMS-2), and future bugs won't all be covered by tests. The next cases A10 adds should be ones the tests miss, like 07, 15, 16, 17 and 18.
 
 ## Replay
 ```
