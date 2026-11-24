@@ -1,0 +1,23 @@
+# Lints .github/workflows/ (not a required gate; informs reviewers and A7). Runs only when a workflow
+# changes, so the sandbox VM isn't booted for every push (team-waste `queue-vm-sandbox`, A10 weekly 2026-11-23).
+name: actionlint
+on:
+  pull_request:
+    paths: ['.github/workflows/**', '.github/actionlint.yaml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**', '.github/actionlint.yaml']
+permissions:
+  contents: read
+concurrency:
+  group: actionlint-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+jobs:
+  actionlint:
+    runs-on: [self-hosted, vm-sandbox]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - name: actionlint (official image, pinned)
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color

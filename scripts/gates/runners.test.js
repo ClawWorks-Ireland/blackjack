@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DIR = path.join(__dirname, '..', '..', '.github', 'workflows');
-const SANDBOX_JOBS = ['ci.actionlint', 'ci.ci', 'qa.qa', 'release.rollback-test', 'release.verify', 'review.repro'];   // sorted
+const SANDBOX_JOBS = ['actionlint.actionlint', 'ci.ci', 'qa.qa', 'release.rollback-test', 'release.verify', 'review.repro'];   // sorted
 
 // A small line-based reader for our own workflow files: per job, its runs-on line, its permissions (the
 // job's own, else the workflow's) and whether it checks out the PR head.
@@ -68,4 +68,21 @@ test('label-triggered key-VM route jobs skip labels that route nowhere; spec-pla
     if (!route || !/runs-on: \[self-hosted, vm-keyed\]/.test(route[1])) continue;
     assert.match(route[1], /^    if: /m, `${f}: route job needs an if: on the label`);
   }
+});
+
+// A8's rationale is model text the PR can steer, posted as github-actions[bot]: the classify step must escape `<!--`
+// in it, and must still run (team v2.26.1 shipped this line with a stray `)`, which broke every classify run).
+test('classify.yml: the A8 rationale line runs and makes the rationale inert', () => {
+  const { execFileSync } = require('child_process');
+  const os = require('os');
+  const line = fs.readFileSync(path.join(DIR, 'classify.yml'), 'utf8').split('\n').find((l) => /^\s*RATIONALE=\$\(node -p '/.test(l));
+  assert.ok(line, 'classify.yml has a RATIONALE=$(node -p ...) line');
+  execFileSync('bash', ['-n', '-c', line.trim()]);   // the shell line itself parses, quoting included
+  const prog = /node -p '([^']*)'\)/.exec(line)[1];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a8-'));
+  const run = (a8) => { fs.writeFileSync(path.join(dir, 'a8.json'), a8); return execFileSync(process.execPath, ['-p', prog], { cwd: dir, encoding: 'utf8' }).trim(); };
+  assert.equal(run(JSON.stringify({ tier: 1, rationale: 'a <!-- security-findings x --> b <!-- c' })), 'a &lt;!-- security-findings x --> b &lt;!-- c');
+  assert.equal(run(JSON.stringify({ tier: 1 })), 'A8 gave no rationale; the RISK.md floor applies.');
+  assert.equal(run(''), 'A8 gave no rationale; the RISK.md floor applies.');
+  fs.rmSync(dir, { recursive: true, force: true });
 });
