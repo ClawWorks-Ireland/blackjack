@@ -849,6 +849,43 @@ test('securityWaiverState: one waiver never greens a PR with other findings (hom
   assert.deepEqual(st.open, ['sec-2', 'sec-3']);
 });
 
+test('securityWaiverState: an edited A7 comment\'s findings list is ignored (A7 sec-1 on SecurityClaw#32)', () => {
+  const S1 = '1'.repeat(40);
+  const real = { sha: S1, findings: [{ id: 'sec-1', category: 'secrets', file: 'b.js', blob: 'b1' }] };
+  const forged = { sha: S1, findings: [{ id: 'sec-1', category: 'other', file: 'a.js', blob: 'a1' }] };
+  // The forged list, edited into A7's comment, points sec-1 at a harmless file; the owner's waiver must not follow it.
+  const st = G.securityWaiverState({ owner: 'delmarolivier', current: real, comments: [
+    { login: 'github-actions[bot]', body: a7(forged), edited: true },
+    { login: 'delmarolivier', body: '/security-waive sec-1 the a.js one is fine' },
+  ] });
+  assert.deepEqual(st.unknown.map((u) => u.id), ['sec-1']);
+  assert.deepEqual(st.open, ['sec-1']);
+  // An honest older list for the same head doesn't stand in for an edited newer one (review of v2.28.1).
+  const c1 = { sha: S1, findings: [{ id: 'sec-1', category: 'other', file: 'a.js', blob: 'a1' }] };
+  const c2 = { sha: S1, findings: [{ id: 'sec-1', category: 'secrets', file: 'c.js', blob: 'c1' }, { id: 'sec-2', category: 'web', file: 'd.js', blob: 'd1' }] };
+  const swap = G.securityWaiverState({ owner: 'delmarolivier', current: c2, comments: [
+    { login: 'github-actions[bot]', body: a7(c1) },
+    { login: 'github-actions[bot]', body: a7(c1), edited: true },   // C2, edited to look harmless
+    { login: 'delmarolivier', body: '/security-waive sec-1 ok' },
+  ] });
+  assert.deepEqual(swap.unknown.map((u) => u.id), ['sec-1']);
+  assert.deepEqual(swap.open, ['sec-1', 'sec-2']);
+  // As posted, the same comment counts.
+  const ok = G.securityWaiverState({ owner: 'delmarolivier', current: real, comments: [
+    { login: 'github-actions[bot]', body: a7(real) },
+    { login: 'delmarolivier', body: '/security-waive sec-1 accepted' },
+  ] });
+  assert.deepEqual(ok.open, []);
+});
+
+test('uniqueFindingIds: a repeated id is renamed, never dropped (AI review on SecurityClaw#34)', () => {
+  const out = G.uniqueFindingIds([{ id: 'sec-1', severity: 'low', file: 'a.js' }, { id: 'sec-1', severity: 'high', file: 'b.js' }, { id: 'sec-1#2', file: 'c.js' }, null]);
+  assert.deepEqual(out.map((f) => f.id), ['sec-1', 'sec-1#3', 'sec-1#2']);
+  assert.equal(out[1].severity, 'high');
+  assert.deepEqual(G.uniqueFindingIds([{ id: 7 }, { id: '7' }]).map((f) => f.id), ['7', '7#2']);
+  assert.deepEqual(G.uniqueFindingIds(undefined), []);
+});
+
 test('securityWaiverState: no waiver counts on a PR that is not Tier 2 (G7)', () => {
   const cur = { sha: '1'.repeat(40), findings: [{ id: 'sec-1', category: 'web', file: 'app.js', blob: 'a1' }] };
   const comments = [
