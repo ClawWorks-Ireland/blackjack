@@ -16,6 +16,8 @@
  *   gate.js guard-revert --sha S              revert S on main with a Main-guard-revert trailer (App token step)
  *   gate.js review-decide --candidates F --votes F1,F2,F3 --pr N --sha S --round R [--repro F]   A6 majority → ai-review status + comment
  *   gate.js carry-over --pr N --sha S --context C   keep a green verdict across a pure branch update
+ *   gate.js security-decide --pr N --sha S --file F --head DIR   post A7's findings (with marker) and set `security` per finding
+ *   gate.js security-waive --pr N              recompute `security` from every owner `/security-waive` line
  *   gate.js qa-report --sha S --result pass|fail|error --dir D   QA status and PR comment (qa.yml)
  *   gate.js ladder-resume --issue N              resume a paused ladder attempt from the team's own marker
  *   gate.js qa-retry --run R [--dry]          re-run a QA round once when its runner was lost (blackjack#128)
@@ -371,7 +373,7 @@ commands['carry-over'] = async () => {
   const since = await gh('GET', repo(`/compare/${base.merge_base_commit.sha}...${mainParent}`));
   if ((since.files || []).length >= 300) return say(false, 'too many changes on main to check');
   const mainPaths = (since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
-  const refusal = G.carryOverRefusal(mainPaths);
+  const refusal = G.carryOverRefusal(mainPaths, args.context);
   if (refusal) return say(false, refusal);
   // A waiver is the owner's decision about this PR's changes in their context (home-automation#5, 2026-11-22: an
   // automatic branch update discarded one). It carries only while main touched none of the files the PR changes.
@@ -601,6 +603,71 @@ commands['repro-run'] = async () => {
   console.log(`${out.length} check(s) run: ${out.map((o) => `${o.id} head=${o.head} base=${o.base}`).join('; ') || 'none'}`);
 };
 
+// ---- Per-finding security waivers (home-automation#18, A10 weekly 2026-11-23). The `security` status is green
+// only when every A7 finding at the head is waived, by id at that head or carried from an earlier head whose
+// waived file is unchanged (lib.js securityWaiverState). Waivers are read from all the owner's comments.
+const prComments = async (n) => (await all(repo(`/issues/${n}/comments`)))
+  .sort((x, y) => (x.created_at < y.created_at ? -1 : x.created_at > y.created_at ? 1 : x.id - y.id))
+  .map((c) => ({ login: c.user && c.user.login, body: c.body || '' }));
+// A finding's file blob at the PR head, from the head checkout (data only: git reads the tree, runs nothing).
+const blobAt = (dir, file) => {
+  if (!dir || typeof file !== 'string' || !/^[\w.@+-][\w./@+-]*$/.test(file) || file.split('/').includes('..')) return '';
+  try { return execFileSync('git', ['-C', dir, 'rev-parse', '--verify', '--quiet', `HEAD:${file}`], { encoding: 'utf8' }).trim(); } catch { return ''; }
+};
+// Waivers count on Tier 2 PRs only (G7). The `waive` job checks the tier too, but a waiver line that isn't a
+// comment's first line never starts that job, and a refused waiver would otherwise still count at A7's next run.
+async function securityVerdict(pr, sha, current, comments, waivable) {
+  const st = G.securityWaiverState({ comments, current, owner: OWNER_LOGIN, waivable });
+  const n = current.findings.length;
+  const [state, description] = !n ? ['success', 'A7: no findings']
+    : !st.open.length ? ['success', `Waived by @${OWNER_LOGIN}: all ${n} finding(s) (${st.waived.map((w) => w.id).join(', ')})`]
+      : ['failure', `A7: ${st.open.length} of ${n} finding(s) open (${st.open.join(', ')}), blocking`];
+  await setStatus(sha, 'security', state, description);
+  return st;
+}
+
+// After A7: post its findings with the hidden marker, then set `security` from the waivers that already apply.
+// gate.js security-decide --pr N --sha S --file a7.json --head pr-head
+commands['security-decide'] = async () => {
+  const out = JSON.parse(fs.readFileSync(args.file, 'utf8'));
+  // Each id once, so one waiver line can never clear two findings that share an id.
+  const seen = new Set();
+  const findings = (Array.isArray(out.findings) ? out.findings : []).filter((f) => !seen.has(String(f.id)) && seen.add(String(f.id)));
+  const current = { sha: args.sha, findings: findings.map((f) => ({ id: String(f.id), category: String(f.category || 'other'), file: String(f.file || ''), blob: blobAt(args.head, f.file) })) };
+  const waivable = (await prFacts(args.pr)).tier === 2;
+  const st = G.securityWaiverState({ comments: await prComments(args.pr), current, owner: OWNER_LOGIN, waivable });
+  const carried = new Map(st.waived.map((w) => [w.id, w]));
+  const line = (x) => `- **${x.id}** (${x.severity}, ${x.category || 'other'}) \`${x.file}:${x.line}\`: ${x.issue}\n  - Evidence: ${x.evidence}\n  - Fix: ${x.fix}`
+    + (carried.has(String(x.id)) ? `\n  - Waiver ${carried.get(String(x.id)).how}: ${carried.get(String(x.id)).reason}` : '');
+  const open = findings.length - st.waived.length;
+  const body = ['<!-- security -->', G.securityMarker(current),
+    `ROLE: Security Reviewer (A7)   ITEM: #${args.pr}   RESULT: ${open ? 'blocked' : 'done'}`, '',
+    ...(findings.length ? findings.map(line) : ['No security findings.']), '',
+    !open ? '' : waivable ? `Blocking. Only @${OWNER_LOGIN} can waive, on Tier 2 PRs, one line per finding: \`/security-waive <id> <reason>\`. A waiver carries to later pushes while the waived file is unchanged.`
+      : 'Blocking. This PR is not Tier 2, so findings can\'t be waived (G7): fix them.'].join('\n');
+  await gh('POST', repo(`/issues/${args.pr}/comments`), { body: body.slice(0, 60000) });
+  await securityVerdict(args.pr, args.sha, current, await prComments(args.pr), waivable);
+};
+
+// On an owner `/security-waive` comment (Tier 2 checked by the workflow): recompute from every comment.
+// gate.js security-waive --pr N
+commands['security-waive'] = async () => {
+  const pr = await gh('GET', repo(`/pulls/${args.pr}`));
+  const sha = pr.head.sha;
+  const comments = await prComments(args.pr);
+  const current = comments.filter((c) => c.login === 'github-actions[bot]').map((c) => G.readSecurityMarker(c.body)).filter((m) => m && m.sha === sha).pop();
+  if (!current) {
+    // A waiver names a finding in the latest list posted before it, so one posted now can't cover this head's.
+    await gh('POST', repo(`/issues/${args.pr}/comments`), { body: `Not applied: A7 hasn't posted findings for ${sha.slice(0, 7)} (it is still reviewing, or this head kept an earlier head's verdict). Post the waiver again once A7 has posted its findings for this head.` });
+    return;
+  }
+  const st = await securityVerdict(args.pr, sha, current, comments, (await prFacts(args.pr)).tier === 2);
+  const bad = st.unknown.filter((u) => u.sha === sha);
+  await gh('POST', repo(`/issues/${args.pr}/comments`), { body: [
+    `Security waivers on ${sha.slice(0, 7)}: ${st.waived.map((w) => `${w.id} (${w.how})`).join(', ') || 'none'}. Still open: ${st.open.join(', ') || 'none'}.`,
+    bad.length ? `Not a finding on this head: ${bad.map((u) => u.id).join(', ')}.` : ''].filter(Boolean).join('\n') });
+};
+
 commands['review-decide'] = async () => {
   const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
   const candidates = fs.existsSync(args.candidates) ? read(args.candidates) : [];
@@ -815,7 +882,12 @@ commands['template-render'] = async () => {
     execFileSync('tar', ['-xzf', path.join(tmp, 't.tgz'), '-C', tdir, '--strip-components=1']);
     execFileSync('bash', ['-c', 'git archive HEAD | tar -x -C "$1"', '_', pdir]);
     const baseManifest = fs.existsSync(path.join(pdir, '.agents/TEAM_FILES')) ? fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter(Boolean) : [];
-    execFileSync('node', [path.join(tdir, 'scripts/team/render.js'), '--project', pdir, '--prune'], { env: { PATH: process.env.PATH, TEMPLATE_REPO: TEMPLATE }, stdio: ['ignore', 'ignore', 'pipe'] });
+    // --repo (team v2.24): the overlay rendered is this repo's, whatever the base overlay's `repo:` key says.
+    try {
+      execFileSync('node', [path.join(tdir, 'scripts/team/render.js'), '--project', pdir, '--repo', REPO, '--prune'], { env: { PATH: process.env.PATH, TEMPLATE_REPO: TEMPLATE }, stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (e) {
+      return fail(`render.js failed for ${REPO} at template ${src.slice(0, 7)}: ${String(e.stderr || e.message).trim().split('\n').pop().slice(0, 120)}`);
+    }
     const manifest = fs.readFileSync(path.join(pdir, '.agents/TEAM_FILES'), 'utf8').split('\n').filter((p) => p && p !== '.agents/TEAM_SOURCE');
     const rendered = {};
     for (const p of manifest) {

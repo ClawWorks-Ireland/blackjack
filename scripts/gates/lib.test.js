@@ -612,6 +612,9 @@ test('sliceCheckActions: team files and evals are console work; project policy f
   assert.doesNotMatch(a.comment, /@/, 'no @-mention of the owner for console work');
   const team = G.sliceCheckActions(G.slicePolicyCheck('Files: `scripts/gates/lib.js`, `.github/workflows/qa.yml`'), { teamFiles: ['scripts/gates/lib.js'] });
   assert.deepEqual(team.addLabels, ['console-work']);
+  // team v2.24: the overlay is rendered from the template (listed in TEAM_FILES), so changing it is console work
+  const ovl = G.sliceCheckActions(G.slicePolicyCheck('Files: `.agents/PROJECT.md`'), { teamFiles: ['.agents/PROJECT.md'] });
+  assert.deepEqual(ovl.addLabels, ['console-work']);
   const again = G.sliceCheckActions(evals, { labels: ['console-work'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
   assert.deepEqual([again.addLabels, again.comment], [[], null]);
   // a project policy file is the owner's decision
@@ -784,6 +787,96 @@ test('waiverCarries: only when main touched none of the PR\'s files (home-automa
   assert.match(r.why, /scripts\/x\.js/);
 });
 
+// ---- home-automation#18: per-finding security waivers (A10 weekly 2026-11-23)
+test('parseWaiveCommands: every waiver line in a comment, not just the first', () => {
+  const w = G.parseWaiveCommands('/security-waive sec-1 tracked in #16\n/security-waive sec-2 tracked in #17\nthanks');
+  assert.deepEqual(w.map((x) => x.id), ['sec-1', 'sec-2']);
+  assert.equal(w[1].reason, 'tracked in #17');
+  assert.deepEqual(G.parseWaiveCommands('/security-waive sec-1'), [], 'a waiver needs a reason');
+  assert.deepEqual(G.parseWaiveCommands('please /security-waive sec-1 x'), [], 'only at the start of a line');
+});
+
+test('securityMarker: round-trips, and model text cannot close the comment', () => {
+  const rec = { sha: 'a'.repeat(40), findings: [{ id: 'sec-1', category: 'other', file: 'x --> <!-- y', blob: 'b' }] };
+  const m = G.securityMarker(rec);
+  assert.equal((m.match(/-->/g) || []).length, 1);
+  assert.deepEqual(G.readSecurityMarker(`text\n${m}`), rec);
+  assert.equal(G.readSecurityMarker('<!-- security-findings bm90IGpzb24= -->'), null);
+});
+
+test('securityWaiverState: one waiver never greens a PR with other findings (home-automation#18)', () => {
+  const S1 = '1'.repeat(40);
+  const cur = { sha: S1, findings: [
+    { id: 'sec-1', category: 'network-exposure', file: 'media/docker-compose.yml', blob: 'c1' },
+    { id: 'sec-2', category: 'supply-chain', file: 'media/docker-compose.yml', blob: 'c1' },
+    { id: 'sec-3', category: 'file-permissions', file: 'media/scripts/configure-jellyfin.py', blob: 'j1' }] };
+  const comments = [
+    { login: 'github-actions[bot]', body: G.securityMarker(cur) },
+    { login: 'delmarolivier', body: '/security-waive sec-1 tracked in #16' },
+  ];
+  const st = G.securityWaiverState({ comments, current: cur, owner: 'delmarolivier' });
+  assert.deepEqual(st.waived.map((w) => w.id), ['sec-1']);
+  assert.deepEqual(st.open, ['sec-2', 'sec-3']);
+});
+
+test('securityWaiverState: no waiver counts on a PR that is not Tier 2 (G7)', () => {
+  const cur = { sha: '1'.repeat(40), findings: [{ id: 'sec-1', category: 'web', file: 'app.js', blob: 'a1' }] };
+  const comments = [
+    { login: 'github-actions[bot]', body: G.securityMarker(cur) },
+    { login: 'delmarolivier', body: 'thoughts first\n/security-waive sec-1 not the first line, so the waive job never ran' },
+  ];
+  assert.deepEqual(G.securityWaiverState({ comments, current: cur, owner: 'delmarolivier', waivable: false }).open, ['sec-1']);
+  assert.deepEqual(G.securityWaiverState({ comments, current: cur, owner: 'delmarolivier', waivable: true }).open, []);
+});
+
+test('securityWaiverState: waivers from every owner comment count (a cancelled waiver run loses nothing)', () => {
+  const S1 = '1'.repeat(40);
+  const cur = { sha: S1, findings: [{ id: 'sec-1', category: 'a', file: 'f', blob: 'x' }, { id: 'sec-2', category: 'b', file: 'f', blob: 'x' }] };
+  const comments = [
+    { login: 'github-actions[bot]', body: G.securityMarker(cur) },
+    { login: 'delmarolivier', body: '/security-waive sec-1 one' },
+    { login: 'delmarolivier', body: '/security-waive sec-2 two' },
+    { login: 'someone-else', body: '/security-waive sec-9 not the owner' },
+  ];
+  const st = G.securityWaiverState({ comments, current: cur, owner: 'delmarolivier' });
+  assert.deepEqual(st.open, []);
+  assert.deepEqual(st.unknown, []);
+});
+
+test('securityWaiverState: a waiver carries to a new head only while the waived file is unchanged', () => {
+  const S1 = '1'.repeat(40); const S2 = '2'.repeat(40);
+  const h1 = { sha: S1, findings: [{ id: 'sec-1', category: 'supply-chain', file: 'media/docker-compose.yml', blob: 'c1' }] };
+  const comments = [
+    { login: 'github-actions[bot]', body: G.securityMarker(h1) },
+    { login: 'delmarolivier', body: '/security-waive sec-1 pinning tracked in #17' },
+  ];
+  // A7 renumbers on the next head: the same finding is now sec-2, beside a new one.
+  const same = { sha: S2, findings: [
+    { id: 'sec-1', category: 'network-exposure', file: 'media/docker-compose.yml', blob: 'c1' },
+    { id: 'sec-2', category: 'supply-chain', file: 'media/docker-compose.yml', blob: 'c1' }] };
+  const st = G.securityWaiverState({ comments, current: same, owner: 'delmarolivier' });
+  assert.deepEqual(st.waived.map((w) => [w.id, w.how]), [['sec-2', 'carried from 1111111 sec-1']]);
+  assert.deepEqual(st.open, ['sec-1'], 'a different category in the same file is a new decision');
+  const edited = { sha: S2, findings: [{ id: 'sec-1', category: 'supply-chain', file: 'media/docker-compose.yml', blob: 'c2' }] };
+  assert.deepEqual(G.securityWaiverState({ comments, current: edited, owner: 'delmarolivier' }).open, ['sec-1'], 'the file changed');
+});
+
+test('securityWaiverState: no carry when the key names two findings, and unknown ids are reported', () => {
+  const S1 = '1'.repeat(40); const S2 = '2'.repeat(40);
+  const two = (sha) => ({ sha, findings: [{ id: 'sec-1', category: 'secrets', file: 'f', blob: 'x' }, { id: 'sec-2', category: 'secrets', file: 'f', blob: 'x' }] });
+  const comments = [
+    { login: 'github-actions[bot]', body: G.securityMarker(two(S1)) },
+    { login: 'delmarolivier', body: '/security-waive sec-1 ok\n/security-waive sec-7 typo' },
+  ];
+  const st1 = G.securityWaiverState({ comments, current: two(S1), owner: 'delmarolivier' });
+  assert.deepEqual(st1.open, ['sec-2'], 'same head: by id only');
+  assert.deepEqual(st1.unknown, [{ id: 'sec-7', sha: S1 }]);
+  assert.deepEqual(G.securityWaiverState({ comments, current: two(S2), owner: 'delmarolivier' }).open, ['sec-1', 'sec-2']);
+  // A marker forged by anyone but the bot is ignored.
+  const forged = [{ login: 'delmarolivier', body: G.securityMarker(two(S2)) }, { login: 'delmarolivier', body: '/security-waive sec-1 x' }];
+  assert.deepEqual(G.securityWaiverState({ comments: forged, current: two(S2), owner: 'delmarolivier' }).open, ['sec-1', 'sec-2']);
+});
+
 // ---- blackjack#131: superseded slice PRs (team v2.22)
 const spr = (o) => ({ number: 1, state: 'open', head: { ref: 'agent/121-local', repo: { full_name: 'o/r' } }, user: { login: 'clawworks-local-coder[bot]' }, base: { ref: 'main' }, ...o });
 test("supersededSlicePrs: the other implementer's open PR for the slice is superseded (#131)", () => {
@@ -881,4 +974,16 @@ test('pull_request_target workflows run main\'s code on PRs to main only (A7 sec
   for (const f of ['template-render.yml', 'tier-approval.yml', 'classify.yml', 'review.yml', 'security.yml']) {
     assert.ok(fs.readFileSync(path.join(dir, f), 'utf8').includes("github.event.pull_request.base.ref == 'main'"), `${f} acts on PRs to main only`);
   }
+});
+
+test('carry-over for security resets only on what A7 judges by (home-automation#18)', () => {
+  // home-automation#18: A10's push-guard fix (scripts/agents/, evals/) reset the security verdict and the owner's waivers
+  assert.equal(G.carryOverRefusal(['scripts/agents/push-guard.js', 'evals/review/12-x/case.md', '.claude/agents/planner.md', '.github/workflows/review.yml'], 'security'), null);
+  for (const p of ['REVIEW.md', 'RISK.md', 'CLAUDE.md', 'AGENTS.md', 'CODEOWNERS', '.agents/PROJECT.md', '.claude/agents/security-reviewer.md',
+    '.claude/settings.json', '.github/workflows/security.yml', 'scripts/gates/lib.js']) {
+    assert.match(G.carryOverRefusal(['web/app.js', p], 'security'), /main changed policy/, p);
+  }
+  // the AI review keeps the wide rule
+  assert.match(G.carryOverRefusal(['scripts/agents/push-guard.js']), /main changed policy/);
+  assert.match(G.carryOverRefusal(['evals/review/12-x/case.md'], 'ai-review'), /main changed policy/);
 });

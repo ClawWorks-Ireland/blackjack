@@ -650,7 +650,8 @@ function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHE
   const add = (ls) => ls.filter((l) => !have.includes(l));
   // REQ-COORD-6 (team v2.20): team files (rendered from the template, listed in .agents/TEAM_FILES) and eval content
   // are console work, not a decision for the owner: the console makes them (template first) and he reviews the PR.
-  // Only the project's own policy files (RISK.md, CLAUDE.md, REVIEW.md, CODEOWNERS, the overlay) still ask him.
+  // Only the project's own policy files (RISK.md, CLAUDE.md, REVIEW.md, CODEOWNERS) still ask him. The overlay is a
+  // team file since team v2.24 (listed in TEAM_FILES): it is changed in the template's projects/, so console work.
   // CODEOWNERS is the project's own policy file wherever GitHub reads it (.github/, docs/ or the root): never console work.
   const consoleFile = (p) => !/(^|\/)CODEOWNERS$/.test(p) && (teamFiles.includes(p) || p.startsWith('evals/') || /^(\.github|\.claude|scripts\/gates|scripts\/agents)\//.test(p));
   if (check.policy.length && check.policy.every(consoleFile)) {
@@ -685,10 +686,16 @@ function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHE
  * Carry-over (gate.js carry-over) keeps an old verdict only if main didn't change the rules it was
  * judged by: any policy path (REVIEW.md, RISK.md, the agents, the gates, the workflows) changed on
  * main since the reviewed head's merge base means a fresh review (A7 sec-1 on blackjack#63).
+ * For the `security` verdict (team v2.23.8), only what A7 judges by counts: its definition, its workflow, the
+ * project's policy and instruction files and the gate scripts. A change to other agents, other workflows or the
+ * evals can't change A7's verdict, and resetting on it threw away the owner's waivers three times on
+ * home-automation#18 (2026-11-23). Code changes on main never reset any verdict, as before.
  * Returns the refusal reason, or null if carrying over is allowed.
  */
-function carryOverRefusal(mainChangedPaths) {
-  const hit = (mainChangedPaths || []).find((f) => POLICY_RE.test(f));
+const SECURITY_INPUTS_RE = /^(CLAUDE\.md|AGENTS\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/PROJECT\.md|\.claude\/agents\/security-reviewer\.md|\.claude\/settings[^/]*\.json|\.github\/workflows\/security\.yml|scripts\/gates\/)/;
+function carryOverRefusal(mainChangedPaths, context = 'ai-review') {
+  const re = context === 'security' ? SECURITY_INPUTS_RE : POLICY_RE;
+  const hit = (mainChangedPaths || []).find((f) => re.test(f));
   return hit ? `main changed policy since the review (${hit})` : null;
 }
 
@@ -846,6 +853,75 @@ function renderDirection(baseSrc, src, compareStatus) {
 function waiverCarries(prPaths = [], mainPaths = []) {
   const touched = prPaths.filter((p) => mainPaths.includes(p));
   return touched.length ? { ok: false, why: `main changed ${touched.slice(0, 3).join(', ')}, which this PR also changes: the waiver needs a fresh look` } : { ok: true, why: 'main touched none of the PR\'s files' };
+}
+
+/**
+ * Every `/security-waive <id> <reason>` line in an owner comment, not just the first (home-automation#18: a comment
+ * with two waiver lines recorded only the first).
+ */
+function parseWaiveCommands(body = '') {
+  return String(body).split(/\r?\n/)
+    .map((l) => l.trim().match(/^\/security-waive\s+(\S+)\s+(\S.*)$/))
+    .filter(Boolean)
+    .map((m) => ({ id: m[1], reason: m[2].trim().slice(0, 300) }));
+}
+
+/**
+ * A7's findings at one head, as a hidden marker in the bot's review comment: { sha, findings: [{ id, category, file, blob }] }.
+ * Base64 so no file name or text from the model can close the HTML comment.
+ */
+function securityMarker(rec) {
+  return `<!-- security-findings ${Buffer.from(JSON.stringify(rec)).toString('base64')} -->`;
+}
+function readSecurityMarker(body = '') {
+  const m = String(body).match(/<!-- security-findings ([A-Za-z0-9+/=]+) -->/);
+  if (!m) return null;
+  try {
+    const r = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8'));
+    return r && typeof r.sha === 'string' && Array.isArray(r.findings) ? r : null;
+  } catch { return null; }
+}
+
+/**
+ * Which of A7's findings at the current head has the owner waived? (home-automation#18, A10 weekly 2026-11-23.)
+ * Before this, any one `/security-waive` turned the whole `security` status green, whatever the other findings,
+ * and a waiver died with every push even when the waived file was unchanged (9 waivers for 3 decisions on #18).
+ *
+ * `comments`: the PR's comments in order, { login, body }. A finding list is a `security-findings` marker posted
+ * by `botLogin`; each waiver line in an `owner` comment names an id in the latest list posted before it. A waiver
+ * covers that finding at that head. It carries to a later head's finding with the same category, file and file
+ * blob (the waived file is byte-for-byte unchanged), but only when that key names exactly one finding on both
+ * heads, so one waiver never covers two findings. Waivers are read from all the owner's comments, so a waiver
+ * run that GitHub cancels in the concurrency queue loses nothing.
+ * Returns { waived: [{ id, how, reason }], open: [id], unknown: [{ id, sha }] }.
+ */
+function securityWaiverState({ comments = [], current, owner, botLogin = 'github-actions[bot]', waivable = true }) {
+  const key = (f) => JSON.stringify([f.category || 'other', f.file || '', f.blob || '']);
+  const unique = (list, k) => list.filter((f) => key(f) === k).length === 1;
+  let latest = null;
+  const records = [];
+  const unknown = [];
+  for (const c of comments) {
+    if (c.login === botLogin) { const m = readSecurityMarker(c.body); if (m) latest = m; continue; }
+    if (c.login !== owner || !waivable) continue;   // waivable: the PR is Tier 2 (G7)
+    for (const w of parseWaiveCommands(c.body)) {
+      const f = latest && latest.findings.find((x) => x.id === w.id);
+      if (!f) { unknown.push({ id: w.id, sha: latest ? latest.sha : '' }); continue; }
+      records.push({ sha: latest.sha, id: f.id, key: key(f), blob: f.blob || '', unique: unique(latest.findings, key(f)), reason: w.reason });
+    }
+  }
+  const waived = [];
+  const open = [];
+  for (const f of (current && current.findings) || []) {
+    const k = key(f);
+    const same = records.find((r) => r.sha === current.sha && r.id === f.id && r.key === k);
+    const carried = !same && f.blob && unique(current.findings, k)
+      && records.find((r) => r.sha !== current.sha && r.unique && r.blob && r.key === k);
+    if (same) waived.push({ id: f.id, how: 'waived', reason: same.reason });
+    else if (carried) waived.push({ id: f.id, how: `carried from ${carried.sha.slice(0, 7)} ${carried.id}`, reason: carried.reason });
+    else open.push(f.id);
+  }
+  return { waived, open, unknown };
 }
 
 /** A file's git blob id (what a tree lists), so rendered files compare with a PR's tree without downloading it. */
@@ -1019,6 +1095,7 @@ module.exports = {
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, ownerReviewAction, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch, renderDirection, waiverCarries,
+  parseWaiveCommands, securityMarker, readSecurityMarker, securityWaiverState,
   trustedStatuses, qaCoveredPrs, runnerLost, qaRetryAction, qaReportPlan, releaseRetryAction, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
   dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, deniedTools, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, slicePolicyCheck, sliceCheckResult, sliceCheckActions, SLICE_CHECK_BOTS, CODER_BOTS, fixRoundRefusal, supersededSlicePrs, closeSuperseded, parseManualChecks, t3Verdict,
 };

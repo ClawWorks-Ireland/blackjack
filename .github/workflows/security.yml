@@ -92,10 +92,9 @@ jobs:
           if [ "$N" = "-1" ]; then
             node scripts/gates/gate.js status --sha "$SHA" --context security --state error --description "A7 produced no result; re-run (gates are never skipped)"; exit 1
           fi
-          node -e 'const f=JSON.parse(require("fs").readFileSync("a7.json","utf8")).findings;console.log(["<!-- security -->","ROLE: Security Reviewer (A7)   ITEM: #"+process.env.PR+"   RESULT: "+(f.length?"blocked":"done"),"",...(f.length?f.map(x=>`- **${x.id}** (${x.severity}) \`${x.file}:${x.line}\`: ${x.issue}\n  - Evidence: ${x.evidence}\n  - Fix: ${x.fix}`):["No security findings."]),"",f.length?"Blocking. Only @delmarolivier can waive, on Tier 2 PRs, with `/security-waive <id> <reason>`.":""].join("\n"))' > body.md
-          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file body.md
-          if [ "$N" = "0" ]; then S=success; D="A7: no findings"; else S=failure; D="A7: $N finding(s), blocking"; fi
-          node scripts/gates/gate.js status --sha "$SHA" --context security --state "$S" --description "$D"
+          # Per-finding waivers (home-automation#18): green only when every finding is waived at this head, or
+          # carried from an earlier head whose waived file is unchanged (gate.js security-decide).
+          node scripts/gates/gate.js security-decide --pr "$PR" --sha "$SHA" --file a7.json --head pr-head
       - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 
@@ -111,14 +110,13 @@ jobs:
     env:
       PR: ${{ github.event.issue.number }}
       GITHUB_TOKEN: ${{ github.token }}
-      BODY: ${{ github.event.comment.body }}
     steps:
       - uses: actions/checkout@v4
         with: { ref: main, persist-credentials: false }
       - run: |
           TIER=$(node scripts/gates/gate.js floor --pr "$PR" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tier))')
-          SHA=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)
           if [ "$TIER" != "2" ]; then gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Security waivers apply to Tier 2 PRs only (G7). This PR is Tier $TIER: fix the finding instead."; exit 0; fi
-          REASON=$(printf '%s' "$BODY" | head -1 | cut -c17-)
-          node scripts/gates/gate.js status --sha "$SHA" --context security --state success --description "Waived by @delmarolivier: $REASON"
-          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Security finding waived by @delmarolivier on ${SHA:0:7}: $REASON. A new push re-runs A7."
+          # Recomputes `security` from every owner waiver line on the PR against A7's findings at the head, so a run
+          # cancelled in the concurrency queue loses nothing, and a waiver posted while A7 is still running is kept
+          # and applies once A7 posts this head's findings (home-automation#18).
+          node scripts/gates/gate.js security-waive --pr "$PR"
