@@ -22,13 +22,3 @@ jobs:
           : no install_command in the overlay
           npm test
           node --test scripts/gates/*.test.js scripts/agents/*.test.js
-
-  # Lints .github/workflows/ (not a required gate; informs reviewers and A7).
-  actionlint:
-    runs-on: [self-hosted, vm-sandbox]
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-      - name: actionlint (official image, pinned)
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color

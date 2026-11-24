@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DIR = path.join(__dirname, '..', '..', '.github', 'workflows');
-const SANDBOX_JOBS = ['ci.actionlint', 'ci.ci', 'qa.qa', 'release.rollback-test', 'release.verify', 'review.repro'];   // sorted
+const SANDBOX_JOBS = ['actionlint.actionlint', 'ci.ci', 'qa.qa', 'release.rollback-test', 'release.verify', 'review.repro'];   // sorted
 
 // A small line-based reader for our own workflow files: per job, its runs-on line, its permissions (the
 // job's own, else the workflow's) and whether it checks out the PR head.

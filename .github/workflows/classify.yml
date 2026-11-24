@@ -87,7 +87,7 @@ jobs:
         run: |
           printf '%s' "$OUT" > a8.json   # empty → the RISK.md floor applies (classification can only raise)
           TIER=$(node -e 'const a=JSON.parse(require("fs").readFileSync("a8.json","utf8")||"{}");console.log(Math.max(Number(process.env.FLOOR),Number.isInteger(a.tier)?a.tier:Number(process.env.FLOOR)))')
-          RATIONALE=$(node -p 'JSON.parse(require("fs").readFileSync("a8.json","utf8")||"{}").rationale||"A8 gave no rationale; the RISK.md floor applies."')
+          RATIONALE=$(node -p 'JSON.parse(require("fs").readFileSync("a8.json","utf8")||"{}").rationale||"A8 gave no rationale; the RISK.md floor applies.").replace(/<!--/g,"&lt;!--")')
           for t in 0 1 2; do [ "$t" = "$TIER" ] || gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --remove-label "tier:$t" 2>/dev/null || true; done
           gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label "tier:$TIER"
           MENTION=""
