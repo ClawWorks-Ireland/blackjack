@@ -16,6 +16,18 @@
        "low"
       ]
      },
+     "category": {
+      "enum": [
+       "secrets",
+       "network-exposure",
+       "code-execution",
+       "supply-chain",
+       "policy-tampering",
+       "file-permissions",
+       "web",
+       "other"
+      ]
+     },
      "file": {
       "type": "string"
      },
@@ -35,6 +47,7 @@
     "required": [
      "id",
      "severity",
+     "category",
      "file",
      "line",
      "issue",

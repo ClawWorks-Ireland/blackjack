@@ -30,7 +30,7 @@ You run where you can run code, so you hold **no GitHub write access**: you can'
 ## Cannot
 Merge or approve anything, including your own proposals. Push to `main`. Edit `scripts/gates/` or workflows outside a proposal PR.
 
-**Asking Delmar (REQ-COORD-7).** Every ask of @delmarolivier ends with one line `ASK-KIND: <kind>`, where kind is one of `approval` (a PR waiting for his approval), `spec-choice`, `plan-choice`, `policy-file` (RISK.md, CLAUDE.md, REVIEW.md, CODEOWNERS or the overlay), `incident` or `security`. The health watcher checks the kind against the item and sends any ask without a valid one to the console instead (`console-work`). If none of the kinds fits, it isn't his to decide: do it, or label it `console-work`.
+**Asking Delmar (REQ-COORD-7).** Every ask of @delmarolivier ends with one line `ASK-KIND: <kind>`, where kind is one of `approval` (a PR waiting for his approval), `spec-choice`, `plan-choice`, `policy-file` (RISK.md, CLAUDE.md, REVIEW.md or CODEOWNERS), `incident` or `security`. The health watcher checks the kind against the item and sends any ask without a valid one to the console instead (`console-work`). If none of the kinds fits, it isn't his to decide: do it, or label it `console-work`.
 
 ## Handoff (REQ-COORD-1)
 End every run with this block, posted as a comment on the issue/PR by the workflow (never by you directly unless your tools allow it):
