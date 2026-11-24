@@ -1,0 +1,56 @@
+diff --git a/scripts/gates/gate.js b/scripts/gates/gate.js
+index 5310699..a0c7940 100755
+--- a/scripts/gates/gate.js
++++ b/scripts/gates/gate.js
+@@ -371,7 +371,7 @@ commands['carry-over'] = async () => {
+   const since = await gh('GET', repo(`/compare/${base.merge_base_commit.sha}...${mainParent}`));
+   if ((since.files || []).length >= 300) return say(false, 'too many changes on main to check');
+   const mainPaths = (since.files || []).flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
+-  const refusal = G.carryOverRefusal(mainPaths);
++  const refusal = G.carryOverRefusal(mainPaths, args.context);
+   if (refusal) return say(false, refusal);
+   // A waiver is the owner's decision about this PR's changes in their context (home-automation#5, 2026-11-22: an
+   // automatic branch update discarded one). It carries only while main touched none of the files the PR changes.
+diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js
+index 1e79931..e87c362 100644
+--- a/scripts/gates/lib.js
++++ b/scripts/gates/lib.js
+@@ -685,10 +685,16 @@ function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHE
+  * Carry-over (gate.js carry-over) keeps an old verdict only if main didn't change the rules it was
+  * judged by: any policy path (REVIEW.md, RISK.md, the agents, the gates, the workflows) changed on
+  * main since the reviewed head's merge base means a fresh review (A7 sec-1 on blackjack#63).
++ * For the `security` verdict (team v2.23.8), only what A7 judges by counts: its definition, its workflow, the
++ * project's policy and instruction files and the gate scripts. A change to other agents, other workflows or the
++ * evals can't change A7's verdict, and resetting on it threw away the owner's waivers three times on
++ * home-automation#18 (2026-11-23). Code changes on main never reset any verdict, as before.
+  * Returns the refusal reason, or null if carrying over is allowed.
+  */
+-function carryOverRefusal(mainChangedPaths) {
+-  const hit = (mainChangedPaths || []).find((f) => POLICY_RE.test(f));
++const SECURITY_INPUTS_RE = /^(CLAUDE\.md|AGENTS\.md|REVIEW\.md|RISK\.md|CODEOWNERS|\.agents\/PROJECT\.md|\.claude\/agents\/security-reviewer\.md|\.claude\/settings[^/]*\.json|\.github\/workflows\/security\.yml|scripts\/gates\/)/;
++function carryOverRefusal(mainChangedPaths, context = 'ai-review') {
++  const re = context === 'security' ? SECURITY_INPUTS_RE : POLICY_RE;
++  const hit = (mainChangedPaths || []).find((f) => re.test(f));
+   return hit ? `main changed policy since the review (${hit})` : null;
+ }
+
+diff --git a/scripts/gates/lib.test.js b/scripts/gates/lib.test.js
+index 99c6a2b..4330564 100644
+--- a/scripts/gates/lib.test.js
++++ b/scripts/gates/lib.test.js
+@@ -882,3 +882,15 @@ test('pull_request_target workflows run main\'s code on PRs to main only (A7 sec
+     assert.ok(fs.readFileSync(path.join(dir, f), 'utf8').includes("github.event.pull_request.base.ref == 'main'"), `${f} acts on PRs to main only`);
+   }
+ });
++
++test('carry-over for security resets only on what A7 judges by (home-automation#18)', () => {
++  // home-automation#18: A10's push-guard fix (scripts/agents/, evals/) reset the security verdict and the owner's waivers
++  assert.equal(G.carryOverRefusal(['scripts/agents/push-guard.js', 'evals/review/12-x/case.md', '.claude/agents/planner.md', '.github/workflows/review.yml'], 'security'), null);
++  for (const p of ['REVIEW.md', 'RISK.md', 'CLAUDE.md', 'AGENTS.md', 'CODEOWNERS', '.agents/PROJECT.md', '.claude/agents/security-reviewer.md',
++    '.claude/settings.json', '.github/workflows/security.yml', 'scripts/gates/lib.js']) {
++    assert.match(G.carryOverRefusal(['web/app.js', p], 'security'), /main changed policy/, p);
++  }
++  // the AI review keeps the wide rule
++  assert.match(G.carryOverRefusal(['scripts/agents/push-guard.js']), /main changed policy/);
++  assert.match(G.carryOverRefusal(['evals/review/12-x/case.md'], 'ai-review'), /main changed policy/);
++});
