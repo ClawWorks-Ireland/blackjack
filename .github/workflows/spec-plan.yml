@@ -97,7 +97,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/${{ needs.route.outputs.role == 'spec' && 'spec-writer' || 'planner' }}.md --model opus ${{ (needs.route.outputs.role == 'plan' && github.event.label.name == 'needs-replan') && '--effort high --advisor fable' || '' }} --max-turns 50
             --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh label list:*)"
-            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,Bash(git push:*),Bash(gh pr:*)"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,Bash(git push:*),Bash(gh pr:*),SendMessage,ListAgents"
       - name: Slice check at plan time (REQ-FLOW-9; no model)
         # Flags this plan's slices that name an implementer policy path (needs-human) or no Files: line
         # (needs-replan) in the same run, before the orchestrator could dispatch them (blackjack#158).

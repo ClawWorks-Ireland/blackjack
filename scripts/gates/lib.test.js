@@ -849,6 +849,43 @@ test('securityWaiverState: one waiver never greens a PR with other findings (hom
   assert.deepEqual(st.open, ['sec-2', 'sec-3']);
 });
 
+test('securityWaiverState: an edited A7 comment\'s findings list is ignored (A7 sec-1 on SecurityClaw#32)', () => {
+  const S1 = '1'.repeat(40);
+  const real = { sha: S1, findings: [{ id: 'sec-1', category: 'secrets', file: 'b.js', blob: 'b1' }] };
+  const forged = { sha: S1, findings: [{ id: 'sec-1', category: 'other', file: 'a.js', blob: 'a1' }] };
+  // The forged list, edited into A7's comment, points sec-1 at a harmless file; the owner's waiver must not follow it.
+  const st = G.securityWaiverState({ owner: 'delmarolivier', current: real, comments: [
+    { login: 'github-actions[bot]', body: a7(forged), edited: true },
+    { login: 'delmarolivier', body: '/security-waive sec-1 the a.js one is fine' },
+  ] });
+  assert.deepEqual(st.unknown.map((u) => u.id), ['sec-1']);
+  assert.deepEqual(st.open, ['sec-1']);
+  // An honest older list for the same head doesn't stand in for an edited newer one (review of v2.28.1).
+  const c1 = { sha: S1, findings: [{ id: 'sec-1', category: 'other', file: 'a.js', blob: 'a1' }] };
+  const c2 = { sha: S1, findings: [{ id: 'sec-1', category: 'secrets', file: 'c.js', blob: 'c1' }, { id: 'sec-2', category: 'web', file: 'd.js', blob: 'd1' }] };
+  const swap = G.securityWaiverState({ owner: 'delmarolivier', current: c2, comments: [
+    { login: 'github-actions[bot]', body: a7(c1) },
+    { login: 'github-actions[bot]', body: a7(c1), edited: true },   // C2, edited to look harmless
+    { login: 'delmarolivier', body: '/security-waive sec-1 ok' },
+  ] });
+  assert.deepEqual(swap.unknown.map((u) => u.id), ['sec-1']);
+  assert.deepEqual(swap.open, ['sec-1', 'sec-2']);
+  // As posted, the same comment counts.
+  const ok = G.securityWaiverState({ owner: 'delmarolivier', current: real, comments: [
+    { login: 'github-actions[bot]', body: a7(real) },
+    { login: 'delmarolivier', body: '/security-waive sec-1 accepted' },
+  ] });
+  assert.deepEqual(ok.open, []);
+});
+
+test('uniqueFindingIds: a repeated id is renamed, never dropped (AI review on SecurityClaw#34)', () => {
+  const out = G.uniqueFindingIds([{ id: 'sec-1', severity: 'low', file: 'a.js' }, { id: 'sec-1', severity: 'high', file: 'b.js' }, { id: 'sec-1#2', file: 'c.js' }, null]);
+  assert.deepEqual(out.map((f) => f.id), ['sec-1', 'sec-1#3', 'sec-1#2']);
+  assert.equal(out[1].severity, 'high');
+  assert.deepEqual(G.uniqueFindingIds([{ id: 7 }, { id: '7' }]).map((f) => f.id), ['7', '7#2']);
+  assert.deepEqual(G.uniqueFindingIds(undefined), []);
+});
+
 test('securityWaiverState: no waiver counts on a PR that is not Tier 2 (G7)', () => {
   const cur = { sha: '1'.repeat(40), findings: [{ id: 'sec-1', category: 'web', file: 'app.js', blob: 'a1' }] };
   const comments = [
@@ -993,6 +1030,52 @@ test('mergeVerdict: behind main with only ai-review failing is a stale-review up
   assert.equal(G.mergeVerdict({ ...readyPr(), behindBy: 2 }).staleReview, false, 'all green: the plain behind case');
 });
 
+test('mergeVerdict: behind main with only a cancelled ci is a stale-ci update (SecurityClaw#27/#28)', () => {
+  const withCi = (conclusion, over = {}) => {
+    const p = readyPr(over);
+    p.checkRuns = p.checkRuns.map((c) => ({ ...c, conclusion }));
+    return p;
+  };
+  assert.equal(G.mergeVerdict({ ...withCi('cancelled'), behindBy: 1 }).staleCi, true);
+  assert.equal(G.mergeVerdict({ ...withCi('timed_out'), behindBy: 1 }).staleCi, true);
+  assert.equal(G.mergeVerdict({ ...withCi('failure'), behindBy: 1 }).staleCi, true);
+  assert.equal(G.mergeVerdict({ ...withCi('cancelled'), behindBy: 0 }).staleCi, false, 'up to date: an update would not re-run it');
+  assert.equal(G.mergeVerdict({ ...withCi('action_required'), behindBy: 1 }).staleCi, false, 'not a conclusion main can change');
+  const running = readyPr();
+  running.checkRuns = running.checkRuns.map((c) => ({ ...c, status: 'in_progress', conclusion: null }));
+  assert.equal(G.mergeVerdict({ ...running, behindBy: 1 }).staleCi, false, 'still running: wait for it');
+  const alsoReview = withCi('cancelled');
+  alsoReview.statuses = alsoReview.statuses.map((x) => (x.context === 'ai-review' ? { ...x, state: 'failure' } : x));
+  assert.equal(G.mergeVerdict({ ...alsoReview, behindBy: 1 }).staleCi, false, 'another gate failing too: not just a stale ci');
+  const closed = withCi('cancelled');
+  closed.pr = { ...closed.pr, state: 'closed' };
+  assert.equal(G.mergeVerdict({ ...closed, behindBy: 1 }).staleCi, false, 'never acts on a merged or closed PR');
+  assert.equal(G.mergeVerdict({ ...readyPr(), behindBy: 1 }).staleCi, false, 'all green: the plain behind case');
+});
+
+test('withRetry: a 504 then 201 succeeds; a 4xx and a merge are never retried (SecurityClaw#39)', async () => {
+  const run = async (codes, method, url) => {
+    let calls = 0; const slept = [];
+    const res = await G.withRetry(async () => ({ status: codes[Math.min(calls++, codes.length - 1)] }),
+      { method, url, sleep: async (ms) => { slept.push(ms); } });
+    return { status: res.status, calls, slept };
+  };
+  const st = '/repos/o/r/statuses/' + 'a'.repeat(40);
+  assert.deepEqual(await run([504, 201], 'POST', st), { status: 201, calls: 2, slept: [1000] });
+  assert.deepEqual(await run([422], 'POST', st), { status: 422, calls: 1, slept: [] }, 'a 4xx is final');
+  assert.deepEqual(await run([404, 200], 'GET', '/repos/o/r/pulls/1'), { status: 404, calls: 1, slept: [] });
+  assert.deepEqual(await run([502, 503, 504, 504, 200], 'GET', '/repos/o/r/pulls/1'),
+    { status: 504, calls: 4, slept: [1000, 2000, 4000] }, 'three retries, then the last response');
+  assert.deepEqual(await run([504, 200], 'PUT', '/repos/o/r/pulls/1/merge'), { status: 504, calls: 1, slept: [] }, 'never a merge');
+  assert.deepEqual(await run([504, 200], 'PUT', '/repos/o/r/pulls/1/update-branch'), { status: 504, calls: 1, slept: [] });
+  assert.deepEqual(await run([504, 201], 'POST', '/repos/o/r/issues/1/comments'), { status: 504, calls: 1, slept: [] }, 'a comment could post twice');
+  let n = 0;
+  const res = await G.withRetry(async () => { if (n++ === 0) throw new TypeError('fetch failed'); return { status: 200 }; },
+    { method: 'GET', url: '/x', sleep: async () => {} });
+  assert.equal(res.status, 200, 'a network error is retried');
+  await assert.rejects(G.withRetry(async () => { throw new TypeError('fetch failed'); }, { method: 'PUT', url: '/repos/o/r/pulls/1/merge', sleep: async () => {} }), /fetch failed/);
+});
+
 test('renderMatch: inherited Object keys are not team files (home-automation#12 ai-review)', () => {
   const blob = { blob: 'b', mode: '100644' };
   for (const p of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
@@ -1031,4 +1114,33 @@ test('carry-over for security resets only on what A7 judges by (home-automation#
   // the AI review keeps the wide rule
   assert.match(G.carryOverRefusal(['scripts/agents/push-guard.js']), /main changed policy/);
   assert.match(G.carryOverRefusal(['evals/review/12-x/case.md'], 'ai-review'), /main changed policy/);
+});
+
+test('ownerUnassign: only a console-made assignment, only once nothing asks him (team v2.28.2)', () => {
+  const owner = H.login;
+  const ev = (event, actor, assignee = owner) => ({ event, actor: { login: actor }, assignee: { login: assignee } });
+  const byConsole = [ev('labeled', 'clawworks-orchestrator[bot]'), ev('assigned', 'clawworks-console[bot]')];
+  const u = (o) => G.ownerUnassign({ isPr: false, labels: [], timeline: byConsole, ...o }, owner);
+  assert.equal(u({}).unassign, true);
+  // Still an ask, or an incident: stays in his queue.
+  for (const l of ['needs-human', 'status:awaiting-human', 'incident']) assert.equal(u({ labels: [{ name: l }] }).unassign, false, l);
+  assert.equal(u({ labels: [{ name: 'enhancement' }, { name: 'spec-approved' }] }).unassign, true);
+  // A PR: its assignment follows tier-approval, which the watcher tracks.
+  assert.equal(u({ isPr: true }).unassign, false);
+  // Assigned by hand (he or anyone but the console): never removed, even after a console assignment earlier.
+  assert.equal(u({ timeline: [ev('assigned', owner)] }).unassign, false);
+  assert.equal(u({ timeline: [...byConsole, ev('unassigned', 'clawworks-console[bot]'), ev('assigned', owner)] }).unassign, false);
+  // Not assigned to him any more, or only someone else is.
+  assert.equal(u({ timeline: [...byConsole, ev('unassigned', 'clawworks-console[bot]')] }).unassign, false);
+  assert.equal(u({ timeline: [ev('assigned', 'clawworks-console[bot]', 'someone-else')] }).unassign, false);
+  assert.equal(u({ timeline: [] }).unassign, false);
+});
+
+test('owner-unassign.yml: runs only when an ask label comes off an issue assigned to the owner', () => {
+  const y = fs.readFileSync(path.join(__dirname, '../../.github/workflows/owner-unassign.yml'), 'utf8');
+  assert.match(y, /types: \[unlabeled\]/);
+  assert.match(y, /"needs-human", "status:awaiting-human"/);
+  assert.match(y, /assignees\.\*\.login/);
+  assert.match(y, /ref: main/);
+  assert.match(y, /gate\.js owner-unassign --issue "\$ISSUE"/);
 });
