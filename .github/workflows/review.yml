@@ -38,7 +38,7 @@ jobs:
           fi
           node scripts/gates/gate.js status --sha "$SHA" --context ai-review --state pending --description "AI review running"
           TIER=$(node scripts/gates/gate.js floor --pr "$PR" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tier))')
-          if [ "$TIER" = "2" ]; then L='["logic","state","contract","performance","rules"]'; else L='["logic","state","contract"]'; fi
+          if [ "$TIER" = "2" ]; then L='["logic","state","contract","performance","rules"]'; else L='["logic","state","contract"]'; fi   # project type (REQ-OPS-17)
           LAST=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name|select(startswith("round:"))|ltrimstr("round:")|tonumber]|max // 0')
           # Rounds count the coder's changes: a pure branch update is re-reviewed in the same round.
           PURE=$(node scripts/gates/gate.js pure-update --pr "$PR" --sha "$SHA" || echo pure=false)
@@ -114,8 +114,8 @@ jobs:
             Policy: ./REVIEW.md and ./RISK.md (base branch). Number your findings ${{ matrix.lens }}-1, ${{ matrix.lens }}-2, …
           claude_args: >-
             --append-system-prompt-file .claude/agents/bug-hunter-${{ matrix.lens }}.md --model sonnet --max-turns 40
-            --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --allowedTools "Read,Grep,Glob${{ matrix.lens == 'fact-check' && ',WebFetch' || '' }}"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,${{ matrix.lens == 'fact-check' && '' || 'WebFetch,' }}WebSearch,Task,SendMessage,ListAgents"
             --json-schema '${{ steps.s.outputs.schema }}'
       - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
         continue-on-error: true   # a metric never fails the job
@@ -196,7 +196,7 @@ jobs:
           claude_args: >-
             --append-system-prompt-file .claude/agents/finding-verifier.md --model haiku --max-turns 40
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task"
+            --disallowedTools "Read(~/actions-runner*/.credentials*),Read(~/actions-runner*/.runner),Read(~/actions-runner*/.env),Read(~/.claude/**),Read(//proc/**),Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task,SendMessage,ListAgents"
             --json-schema '${{ steps.s.outputs.schema }}'
       - name: Team metrics (REQ-OPS-14; no model, read by the health watcher)
         continue-on-error: true   # a metric never fails the job

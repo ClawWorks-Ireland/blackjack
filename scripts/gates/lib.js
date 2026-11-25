@@ -16,6 +16,8 @@ const MERGE_BOT = 'clawworks-release-manager[bot]';   // spec §8.5: A9's own Ap
 const ORCH_BOT = 'clawworks-orchestrator[bot]';   // A0's own App: the ladder comments and dispatches as A0
 const REQUIRED_STATUSES = ['ai-review', 'security', 'tier-approval'];
 const REQUIRED_CHECK = 'ci';
+// ci conclusions that a branch update may cure (mergeVerdict staleCi). Not action_required, neutral or skipped.
+const STALE_CI_CONCLUSIONS = ['cancelled', 'timed_out', 'failure'];
 
 // ---------------------------------------------------------------- RISK.md
 
@@ -305,6 +307,9 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
   const ci = checkRuns.filter((c) => c.name === REQUIRED_CHECK && c.app && c.app.slug === 'github-actions' && c.head_sha === head);
   if (!ci.length) reasons.push('no "ci" check run on head');
   else if (!ci.every((c) => c.status === 'completed' && c.conclusion === 'success')) reasons.push('"ci" is not green');
+  // The ci runs that aren't green, all finished with a conclusion that a newer main might change (staleCi below).
+  const ciRed = ci.filter((c) => !(c.status === 'completed' && c.conclusion === 'success'));
+  const ciRerunnable = ciRed.length > 0 && ciRed.every((c) => c.status === 'completed' && STALE_CI_CONCLUSIONS.includes(c.conclusion));
   const appr = tierApprovalStatus({ tier, level, reviews, headSha: head, statuses });
   if (appr.state !== 'success') reasons.push(appr.description);
   if (tier === 2) {
@@ -319,7 +324,12 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
   // is a pure update (gate.js pure-update), re-reviewed in the same round, so A9 does it rather than asking H.
   // Once updated it isn't behind, so this fires at most once per change to main.
   const staleReview = behind && reasons.length > 0 && reasons.every((r) => r.startsWith('"ai-review" is failure'));
-  return { ok: reasons.length === 0 && !behind, behind: reasons.length === 0 && behind, staleReview, reasons };
+  // SecurityClaw#27/#28 (team v2.28.4): ci was cancelled at its timeout by a slow test on main, which main then fixed.
+  // On the same terms as staleReview: behind main, ci finished cancelled, timed_out or failure, and ci is the only
+  // failing gate. The pure update gives the head a new commit, so ci runs again; once updated the PR isn't behind,
+  // so this fires at most once per change to main. A merged or closed PR fails another gate, so it never fires.
+  const staleCi = behind && pr.state === 'open' && ciRerunnable && reasons.length > 0 && reasons.every((r) => r === '"ci" is not green');
+  return { ok: reasons.length === 0 && !behind, behind: reasons.length === 0 && behind, staleReview, staleCi, reasons };
 }
 
 // ---------------------------------------------------------------- main-guard
@@ -882,6 +892,22 @@ function inert(text) {
 // Other github-actions[bot] comments quote model text that a PR can steer (hunter claims, A8's rationale), so a
 // marker anywhere else, even in A7's own finding text, is not a finding list (A7 sec-1 on the v2.26.0 renders).
 const SECURITY_HEAD_RE = /^<!-- security -->\r?\n<!-- security-findings ([A-Za-z0-9+/=]+) -->\r?\n/;
+/**
+ * A7's findings with every id unique (team v2.28.1). A second finding that reuses an id is kept, renamed `<id>#2`
+ * (then #3…), so it is posted, counted and gated like any other and needs its own waiver. Before, it was dropped
+ * unseen, so a high-severity finding could hide behind a low one's id (AI review on SecurityClaw#34).
+ */
+function uniqueFindingIds(findings = []) {
+  const ids = new Set((findings || []).map((f) => String(f && f.id)));
+  const seen = new Set();
+  return (findings || []).filter((f) => f && typeof f === 'object').map((f) => {
+    let id = String(f.id);
+    if (seen.has(id)) { let k = 2; while (ids.has(`${id}#${k}`) || seen.has(`${id}#${k}`)) k++; id = `${id}#${k}`; }
+    seen.add(id);
+    return { ...f, id };
+  });
+}
+
 function readSecurityMarker(body = '') {
   const m = String(body).match(SECURITY_HEAD_RE);
   if (!m) return null;
@@ -913,7 +939,11 @@ function securityWaiverState({ comments = [], current, owner, botLogin = 'github
   const unknown = [];
   const edited = [];
   for (const c of comments) {
-    if (c.login === botLogin) { const m = readSecurityMarker(c.body); if (m) latest = m; continue; }
+    // A7's findings list counts only from its comment as posted: an App with issues:write could edit the marker to
+    // drop findings or point their ids elsewhere (A7 sec-1 on SecurityClaw#32, team v2.28.1). An edited one leaves no
+    // list at all, so later waivers are unknown: falling back to an older list would let them bind to findings A7
+    // has since replaced (review of v2.28.1).
+    if (c.login === botLogin) { const m = readSecurityMarker(c.body); if (m) latest = c.edited ? null : m; continue; }
     if (c.login !== owner || !waivable) continue;   // waivable: the PR is Tier 2 (G7)
     // An edited comment's waiver lines don't count: anyone with issues:write could have added them (A7 sec-1, v2.26.1).
     if (c.edited) { for (const w of parseWaiveCommands(c.body)) edited.push(w.id); continue; }
@@ -1102,13 +1132,66 @@ function dublinHour(now = new Date()) {
   return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Dublin', hour: '2-digit', hourCycle: 'h23' }).format(now));
 }
 
+/**
+ * Team v2.28.2 (H, 2026-11-24: "if I should not action it, it should not be assigned to me"). When an ask's label
+ * comes off an issue, unassign the owner at once instead of at the health watcher's next hourly run, but only:
+ *  - on an issue, not a PR (a PR's assignment follows its tier-approval, which the watcher's queue tracks);
+ *  - when no ask label is left and it isn't an incident (both stay in his queue);
+ *  - when his latest assignment there was made by the console App. The timeline API names the App as the
+ *    actor (the events API names him, blackjack#45), so an assignment he or anyone made by hand is never removed.
+ * timeline: the issue's timeline events, oldest first. Returns { unassign, why }.
+ */
+const OWNER_ASK_LABELS = ['needs-human', 'status:awaiting-human', 'incident'];
+const CONSOLE_APP_BOT = 'clawworks-console[bot]';
+function ownerUnassign({ isPr, labels, timeline }, owner = OWNER) {
+  if (isPr) return { unassign: false, why: 'a PR: its assignment follows tier-approval' };
+  const names = (labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+  const left = names.filter((n) => OWNER_ASK_LABELS.includes(n));
+  if (left.length) return { unassign: false, why: `still asks ${owner} (${left.join(', ')})` };
+  const last = (timeline || []).filter((e) => (e.event === 'assigned' || e.event === 'unassigned') && e.assignee && e.assignee.login === owner).pop();
+  if (!last || last.event !== 'assigned') return { unassign: false, why: `not assigned to ${owner}` };
+  if (!last.actor || last.actor.login !== CONSOLE_APP_BOT) return { unassign: false, why: `assigned by ${(last.actor && last.actor.login) || 'unknown'}, not the console: never removed` };
+  return { unassign: true, why: 'the ask ended and the console made the assignment' };
+}
+
+// ---------------------------------------------------------------- GitHub API retries
+
+/**
+ * SecurityClaw#39 (team v2.28.4): a one-off 504 from POST /statuses failed the template-render check and nothing
+ * re-ran it. Which calls may be retried: reads (GET, HEAD), DELETE, and status POSTs (a status is a "latest wins"
+ * record, so posting it twice is harmless). Never PUT (merge, update-branch), PATCH or any other POST.
+ */
+function retryableCall(method, url) {
+  const m = String(method).toUpperCase();
+  if (['GET', 'HEAD', 'DELETE'].includes(m)) return true;
+  return m === 'POST' && /\/statuses\/[^/?]+(\?|$)/.test(String(url));
+}
+const RETRY_STATUSES = [502, 503, 504];
+/**
+ * Run `attempt()` (one fetch, resolving to a Response) and retry a retryable call up to `retries` times, with
+ * backoff, on 502/503/504 or a network error (fetch rejects). A 4xx, or any other status, is returned at once.
+ * Returns the last Response; rethrows the last network error.
+ */
+async function withRetry(attempt, { method, url, retries = 3, delayMs = 1000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = () => {} } = {}) {
+  const may = retryableCall(method, url);
+  for (let i = 0; ; i++) {
+    let res; let err;
+    try { res = await attempt(); } catch (e) { err = e; }
+    const transient = err || RETRY_STATUSES.includes(res.status);
+    if (!transient || !may || i >= retries) { if (err) throw err; return res; }
+    log(`${method} ${url}: ${err ? `network error (${String(err.message).slice(0, 80)})` : res.status}; retry ${i + 1} of ${retries}`);
+    await sleep(delayMs * 2 ** i);
+  }
+}
+
 module.exports = {
-  digestStamp,
+  retryableCall, withRetry, STALE_CI_CONCLUSIONS,
+  digestStamp, ownerUnassign, OWNER_ASK_LABELS, CONSOLE_APP_BOT,
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
   ownerApproval, ownerReviewAction, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch, renderDirection, waiverCarries,
-  parseWaiveCommands, securityMarker, readSecurityMarker, inert, securityWaiverState,
+  parseWaiveCommands, securityMarker, readSecurityMarker, uniqueFindingIds, inert, securityWaiverState,
   trustedStatuses, qaCoveredPrs, runnerLost, qaRetryAction, qaReportPlan, releaseRetryAction, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
   dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, deniedTools, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, slicePolicyCheck, sliceCheckResult, sliceCheckActions, SLICE_CHECK_BOTS, CODER_BOTS, fixRoundRefusal, supersededSlicePrs, closeSuperseded, parseManualChecks, t3Verdict,
 };

@@ -23,7 +23,7 @@ function claude(cwd, agent, model, prompt, schemaJson) {
   return new Promise((resolve) => {
     // Same as review.yml: the role is an appended system prompt (`--agent` disables --json-schema).
     const p = spawn('claude', ['-p', prompt, '--append-system-prompt-file', `.claude/agents/${agent}.md`, '--model', model, '--max-turns', '40',
-      '--allowedTools', 'Read,Grep,Glob', '--disallowedTools', 'Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task',
+      '--allowedTools', 'Read,Grep,Glob', '--disallowedTools', 'Edit,Write,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,Task,SendMessage,ListAgents',
       '--json-schema', schemaJson, '--output-format', 'json'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; });
