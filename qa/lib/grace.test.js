@@ -156,3 +156,61 @@ test('grace: graceMs option moves the late boundary', async () => {
   assert.equal(r.pass, false);
   assert.equal(r.reason, 'harness-late');
 });
+
+test('grace: pressMs under 500 but handledMs 500 or more is late', () => {
+  assert.equal(classify({ open: true, pressMs: 100, handledMs: 500, dealt: 1 }), 'late');
+  assert.equal(classify({ open: true, pressMs: 100, handledMs: 900, dealt: 0 }), 'late');
+});
+
+test('grace: handledMs missing keeps the pressMs-only rule', () => {
+  assert.equal(classify({ open: true, pressMs: 499, handledMs: undefined, dealt: 1 }), 'dealt-one');
+  assert.equal(classify({ open: true, pressMs: 499, handledMs: null, dealt: 1 }), 'dealt-one');
+  assert.equal(classify({ open: true, pressMs: 499, dealt: 1 }), 'dealt-one');
+});
+
+test('grace: dealt-one only when pressMs and handledMs are both under 500', () => {
+  assert.equal(classify({ open: true, pressMs: 499, handledMs: 499, dealt: 1 }), 'dealt-one');
+  assert.equal(classify({ open: true, pressMs: 499, handledMs: 500, dealt: 1 }), 'late');
+  assert.equal(classify({ open: true, pressMs: 500, handledMs: 400, dealt: 1 }), 'late');
+  assert.equal(classify({ open: true, pressMs: 100, handledMs: 101, dealt: 0 }), 'no-deal');
+  assert.equal(classify({ open: true, pressMs: 100, handledMs: 101, dealt: 2 }), 'two-deals');
+});
+
+test('grace: a press late only by handledMs is retried and passes on a later in-window attempt', async () => {
+  const s = scripted([
+    { open: true, pressMs: 100, handledMs: 650, dealt: 0 },
+    { open: true, pressMs: 90, handledMs: 120, dealt: 1 },
+  ]);
+  const r = await runGraceCheck(s.attempt);
+  assert.equal(r.pass, true);
+  assert.equal(r.attempts, 2);
+  assert.equal(r.handledMs, 120);
+  assert.deepEqual(r.history, [
+    { pressMs: 100, handledMs: 650, outcome: 'late' },
+    { pressMs: 90, handledMs: 120, outcome: 'dealt-one' },
+  ]);
+});
+
+test('grace: three presses late by handledMs fail with harness-late and keep handledMs in history', async () => {
+  const s = scripted([
+    { open: true, pressMs: 100, handledMs: 600, dealt: 1 },
+    { open: true, pressMs: 110, handledMs: 700, dealt: 1 },
+    { open: true, pressMs: 120, handledMs: 800, dealt: 1 },
+  ]);
+  const r = await runGraceCheck(s.attempt);
+  assert.equal(r.pass, false);
+  assert.equal(r.reason, 'harness-late');
+  assert.equal(r.attempts, 3);
+  assert.equal(r.handledMs, 800);
+  assert.deepEqual(r.history.map((h) => h.handledMs), [600, 700, 800]);
+});
+
+test('grace: forced late (graceMs 1) fails with harness-late after 3 attempts', async () => {
+  const s = scripted([{ open: true, pressMs: 5, handledMs: 6, dealt: 1 }]);
+  const r = await runGraceCheck(s.attempt, { graceMs: 1 });
+  assert.equal(r.pass, false);
+  assert.equal(r.reason, 'harness-late');
+  assert.equal(r.attempts, 3);
+  assert.equal(r.history.length, 3);
+  for (const h of r.history) assert.deepEqual(h, { pressMs: 5, handledMs: 6, outcome: 'late' });
+});
