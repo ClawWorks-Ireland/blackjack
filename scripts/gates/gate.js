@@ -69,7 +69,7 @@ async function gh(method, url, body) {
   }), { method, url, log: console.error });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(`${method} ${url} → ${res.status}: ${data && data.message}`);
+  if (!res.ok) { const e = new Error(`${method} ${url} → ${res.status}: ${data && data.message}`); e.status = res.status; throw e; }
   return data;
 }
 async function all(url) {
@@ -120,7 +120,11 @@ async function prFacts(n) {
   // The closing slice's QA: line (REQ-COORD-10): the first issue the PR closes that has one.
   let qa = null;
   for (const i of G.closingIssues(pr.body)) {
-    try { const q = G.qaLine((await gh('GET', repo(`/issues/${i}`))).body); if (q) { qa = { ...q, issue: i }; break; } } catch { /* not readable: no QA line */ }
+    // Only an issue that isn't there (404, 410) has no QA line. Any other error fails the gate closed: before, a 5xx
+    // here read as "no QA line", so tier-approval passed a Tier 0 PR with no QA round (finance-insights#69's review).
+    let body;
+    try { body = (await gh('GET', repo(`/issues/${i}`))).body; } catch (e) { if (e.status === 404 || e.status === 410) continue; throw e; }
+    const q = G.qaLine(body); if (q) { qa = { ...q, issue: i }; break; }
   }
   return { pr, paths, floor, byPath, tier, reviews, qa };
 }
@@ -636,7 +640,9 @@ async function roundCap(n, from, round = null) {
   const comments = await all(repo(`/issues/${n}/comments`));
   const handled = comments.some((c) => G.fromGateBot(c) && String(c.body || '').includes(G.ROUND_CAP_MARKER));   // a look-alike counts for nothing
   const plan = G.roundCapPlan({ pr, round: round || labelRound(pr), comments: [], from, runUrl: RUN_URL });
-  if (!plan || (handled && !plan.close)) { console.log(`round-cap: nothing to do on #${n} (under the cap, or already handled)`); return; }
+  // A capped PR with no slice is finished by its console-work label: a retry adds it again if the first run failed
+  // after its comment (finance-insights#69's review). Labels add idempotently.
+  if (!plan || (handled && !plan.close && !plan.prLabels.length)) { console.log(`round-cap: nothing to do on #${n} (under the cap, or already handled)`); return; }
   if (handled) console.log(`round-cap: #${n} was capped but is still open; finishing the escalation`);
   else await gh('POST', repo(`/issues/${n}/comments`), { body: plan.prComment });
   if (plan.prLabels.length) await gh('POST', repo(`/issues/${n}/labels`), { labels: plan.prLabels });
