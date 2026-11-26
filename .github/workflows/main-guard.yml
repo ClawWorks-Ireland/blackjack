@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '53 * * * *'   # sweep: catches pushes that triggered no workflow (e.g. GITHUB_TOKEN pushes)
+    - cron: '53 * * * *'   # this project's slot of the hour (render.js); sweep: catches pushes that triggered no workflow (e.g. GITHUB_TOKEN pushes)
   workflow_dispatch:
 permissions:
   contents: read

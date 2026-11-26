@@ -2,6 +2,9 @@
 # overlay's qa_command; skipped if it has none) against the latest main on a sandbox VM with headless Chrome,
 # and record the result as a `qa` status on the commit and a comment on every PR merged since the last round. A feature is Done only
 # after its acceptance criteria are verified (G12); for UI work this round is that record. No model.
+# A round on a PR head (REQ-COORD-10, team v2.32): orchestrator.yml's model-free qa-sweep job dispatches it with the
+# slice's `QA:` script and arguments once the PR's other gates are green. The report goes on that PR, and
+# tier-approval waits for it, so the evidence exists before Delmar approves (it was console work before).
 name: qa
 on:
   push:
@@ -9,6 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       sha: { description: 'Commit to test (default: main)', required: false, default: '' }
+      script: { description: "A slice's QA script under qa/ (default: the overlay's qa_command)", required: false, default: '' }
+      args: { description: 'Arguments for the script, after the commit (plain words)', required: false, default: '' }
+      pr: { description: 'The PR whose head this round tests (its report goes there)', required: false, default: '' }
 permissions:
   contents: read
 # One round at a time on main (team v2.11.3): GitHub keeps one pending run per group, so a newer merge
@@ -29,30 +35,43 @@ jobs:
       result: ${{ steps.r.outputs.result }}
     steps:
       - id: s
-        env: { IN_SHA: "${{ inputs.sha }}", PUSH_SHA: "${{ github.sha }}" }
+        env: { IN_SHA: "${{ inputs.sha }}", PUSH_SHA: "${{ github.sha }}", IN_SCRIPT: "${{ inputs.script }}", IN_ARGS: "${{ inputs.args }}", IN_PR: "${{ inputs.pr }}" }
         run: |
           S="${IN_SHA:-$PUSH_SHA}"
           [[ "$S" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::bad sha: $S"; exit 1; }
+          # The same rules as lib.js qaLine: a script under qa/, plain-word arguments, a PR number.
+          if [ -n "$IN_SCRIPT" ]; then
+            [[ "$IN_SCRIPT" =~ ^qa/[A-Za-z0-9._/-]+\.(js|mjs|cjs|sh)$ && "$IN_SCRIPT" != *..* ]] || { echo "::error::bad script: $IN_SCRIPT"; exit 1; }
+          fi
+          [[ "$IN_ARGS" =~ ^[A-Za-z0-9._:=,/@+\ -]*$ ]] || { echo "::error::bad args"; exit 1; }
+          [[ "$IN_PR" =~ ^[0-9]*$ ]] || { echo "::error::bad pr: $IN_PR"; exit 1; }
           echo "sha=$S" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-        if: env.QA_COMMAND != ''
+        if: env.QA_COMMAND != '' || inputs.script != ''
         with: { ref: "${{ steps.s.outputs.sha }}", persist-credentials: false }
       - uses: actions/setup-node@v4
-        if: env.QA_COMMAND != ''
+        if: env.QA_COMMAND != '' || inputs.script != ''
         with: { node-version: 22 }
       - id: r
         name: QA round
+        env: { SCRIPT: "${{ inputs.script }}", ARGS: "${{ inputs.args }}", SHA: "${{ steps.s.outputs.sha }}" }
         run: |
-          if [ -z "$QA_COMMAND" ]; then echo "result=skipped" >> "$GITHUB_OUTPUT"; echo "no qa_command in the overlay"; exit 0; fi
+          if [ -z "$QA_COMMAND" ] && [ -z "$SCRIPT" ]; then echo "result=skipped" >> "$GITHUB_OUTPUT"; echo "no qa_command in the overlay"; exit 0; fi
           set +e
-          bash -c "$QA_COMMAND" 2>&1 | tee qa-output.txt
+          if [ -n "$SCRIPT" ]; then
+            read -ra EXTRA <<< "$ARGS"   # validated plain words
+            case "$SCRIPT" in *.sh) RUNNER=bash ;; *) RUNNER=node ;; esac
+            "$RUNNER" "$SCRIPT" "$SHA" "${EXTRA[@]}" 2>&1 | tee qa-output.txt
+          else
+            bash -c "$QA_COMMAND" 2>&1 | tee qa-output.txt
+          fi
           rc=${PIPESTATUS[0]}
           set -e
           case "$rc" in 0) R=pass ;; 1) R=fail ;; *) R=error ;; esac
           echo "result=$R" >> "$GITHUB_OUTPUT"
           echo "exit=$rc" > qa-exit.txt
       - uses: actions/upload-artifact@v4
-        if: always() && env.QA_COMMAND != ''
+        if: always() && (env.QA_COMMAND != '' || inputs.script != '')
         with:
           name: qa-${{ steps.s.outputs.sha }}
           path: |
@@ -79,4 +98,5 @@ jobs:
           SHA: ${{ needs.qa.outputs.sha }}
           RESULT: ${{ needs.qa.outputs.result || 'error' }}
           RUN_ID: ${{ github.run_id }}
-        run: node scripts/gates/gate.js qa-report --sha "$SHA" --result "$RESULT" --dir qa-out --run "$RUN_ID"
+          PR: ${{ inputs.pr }}
+        run: node scripts/gates/gate.js qa-report --sha "$SHA" --result "$RESULT" --dir qa-out --run "$RUN_ID" ${PR:+--pr "$PR"}

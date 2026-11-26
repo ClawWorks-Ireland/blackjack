@@ -34,6 +34,7 @@
 .github/workflows/main-guard.yml
 .github/workflows/merge.yml
 .github/workflows/orchestrator.yml
+.github/workflows/owner-changes.yml
 .github/workflows/owner-unassign.yml
 .github/workflows/pool-canary.yml
 .github/workflows/qa.yml
@@ -58,6 +59,7 @@ scripts/gates/guard-commits.test.js
 scripts/gates/lib.js
 scripts/gates/lib.test.js
 scripts/gates/package.json
+scripts/gates/round-cap.test.js
 scripts/gates/runners.test.js
 scripts/gates/slice-check.test.js
 scripts/rollback

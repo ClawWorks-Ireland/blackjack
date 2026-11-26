@@ -423,6 +423,7 @@ test('A10 proposals: team files go to the template, project files stay (team v2.
     { team: ['scripts/gates/lib.js', '.agents/SPEC.md'], project: ['evals/review/18/case.md'], generated: ['.agents/TEAM_FILES'] });
   assert.equal(G.templatePathFor('.agents/SPEC.md'), '.agents/SPEC.md');
   assert.equal(G.templatePathFor('scripts/gates/lib.js'), 'team/scripts/gates/lib.js');
+  assert.equal(G.templatePathFor('.claude/agents/planner.md'), 'team/agents/planner.md', '#337: agent sources live in team/agents/');
   const patch = ['diff --git a/scripts/gates/lib.js b/scripts/gates/lib.js', 'index 1..2 100644', '--- a/scripts/gates/lib.js', '+++ b/scripts/gates/lib.js',
     '@@ -1 +1 @@', '-const a = 1;', '+const a = 2;', 'diff --git a/x.js b/y.js', 'rename from x.js', 'rename to y.js', '--- /dev/null'].join('\n');
   const out = G.retargetPatch(patch, G.templatePathFor).split('\n');
@@ -594,7 +595,44 @@ test('slicePolicyCheck flags policy files (AC1)', () => {
 
 test('slicePolicyCheck ignores paths outside the Files line (AC2)', () => {
   const body = 'Part of #48\n\n**Change:** edit only docs. Don\'t touch `scripts/gates/lib.js:574` or `.agents/SETUP_REPORT.md`.\n\nFiles: `docs/x.md`\nFiles: `RISK.md`\n';
-  assert.deepEqual(G.slicePolicyCheck(body), { files: ['docs/x.md'], policy: [], missing: false });
+  assert.deepEqual(G.slicePolicyCheck(body), { files: ['docs/x.md'], policy: [], missing: false, consoleNoReason: false });
+});
+
+// agent-team-template#290: blackjack#230 was a console slice for a QA round on a PR head, with no CONSOLE-REASON.
+test('slicePolicyCheck: a console slice without a CONSOLE-REASON is refused and goes back to the planner', () => {
+  const bj230 = 'Part of #225\n\nFiles: `qa/reports/b99-225.md`\n\nImplementer: console (REQ-COORD-6). It needs a browser and a local server; no policy paths.\n';
+  const c = G.slicePolicyCheck(bj230);
+  assert.equal(c.consoleNoReason, true);
+  assert.equal(G.sliceCheckResult(c), 'ok=false reason=console-no-reason');
+  const a = G.sliceCheckActions(c, { labels: [{ name: 'console-work' }, { name: 'status:planned' }] });
+  assert.deepEqual([a.addLabels, a.removeLabels], [['needs-replan'], ['console-work', 'status:planned']]);
+  assert.match(a.comment, /<!-- slice-check: console-no-reason -->/);
+  assert.match(a.comment, /`QA: qa\/<script> \[args\]`/);
+  assert.doesNotMatch(a.comment, /@/, 'no @-mention of the owner');
+  const again = G.sliceCheckActions(c, { labels: ['needs-replan'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
+  assert.deepEqual([again.addLabels, again.removeLabels, again.comment], [[], [], null]);
+  // the label alone marks it for the console too
+  assert.equal(G.slicePolicyCheck('Files: `docs/x.md`', { labels: [{ name: 'console-work' }] }).consoleNoReason, true);
+  // a valid reason, in the body or a later comment, lets it through
+  assert.equal(G.slicePolicyCheck(`${bj230}\nCONSOLE-REASON: pc\n`).consoleNoReason, false);
+  assert.equal(G.slicePolicyCheck(bj230, { comments: [{ body: 'Needs the runner pool.\nCONSOLE-REASON: pc' }] }).consoleNoReason, false);
+  // not a reason: an unknown word, or the line inside prose
+  assert.equal(G.slicePolicyCheck(`${bj230}\nCONSOLE-REASON: browser\n`).consoleNoReason, true);
+  assert.equal(G.slicePolicyCheck(`${bj230}\nsee CONSOLE-REASON: pc\n`).consoleNoReason, true);
+  // the usual implementers, and "console" elsewhere in the text, are not console slices
+  assert.equal(G.slicePolicyCheck('Files: `a.js`\nImplementer: impl:local\nChange: log to the console').consoleNoReason, false);
+  // agent-team-template#298: botversusbot.com#81 named the console only in its reason, which isn't the implementer
+  const bvb81 = 'Files: `playwright.config.ts`\nImplementer: impl:claude. Reason: the slice\'s only file is a Tier 2 path. It is not a policy path (REQ-FLOW-9), so it\'s an implementer\'s slice, not console work.\n';
+  assert.equal(G.slicePolicyCheck(bvb81).consoleNoReason, false);
+  assert.equal(G.sliceCheckResult(G.slicePolicyCheck(bvb81)), 'ok=true');
+  assert.equal(G.slicePolicyCheck('Files: `a.js`\nImplementer: impl:claude, not the console\n').consoleNoReason, false);
+  assert.equal(G.slicePolicyCheck('Files: `a.js`\nImplementer: impl:claude (Reason: console work avoided)\n').consoleNoReason, false);
+  // the console itself, however it is written, still is one
+  assert.equal(G.slicePolicyCheck('Files: `a.js`\nImplementer: human (console)\n').consoleNoReason, true);
+  assert.equal(G.slicePolicyCheck('Files: `a.js`\nImplementer: Console\n').consoleNoReason, true);
+  // a policy path still wins: team files are team work whatever the Implementer line says
+  assert.match(G.sliceCheckResult(G.slicePolicyCheck('Files: `evals/x.md`\nImplementer: console')), /reason=policy/);
+  assert.deepEqual(G.SLICE_CONSOLE_REASONS, ['pc', 'identity', 'private-data', 'stuck']);
 });
 
 test('slicePolicyCheck reports a missing Files line (AC3)', () => {
@@ -604,18 +642,19 @@ test('slicePolicyCheck reports a missing Files line (AC3)', () => {
   assert.equal(G.sliceCheckResult(G.slicePolicyCheck('')), 'ok=false reason=no-files');
 });
 
-test('sliceCheckActions: team files and evals are console work; project policy files ask the owner (REQ-COORD-6)', () => {
+test('sliceCheckActions: team files and evals are team work for A10 (REQ-OPS-18); project policy files ask the owner', () => {
   const evals = G.slicePolicyCheck('Files: `evals/review/README.md`');
-  const a = G.sliceCheckActions(evals, { labels: [{ name: 'status:planned' }, { name: 'needs-human' }], comments: [] });
-  assert.deepEqual([a.addLabels, a.removeLabels], [['console-work'], ['needs-human', 'status:planned']]);
+  const a = G.sliceCheckActions(evals, { labels: [{ name: 'status:planned' }, { name: 'needs-human' }, { name: 'console-work' }], comments: [] });
+  assert.deepEqual([a.addLabels, a.removeLabels], [['team-improve'], ['needs-human', 'status:planned', 'console-work']]);
   assert.match(a.comment, /<!-- slice-check: console -->/);
-  assert.doesNotMatch(a.comment, /@/, 'no @-mention of the owner for console work');
+  assert.match(a.comment, /team work/);
+  assert.doesNotMatch(a.comment, /@/, 'no @-mention of the owner for team work');
   const team = G.sliceCheckActions(G.slicePolicyCheck('Files: `scripts/gates/lib.js`, `.github/workflows/qa.yml`'), { teamFiles: ['scripts/gates/lib.js'] });
-  assert.deepEqual(team.addLabels, ['console-work']);
-  // team v2.24: the overlay is rendered from the template (listed in TEAM_FILES), so changing it is console work
+  assert.deepEqual(team.addLabels, ['team-improve']);
+  // team v2.24: the overlay is rendered from the template (listed in TEAM_FILES), so changing it is team work there
   const ovl = G.sliceCheckActions(G.slicePolicyCheck('Files: `.agents/PROJECT.md`'), { teamFiles: ['.agents/PROJECT.md'] });
-  assert.deepEqual(ovl.addLabels, ['console-work']);
-  const again = G.sliceCheckActions(evals, { labels: ['console-work'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
+  assert.deepEqual(ovl.addLabels, ['team-improve']);
+  const again = G.sliceCheckActions(evals, { labels: ['team-improve'], comments: [{ user: { login: 'github-actions[bot]' }, body: a.comment }] });
   assert.deepEqual([again.addLabels, again.comment], [[], null]);
   // a project policy file is the owner's decision
   const risk = G.sliceCheckActions(G.slicePolicyCheck('Files: `RISK.md`, `engine/x.js`'), { labels: [{ name: 'status:planned' }] });
@@ -1143,4 +1182,135 @@ test('owner-unassign.yml: runs only when an ask label comes off an issue assigne
   assert.match(y, /assignees\.\*\.login/);
   assert.match(y, /ref: main/);
   assert.match(y, /gate\.js owner-unassign --issue "\$ISSUE"/);
+});
+
+test('REQ-COORD-10: a slice QA: line names a script under qa/ and plain-word arguments', () => {
+  assert.deepEqual(G.qaLine('Part of #225\nQA: qa/run-round.js b99 --runs=10\nFiles: x'), { script: 'qa/run-round.js', args: ['b99', '--runs=10'] });
+  assert.equal(G.qaLine('no line here'), null);
+  assert.match(G.qaLine('QA: scripts/x.js').error, /under qa\//);
+  assert.match(G.qaLine('QA: qa/../x.js').error, /under qa\//);
+  assert.match(G.qaLine('QA: qa/x.js $(id)').error, /plain words/);
+  assert.match(G.qaLine('QA: qa/x.js ' + Array(10).fill('a').join(' ')).error, /at most 8/);
+  assert.deepEqual(G.closingIssues('Closes #225\nfixes: #7\nsee #9'), [225, 7]);
+});
+
+test('REQ-COORD-10: tier-approval waits for a green QA round before any approval counts', () => {
+  const head = 'd'.repeat(40);
+  const st = (context, state, login = 'github-actions[bot]') => ({ context, state, creator: { login }, updated_at: '2026-11-25T10:00:00Z' });
+  const qa = { script: 'qa/run-round.js', args: [] };
+  const wait = G.tierApprovalStatus({ tier: 2, level: 0, reviews: [], headSha: head, statuses: [], qa });
+  assert.equal(wait.state, 'pending'); assert.equal(wait.qaWait, true); assert.match(wait.description, /Waiting for the QA round on ddddddd/);
+  assert.ok(!/waiting for @/.test(wait.description), 'not waiting for him: no queue item, no review request');
+  assert.match(G.tierApprovalStatus({ tier: 2, level: 0, reviews: [], headSha: head, statuses: [st('qa', 'failure')], qa }).description, /failed/);
+  assert.equal(G.tierApprovalStatus({ tier: 2, level: 0, reviews: [], headSha: head, statuses: [st('qa', 'success', 'clawworks-console[bot]')], qa }).qaWait, true, 'only the gate bot');
+  const after = G.tierApprovalStatus({ tier: 2, level: 0, reviews: [], headSha: head, statuses: [st('qa', 'success')], qa });
+  assert.equal(after.qaWait, undefined); assert.equal(after.state, 'pending');   // now waiting for him
+  assert.equal(G.tierApprovalStatus({ tier: 0, level: 4, reviews: [], headSha: head, statuses: [], qa }).state, 'pending', 'a Tier 0 slice that needs no approval still waits');
+  assert.equal(G.tierApprovalStatus({ tier: 0, level: 4, reviews: [], headSha: head, statuses: [] }).state, 'success', 'no QA line: unchanged');
+  assert.match(G.tierApprovalStatus({ tier: 0, level: 0, reviews: [], headSha: head, statuses: [], qa: { error: 'x' } }).description, /re-plans/);
+});
+
+test('REQ-COORD-10: the qa-sweep dispatches once, after ci, ai-review and security are green', () => {
+  const head = 'e'.repeat(40);
+  const pr = { state: 'open', draft: false, head: { sha: head } };
+  const st = (context, state) => ({ context, state, creator: { login: 'github-actions[bot]' }, updated_at: '2026-11-25T10:00:00Z' });
+  const ci = [{ name: 'ci', app: { slug: 'github-actions' }, head_sha: head, status: 'completed', conclusion: 'success' }];
+  const qa = { script: 'qa/run-round.js', args: [] };
+  const green = [st('ai-review', 'success'), st('security', 'success')];
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: green, checkRuns: ci }).dispatch, true);
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: [...green, st('qa', 'pending')], checkRuns: ci }).dispatch, false, 'already queued');
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: [st('ai-review', 'success')], checkRuns: ci }).dispatch, false, 'security not green');
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: green, checkRuns: [] }).dispatch, false, 'no ci');
+  assert.equal(G.qaDispatchDecision({ qa, pr: { ...pr, draft: true }, statuses: green, checkRuns: ci }).dispatch, false, 'draft');
+  assert.equal(G.qaDispatchDecision({ qa: null, pr, statuses: green, checkRuns: ci }).dispatch, false);
+  assert.equal(G.qaDispatchDecision({ qa: { error: 'bad' }, pr, statuses: green, checkRuns: ci }).dispatch, false);
+});
+
+test('#404: a QA round that did not pass is re-run once or sent to a fix round, never a dead end', () => {
+  const head = 'f'.repeat(40);
+  const pr = { state: 'open', draft: false, head: { sha: head } };
+  let t = 0;
+  const st = (context, state, login = 'github-actions[bot]') => ({ context, state, creator: { login }, updated_at: `2026-11-26T10:${String(t++).padStart(2, '0')}:00Z` });
+  const ci = [{ name: 'ci', app: { slug: 'github-actions' }, head_sha: head, status: 'completed', conclusion: 'success' }];
+  const qa = { script: 'qa/run-round.js', args: [] };
+  const green = [st('ai-review', 'success'), st('security', 'success')];
+  // failure: a fix round, once per head
+  const failed = [...green, st('qa', 'pending'), st('qa', 'failure')];
+  const f = G.qaDispatchDecision({ qa, pr, statuses: failed, checkRuns: ci });
+  assert.equal(f.fix, true); assert.equal(f.dispatch, false);
+  const f2 = G.qaDispatchDecision({ qa, pr, statuses: failed, checkRuns: ci, comments: [{ body: `${G.QA_FIX_MARKER(head)}\nROLE: Orchestrator` }] });
+  assert.ok(!f2.fix, 'marker present: not started twice');
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: failed, checkRuns: ci, comments: [{ body: G.QA_FIX_MARKER('a'.repeat(40)) }] }).fix, true, 'another head\'s marker does not count');
+  // error: re-run once, then stuck
+  const err1 = [...green, st('qa', 'pending'), st('qa', 'error')];
+  const e1 = G.qaDispatchDecision({ qa, pr, statuses: err1, checkRuns: ci });
+  assert.equal(e1.dispatch, true); assert.equal(e1.rerun, true);
+  const err2 = [...err1, st('qa', 'pending'), st('qa', 'error')];
+  const e2 = G.qaDispatchDecision({ qa, pr, statuses: err2, checkRuns: ci });
+  assert.equal(e2.dispatch, false); assert.equal(e2.stuck, true);
+  assert.ok(!G.qaDispatchDecision({ qa, pr, statuses: err2, checkRuns: ci, comments: [{ body: G.QA_STUCK_MARKER(head) }] }).stuck, 'stuck reported once');
+  // an error status from anyone but the gate bot is not counted, and the re-run still needs the other gates green
+  const forged = [...green, st('qa', 'error'), st('qa', 'error', 'someone')];
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: forged, checkRuns: ci }).rerun, true);
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: err1, checkRuns: [] }).dispatch, false, 're-run waits for ci');
+  // pending and success are unchanged
+  assert.equal(G.qaDispatchDecision({ qa, pr, statuses: [...green, st('qa', 'success')], checkRuns: ci }).dispatch, false);
+  // the round cap names the QA round
+  const cap = G.roundCapPlan({ pr: { number: 9, body: 'Closes #4' }, round: 3, from: 'qa' });
+  assert.match(cap.prComment, /QA round still fails/);
+});
+
+test('REQ-COORD-10: exactly one workflow starts the fix round for a head (SecurityClaw#21)', () => {
+  assert.equal(G.fixRoundFrom({ from: 'review', important: 2, security: 'success' }), true);
+  assert.equal(G.fixRoundFrom({ from: 'review', important: 0, security: 'failure' }), true, 'A7 blocked first: review starts it');
+  assert.equal(G.fixRoundFrom({ from: 'review', important: 0, security: 'pending' }), false);
+  assert.equal(G.fixRoundFrom({ from: 'security', security: 'failure', aiReview: 'success' }), true, 'review passed first: A7 starts it');
+  assert.equal(G.fixRoundFrom({ from: 'security', security: 'failure', aiReview: 'failure' }), false, 'review already started one');
+  assert.equal(G.fixRoundFrom({ from: 'security', security: 'failure', aiReview: 'pending' }), false, 'review decides when it finishes');
+  assert.equal(G.fixRoundFrom({ from: 'security', security: 'success', aiReview: 'success' }), false);
+});
+
+test('REQ-FLOW-1: the round cap sends the slice back to A2 at once, never an ask of the owner (SecurityClaw#44)', () => {
+  const pr = { number: 44, body: 'Slice 2/4.\n\nCloses #12\n' };
+  assert.equal(G.roundCapPlan({ pr, round: 2 }), null, 'under the cap: the next round is a fix round');
+  const p = G.roundCapPlan({ pr, round: 3, runUrl: 'https://x/run/1' });
+  assert.equal(p.issue, 12);
+  assert.deepEqual(p.issueLabels, ['needs-replan', 'status:blocked']);
+  assert.equal(p.close, true, 'the capped PR is closed; its branch stays as evidence');
+  assert.ok(p.prComment.startsWith(G.ROUND_CAP_MARKER));
+  assert.match(p.issueComment, /A2 Planner/);
+  for (const c of [p.prComment, p.issueComment]) {
+    assert.doesNotMatch(c, /@|ASK-KIND|needs-human/, 'no mention or ask of the owner');
+  }
+  assert.match(G.roundCapPlan({ pr, round: 3, from: 'security' }).prComment, /A7 still blocks it/);
+  assert.equal(G.roundCapPlan({ pr, round: 4 }).issue, 12, 'a 4th push at the cap escalates the same way');
+  assert.equal(G.roundCapPlan({ pr, round: 3, comments: [{ body: p.prComment }] }), null, 'handled once');
+  const none = G.roundCapPlan({ pr: { number: 9, body: 'Re-render to team v2.36.0' }, round: 3 });
+  assert.equal(none.issue, null);
+  assert.deepEqual(none.prLabels, ['console-work']);
+  assert.equal(none.close, false);
+  assert.match(none.prComment, /^CONSOLE-REASON: stuck$/m, 'console work carries its reason (REQ-COORD-7)');
+});
+
+test('REQ-COORD-10: a Source: line names an allowed org repo and a commit (blackjack#199)', () => {
+  assert.deepEqual(G.sourceLine('Files: extension/\nSource: botversusbot.com@984883c', ['botversusbot.com']), { repo: 'botversusbot.com', sha: '984883c' });
+  assert.deepEqual(G.sourceLine('Source: ClawWorks-Ireland/BotVersusBot.com@984883c', ['botversusbot.com']), { repo: 'botversusbot.com', sha: '984883c' });
+  assert.equal(G.sourceLine('no line', ['x']), null);
+  assert.match(G.sourceLine('Source: finance-insights@984883c', ['botversusbot.com']).error, /source_repos/);
+  assert.match(G.sourceLine('Source: other-org/x@984883c', ['x']).error, /needs <repo>@<sha>/);
+  assert.match(G.sourceLine('Source: botversusbot.com@main', ['botversusbot.com']).error, /needs <repo>@<sha>/);
+  assert.match(G.sourceLine('Source: ..@984883c', ['..']).error, /needs <repo>@<sha>/);
+});
+
+test('#337 follow-up: Delmar\'s change request starts one fix round, with his words in it', () => {
+  const pr = { state: 'open', head: { sha: 'h2' }, body: 'Closes #51', labels: [{ name: 'impl:claude' }] };
+  const rv = (id, state, commit_id = 'h2', login = H.login) => ({ id, state, commit_id, user: { login } });
+  assert.equal(G.ownerChangesPlan({ pr, reviews: [rv(1, 'APPROVED')] }), null);
+  assert.deepEqual(G.ownerChangesPlan({ pr, reviews: [rv(1, 'APPROVED'), rv(2, 'CHANGES_REQUESTED')] }), { reviewId: 2, issue: 51, impl: 'claude' });
+  assert.deepEqual(G.ownerChangesPlan({ pr, reviews: [rv(2, 'CHANGES_REQUESTED'), rv(3, 'COMMENTED')] }), { reviewId: 2, issue: 51, impl: 'claude' }, 'a later plain comment does not cancel it');
+  assert.equal(G.ownerChangesPlan({ pr, reviews: [rv(2, 'CHANGES_REQUESTED', 'h1')] }), null, 'on an older head: the fix already landed');
+  assert.equal(G.ownerChangesPlan({ pr, reviews: [rv(2, 'CHANGES_REQUESTED', 'h2', 'someone')] }), null, 'only his review counts');
+  assert.equal(G.ownerChangesPlan({ pr, reviews: [rv(2, 'CHANGES_REQUESTED')], comments: [{ body: G.OWNER_CHANGES_MARKER(2) }] }), null, 'one round per review');
+  assert.deepEqual(G.ownerChangesPlan({ pr: { ...pr, body: 'Re-render' }, reviews: [rv(2, 'CHANGES_REQUESTED')] }), { reviewId: 2, noSlice: true });
+  assert.equal(G.ownerChangesPlan({ pr: { ...pr, state: 'closed' }, reviews: [rv(2, 'CHANGES_REQUESTED')] }), null);
 });

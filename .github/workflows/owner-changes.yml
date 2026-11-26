@@ -1,0 +1,25 @@
+# Delmar's change request starts a fix round (#337 follow-up). pull_request_review runs use the PR's own workflow
+# files, so like tier-approval.yml this listens for the review-submitted shim's completion via workflow_run, which
+# always runs main's version, and reads his review through the API (gate.js owner-changes). Model-free.
+name: owner-changes
+on:
+  workflow_run:
+    workflows: [review-submitted]
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  fix:
+    if: github.event.workflow_run.pull_requests[0].number != ''
+    runs-on: [self-hosted, vm-keyed]
+    timeout-minutes: 5
+    permissions: { contents: read, pull-requests: write, issues: write, actions: write }   # comment, label, dispatch implement.yml
+    steps:
+      - uses: actions/checkout@v4   # main's gate scripts only
+        with: { ref: main, persist-credentials: false }
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "no PR"; exit 0; }
+          node scripts/gates/gate.js owner-changes --pr "$PR"
