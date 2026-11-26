@@ -4,7 +4,7 @@ on:
   issues:
     types: [labeled]
   schedule:
-    - cron: '23 9 * * 1'   # Mondays ~09:23 Dublin
+    - cron: '23 9 * * 1'   # Mondays from ~09:00, each project in its own slot (render.js, spec 0.96)
   workflow_dispatch:
     inputs:
       incident: { description: 'Incident issue number', required: false, default: '' }

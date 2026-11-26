@@ -98,6 +98,41 @@ jobs:
       - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
 
+  # REQ-COORD-10 (team v2.33): a blocking finding starts a fix round, like an Important AI-review finding.
+  # SecurityClaw#21 sat as console work because nothing did. Exactly one workflow dispatches per head: this job
+  # when ai-review already passed, review.yml otherwise (gate.js fix-round-check); both can say yes at once, so
+  # --claim lets only the first claim on the head dispatch. Model-free, on a key VM.
+  fix-round:
+    needs: review
+    if: ${{ !cancelled() && needs.review.result == 'success' }}
+    runs-on: [self-hosted, vm-keyed]
+    timeout-minutes: 5
+    permissions: { contents: read, statuses: read, pull-requests: write, issues: write, actions: write }
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4   # the gate scripts on main only
+        with: { ref: main, persist-credentials: false }
+      - run: |
+          D=$(node scripts/gates/gate.js fix-round-check --claim --from security --pr "$PR")   # judges the PR's current head
+          [ "$D" = dispatch=true ] || { echo "No fix round from A7 ($D): not blocked, or ai-review decides"; exit 0; }
+          LABELS=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name]|join(" ")')
+          case " $LABELS " in *" round:3 "*) node scripts/gates/gate.js round-cap --pr "$PR" --from security --round 3; exit 0 ;; esac   # REQ-FLOW-1
+          IMPL=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
+          ISSUE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>console.log(require("./scripts/gates/lib.js").closingIssues(s)[0]||""))')   # one rule with lib.js closingIssues (#404 follow-up)
+          if [ -z "$ISSUE" ]; then
+            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label console-work || true
+            # The reason line (REQ-COORD-6): without it the watcher reports the PR to A10t as a routing defect (#295).
+            NL=$'\n'
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "A7 blocked this PR, and it has no \`Closes #n\` slice to send back to an implementer. It is **console work** (\`console-work\`): the console fixes it (template first for team files).${NL}${NL}CONSOLE-REASON: stuck"
+            exit 0
+          fi
+          # A failed dispatch frees the claim, so the next event (or a re-run) on this head can start the round (#425).
+          gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR" \
+            || { node scripts/gates/gate.js unclaim-fix-round --pr "$PR"; exit 1; }
+          echo "Fix round dispatched for #$PR (slice #$ISSUE, $IMPL): it gets A7's findings"
+
   waive:
     if: >-
       github.event_name == 'issue_comment' && github.event.issue.pull_request &&

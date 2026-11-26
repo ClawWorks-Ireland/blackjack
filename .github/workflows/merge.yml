@@ -7,7 +7,7 @@ on:
     workflows: [ci, review, security, classify, tier-approval, template-render]
     types: [completed]
   schedule:
-    - cron: '41 * * * *'
+    - cron: '41 * * * *'   # this project's slot of the hour (render.js, spec 0.96)
   workflow_dispatch:
 permissions:
   contents: read
