@@ -163,8 +163,23 @@ function ownerReviewAction({ state, requested = [], author, owner = OWNER }) {
   return 'none';
 }
 
-/** The tier-approval status for a PR. `statuses`: the head's statuses (for a template re-render). */
-function tierApprovalStatus({ tier, level, reviews, headSha, statuses = [] }) {
+/**
+ * The tier-approval status for a PR. `statuses`: the head's statuses (for a template re-render, and the QA round).
+ * `qa`: the closing slice's `QA:` line (qaLine), or null. A slice with one waits for a green `qa` round on the head
+ * before any approval counts (REQ-COORD-10, team v2.32): H approves once the evidence exists, and a Tier 0 slice
+ * can't merge without it. `qaWait` marks that wait: it isn't waiting for H, so no review request and no queue item.
+ */
+function tierApprovalStatus({ tier, level, reviews, headSha, statuses = [], qa = null }) {
+  if (qa) {
+    const sha7 = String(headSha).slice(0, 7);
+    if (qa.error) return { state: 'pending', qaWait: true, description: `The slice's QA: line is invalid (${qa.error}): A2 re-plans it` };
+    const q = trustedStatuses(statuses).qa;
+    if (!q || q.state !== 'success') {
+      return { state: 'pending', qaWait: true, description: q && (q.state === 'failure' || q.state === 'error')
+        ? `QA round ${q.state === 'failure' ? 'failed' : 'could not run'} on ${sha7}: a fix round or re-run follows`
+        : `Waiting for the QA round on ${sha7} (${qa.script}) before approval` };
+    }
+  }
   const need = requiredApprovals(tier, level);
   if (need === 0) return { state: 'success', description: `Tier ${tier} at Level ${level}: no human approval needed` };
   const { approved } = ownerApproval(reviews, headSha);
@@ -203,6 +218,152 @@ function trustedStatuses(statuses) {
     if (!prev || new Date(s.updated_at || s.created_at) > new Date(prev.updated_at || prev.created_at)) latest[s.context] = s;
   }
   return latest;
+}
+
+// ---------------------------------------------------------------- QA before approval (REQ-COORD-10, team v2.32)
+// blackjack#230, #228, #226, #191 and #185 waited in the Console work queue as "manual browser runs on the PC",
+// although qa.yml already ran rounds on a sandbox VM with headless Chrome: nothing ran one on a PR head. A slice
+// now names its round on a line `QA: qa/<script> [args]`; the model-free qa-sweep job dispatches it once the PR's
+// other gates are green, and tier-approval waits for it.
+const QA_SCRIPT = /^qa\/[A-Za-z0-9._\/-]+\.(?:js|mjs|cjs|sh)$/;
+const QA_ARG = /^[A-Za-z0-9._:=,\/@+-]{1,64}$/;
+/** A slice's `QA:` line: { script, args } or { error }, or null when it has none. */
+function qaLine(body) {
+  const m = /^QA:[ \t]*(.*)$/m.exec(String(body || ''));
+  if (!m) return null;
+  const [script, ...rest] = m[1].trim().split(/\s+/).filter(Boolean);
+  if (!script || !QA_SCRIPT.test(script) || script.split('/').includes('..')) return { error: `needs a script under qa/ ending .js, .mjs, .cjs or .sh, got "${String(script || '').slice(0, 60)}"` };
+  if (rest.length > 8 || rest.some((a) => !QA_ARG.test(a))) return { error: 'arguments must be at most 8 plain words (letters, digits and ._:=,/@+-)' };
+  return { script, args: rest };
+}
+/** Issues a PR closes by a line of its own ("Closes #5"). */
+function closingIssues(body) {
+  return [...String(body || '').matchAll(/^\s*(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d{1,7})\b/gim)].map((m) => Number(m[1]));
+}
+/**
+ * Should the qa-sweep job start a QA round on this PR's head now? Only for a valid `QA:` line, an open PR that
+ * isn't a draft, with no trusted `qa` status on the head yet (the sweep sets it pending when it dispatches), and
+ * with ci, ai-review and security green: the round holds a sandbox VM for up to an hour, so it runs last.
+ *
+ * A finished round that didn't pass is never a dead end (SecurityClaw#84's review, #404): tier-approval tells the PR
+ * "a fix round or re-run follows", so the sweep makes it true. A round that could not run (`error`) is re-run once
+ * (`rerun: true`); a second error is `stuck` (console work: the sandbox, not the code). A failed round (`failure`) is
+ * `fix: true`, once per head (`comments` holds the QA_FIX_MARKER of a round already started): the sweep dispatches
+ * the fix round with the QA report in its prompt, or escalates at the round cap.
+ */
+const QA_FIX_MARKER = (sha) => `<!-- qa-fix:${String(sha).slice(0, 40)} -->`;
+const QA_STUCK_MARKER = (sha) => `<!-- qa-stuck:${String(sha).slice(0, 40)} -->`;
+/** Once per invalid QA: line text (the sweep sends the slice to A2; a re-plan that writes another bad line goes back again). */
+const QA_LINE_REPLAN_MARKER = (line) => `<!-- qa-line-replan:${require('crypto').createHash('sha256').update(String(line)).digest('hex').slice(0, 16)} -->`;
+const QA_STALE_HOURS = 3;   // a round that never reported back: qa.yml times out well inside this
+function qaDispatchDecision({ qa, pr, statuses = [], checkRuns = [], comments = [], now = new Date() }) {
+  if (!qa) return { dispatch: false, why: 'no QA: line' };
+  if (qa.error) return { dispatch: false, why: `invalid QA: line (${qa.error})` };
+  if (!pr || pr.state !== 'open' || pr.draft) return { dispatch: false, why: 'not an open, ready PR' };
+  const head = pr.head.sha;
+  const sha7 = head.slice(0, 7);
+  const st = trustedStatuses(statuses);
+  const seen = (m) => comments.some((c) => fromGateBot(c) && String(c.body || '').includes(m));   // a look-alike counts for nothing
+  let rerun = false; let lost = false;
+  if (st.qa) {
+    if (st.qa.state === 'failure') {
+      return seen(QA_FIX_MARKER(head)) ? { dispatch: false, why: `a fix round for the failed QA round on ${sha7} was already started` }
+        : { dispatch: false, fix: true, why: `the QA round failed on ${sha7}: a fix round follows` };
+    }
+    // A pending round that never reported back (its run was lost before qa-report) counts as one that could not run.
+    const stale = st.qa.state === 'pending' && now - new Date(st.qa.updated_at || st.qa.created_at) > QA_STALE_HOURS * 3600e3;
+    if (st.qa.state !== 'error' && !stale) return { dispatch: false, why: `qa is already ${st.qa.state} on ${sha7}` };
+    const errors = statuses.filter((s) => s.creator && s.creator.login === GATE_BOT && s.context === 'qa' && s.state === 'error').length + (stale ? 1 : 0);
+    if (errors >= 2) {
+      return seen(QA_STUCK_MARKER(head)) ? { dispatch: false, why: `the QA round could not run on ${sha7} twice; already console work` }
+        : { dispatch: false, stuck: true, why: `the QA round could not run on ${sha7} twice` };
+    }
+    rerun = true; lost = stale;
+  }
+  const ci = checkRuns.filter((c) => c.name === REQUIRED_CHECK && c.app && c.app.slug === 'github-actions' && c.head_sha === head);
+  if (!ci.length || !ci.every((c) => c.status === 'completed' && c.conclusion === 'success')) return { dispatch: false, why: 'ci is not green yet' };
+  for (const ctx of ['ai-review', 'security']) {
+    if (!st[ctx] || st[ctx].state !== 'success') return { dispatch: false, why: `${ctx} is not green yet` };
+  }
+  // `lost`: the sweep records the lost round as an `error` first, so a second lost round is counted and is stuck.
+  return rerun ? { dispatch: true, rerun: true, lost, why: `the QA round ${lost ? 'never reported back' : 'could not run'} on ${sha7}: re-running it once` } : { dispatch: true, why: '' };
+}
+
+// ---------------------------------------------------------------- the team's own fix rounds and sources (REQ-COORD-10, team v2.33)
+/**
+ * Should this workflow dispatch the fix round for a PR head? SecurityClaw#21 sat as console work because A7's block
+ * started nothing: review.yml started fix rounds only for Important AI-review findings. Now whichever of the two
+ * finishes second dispatches exactly one round: review.yml when it found Important findings or `security` already
+ * failed; security.yml when it blocked and `ai-review` already passed (if ai-review failed, review.yml's round
+ * carries A7's findings too; if it's still running, review.yml decides when it finishes).
+ * from: 'review' | 'security'; important: Important findings this review kept; aiReview, security: trusted states.
+ */
+function fixRoundFrom({ from, important = 0, aiReview = null, security = null }) {
+  if (from === 'review') return important > 0 || security === 'failure';
+  if (from === 'security') return security === 'failure' && aiReview === 'success';
+  return false;
+}
+/**
+ * Both workflows can read the other's status at once and both say yes, so each claims the head first
+ * (`fix-round-check --claim`): the claim with the lowest comment id wins. Only the gate bot's claims count, so a
+ * look-alike comment can neither start nor block a round. Returns the winning comment id, or null.
+ */
+const FIX_ROUND_MARKER = (sha) => `<!-- fix-round:${String(sha).slice(0, 40)} -->`;
+const fromGateBot = (c) => Boolean(c && c.user && c.user.login === GATE_BOT);
+const claimRunLine = (runId) => `<!-- fix-round-run:${String(runId || 'none').replace(/[^0-9a-z]/gi, '')} -->`;
+const claimIsRun = (c, runId) => Boolean(runId) && String(c.body || '').includes(claimRunLine(runId));
+const headClaims = (comments, sha) => comments.filter((c) => fromGateBot(c) && String(c.body || '').startsWith(FIX_ROUND_MARKER(sha)));
+/** The winning claim on a head: the gate bot's claim with the lowest id ({ id, body }), or null. */
+function fixRoundClaimWinner(comments = [], sha) {
+  const all = headClaims(comments, sha);
+  return all.length ? all.reduce((a, b) => (b.id < a.id ? b : a)) : null;
+}
+/** This run's claims on a head (to remove after a failed dispatch). */
+function runClaims(comments = [], sha, runId) {
+  return headClaims(comments, sha).filter((c) => claimIsRun(c, runId));
+}
+
+const ROUND_CAP_MARKER = '<!-- round-cap -->';
+/**
+ * The round cap, reached (REQ-FLOW-1, team v2.37). SecurityClaw#44 ended round 3 with two Important findings and
+ * then sat failed: round 3 dispatches no fix round, and the cap's escalation only ran when a 4th push asked for a
+ * review, which nothing would ever make. Now the workflow that would have dispatched the 4th round escalates at
+ * once, with no ask of the owner: a PR with a slice goes back to A2 (`needs-replan` on the slice, as when the
+ * ladder runs out) and is closed, its branch kept as evidence; a PR with no slice is console work, as before.
+ * Re-slicing is A2's job, not a question for Delmar: A2 asks him only if a finding is a spec or plan choice.
+ * Returns null when the cap was already handled (the marker comment is on the PR) or the PR isn't capped.
+ */
+function roundCapPlan({ pr, round, comments = [], from = 'review', runUrl = '' }) {
+  if (Number(round) < 3) return null;
+  if (comments.some((c) => String(c.body || '').includes(ROUND_CAP_MARKER))) return null;
+  const n = pr.number;
+  const issue = closingIssues(pr.body)[0] || null;
+  const why = from === 'security' ? 'A7 still blocks it' : from === 'qa' ? 'its QA round still fails' : 'Important AI-review findings are still open';
+  const evidence = `EVIDENCE: ${runUrl || 'the round 3 review'} (the findings are in the round 3 comment on #${n})`;
+  if (!issue) {
+    return { issue: null, prLabels: ['console-work'], issueLabels: [], close: false, issueComment: null,
+      prComment: `${ROUND_CAP_MARKER}\nROLE: Orchestrator (A0)   ITEM: #${n}   RESULT: blocked\nWHAT CHANGED: three review rounds ran and ${why}. This PR has no \`Closes #n\` slice to re-slice.\n${evidence}\nNEXT: console: open a fresh PR with the open findings fixed (template first for team files) and close this one.\nCONSOLE-REASON: stuck` };
+  }
+  return { issue, prLabels: [], issueLabels: ['needs-replan', 'status:blocked'], close: true,
+    prComment: `${ROUND_CAP_MARKER}\nROLE: Orchestrator (A0)   ITEM: #${n}   RESULT: blocked\nWHAT CHANGED: round cap (3) reached and ${why}, so this PR is closed and slice #${issue} goes back to A2 to re-slice (REQ-FLOW-1). The branch stays as evidence; an approval on this PR doesn't carry over.\n${evidence}\nNEXT: A2 Planner re-slices #${issue}`,
+    issueComment: `ROLE: Orchestrator (A0)   ITEM: #${issue}   RESULT: blocked\nWHAT CHANGED: PR #${n} used its three review rounds and ${why}. It is closed; this slice needs a re-plan (\`needs-replan\`, REQ-FLOW-1).\n${evidence}\nNEXT: A2 Planner: read the open findings on #${n} and re-slice so each is fixed or designed out. Only a finding that is a spec or plan choice becomes a question for the owner, asked as a plan choice.` };
+}
+
+/**
+ * A slice's `Source: <repo>@<sha>` line (blackjack#199 imported from botversusbot.com and sat as console work,
+ * because a coder can only read its own repo): { repo, sha }, { error }, or null. The repo must be in this org and
+ * named in the overlay's `source_repos` (H's Tier 2 choice per project); implement.yml then fetches that commit
+ * read-only, in a key job, and hands it to the coder as `source/<repo>/`.
+ */
+function sourceLine(body, allowed = [], org = 'ClawWorks-Ireland') {
+  const m = /^Source:[ \t]*(\S+)[ \t]*$/m.exec(String(body || ''));
+  if (!m) return null;
+  const r = new RegExp(`^(?:${org.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/)?([A-Za-z0-9._-]+)@([0-9a-f]{7,40})$`);
+  const x = r.exec(m[1]);
+  if (!x || x[1].startsWith('.')) return { error: `needs <repo>@<sha> for a repo in ${org}, got "${m[1].slice(0, 80)}"` };
+  const ok = allowed.find((a) => a.toLowerCase() === x[1].toLowerCase());
+  if (!ok) return { error: `${x[1]} isn't in this project's source_repos (${allowed.join(', ') || 'none'}): that is H's Tier 2 overlay choice` };
+  return { repo: ok, sha: x[2] };
 }
 
 /**
@@ -290,7 +451,7 @@ function releaseRetryAction({ run, jobs = [], annotations = [] }) {
  * (those workflows run on review events, which use the PR's own workflow files).
  * Returns {ok, behind, reasons[]}.
  */
-function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new Date(), coolingHours = 24, behindBy = 0 }) {
+function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new Date(), coolingHours = 24, behindBy = 0, qa = null }) {
   const reasons = [];
   if (pr.state !== 'open') reasons.push(`PR is ${pr.state}`);
   if (pr.draft) reasons.push('PR is a draft');
@@ -310,7 +471,7 @@ function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new
   // The ci runs that aren't green, all finished with a conclusion that a newer main might change (staleCi below).
   const ciRed = ci.filter((c) => !(c.status === 'completed' && c.conclusion === 'success'));
   const ciRerunnable = ciRed.length > 0 && ciRed.every((c) => c.status === 'completed' && STALE_CI_CONCLUSIONS.includes(c.conclusion));
-  const appr = tierApprovalStatus({ tier, level, reviews, headSha: head, statuses });
+  const appr = tierApprovalStatus({ tier, level, reviews, headSha: head, statuses, qa });
   if (appr.state !== 'success') reasons.push(appr.description);
   if (tier === 2) {
     const cool = coolingStatus({ tier, reviews, headSha: head, labels: pr.labels, now, hours: coolingHours, statuses });
@@ -632,15 +793,49 @@ const policyViolations = (paths, re = POLICY_RE) => paths.filter((f) => re.test(
  * policy paths as context (#132 named `scripts/gates/lib.js:574` under "Don't touch"). Returns
  * { files, policy, missing }; a trailing `:line` or `:a-b` is stripped from each path.
  */
-function slicePolicyCheck(body) {
+function slicePolicyCheck(body, { labels = [], comments = [] } = {}) {
   const line = (/^Files:(.*)$/m.exec(String(body || '')) || [])[1] || '';
   const files = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim().replace(/:\d+(?:-\d+)?$/, '')).filter(Boolean);
-  return { files, policy: policyViolations(files), missing: files.length === 0 };
+  const names = labels.map((l) => (typeof l === 'string' ? l : l.name));
+  // REQ-COORD-10 (team v2.36.1, agent-team-template#290): a slice for the console needs a CONSOLE-REASON line.
+  // Spec 0.93 designed this refusal but 0.98 didn't build it, so blackjack#230 (a QA round on a PR head, marked
+  // `Implementer: console`) reached the console with no reason. Browser and run evidence is a `QA:` line instead.
+  const forConsole = names.includes('console-work') || implementerIsConsole(body);
+  const consoleNoReason = forConsole && !sliceConsoleReason(body, comments);
+  return { files, policy: policyViolations(files), missing: files.length === 0, consoleNoReason };
+}
+
+/**
+ * Whether the slice's `Implementer:` line names the console. Only the implementer itself is read: the text up to
+ * the first sentence end (`. `, `, `, `; `) or `Reason:`. botversusbot.com#81 (agent-team-template#298) was
+ * `Implementer: impl:claude. Reason: ... so it's an implementer's slice, not console work.`, and matching
+ * "console" anywhere on the line made the check refuse it as a console slice with no reason.
+ */
+function implementerIsConsole(body) {
+  const m = /^Implementer:[ \t]*([^\n]*)$/im.exec(String(body || ''));
+  if (!m) return false;
+  const who = m[1].split(/[.,;](?:\s|$)|\bReason:/i)[0];
+  return /\bconsole\b/i.test(who);
+}
+
+/**
+ * The latest valid CONSOLE-REASON, on a line of its own in the body or a comment, or null. This is the same rule as
+ * the watcher's scripts/pc/health/routing.js (consoleReason), which isn't rendered into projects.
+ */
+const SLICE_CONSOLE_REASONS = ['pc', 'identity', 'private-data', 'stuck'];
+function sliceConsoleReason(body, comments = []) {
+  let found = null;
+  for (const text of [body, ...comments.map((c) => c.body)]) {
+    const m = /^CONSOLE-REASON:[ \t]*([a-z-]+)[ \t]*$/m.exec(String(text || ''));
+    if (m && SLICE_CONSOLE_REASONS.includes(m[1])) found = m[1];
+  }
+  return found;
 }
 
 /** The one line `gate.js slice-check` prints. A policy path wins over everything else. */
 function sliceCheckResult(check) {
   if (check.policy.length) return `ok=false reason=policy paths=${check.policy.join(',')}`;
+  if (check.consoleNoReason) return 'ok=false reason=console-no-reason';
   if (check.missing) return 'ok=false reason=no-files';
   return 'ok=true';
 }
@@ -664,12 +859,14 @@ function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHE
   // team file since team v2.24 (listed in TEAM_FILES): it is changed in the template's projects/, so console work.
   // CODEOWNERS is the project's own policy file wherever GitHub reads it (.github/, docs/ or the root): never console work.
   const consoleFile = (p) => !/(^|\/)CODEOWNERS$/.test(p) && (teamFiles.includes(p) || p.startsWith('evals/') || /^(\.github|\.claude|scripts\/gates|scripts\/agents)\//.test(p));
+  // REQ-OPS-18 (team v2.35): team work, not console work. A team-file slice is copied to the template by the health
+  // watcher, where A10t makes it; eval content is A10's in this repo. The marker stays `console` for existing items.
   if (check.policy.length && check.policy.every(consoleFile)) {
     const marker = '<!-- slice-check: console -->';
     return {
-      addLabels: add(['console-work']),
-      removeLabels: ['needs-human', 'status:awaiting-human', 'status:planned', 'status:in-progress'].filter((l) => have.includes(l)),
-      comment: posted(marker) ? null : `${marker}\n**Slice check:** this slice changes ${check.policy.map((p) => `\`${p}\``).join(', ')}, which no implementer may edit. Team files are made in the agent-team template first and reach this repo in the daily re-render; eval content is made directly. Either way it is **console work** (\`console-work\`, REQ-COORD-6): no decision is needed from \`${OWNER}\`, who reviews the resulting PR. Not dispatched.`,
+      addLabels: add(['team-improve']),
+      removeLabels: ['needs-human', 'status:awaiting-human', 'status:planned', 'status:in-progress', 'console-work'].filter((l) => have.includes(l)),
+      comment: posted(marker) ? null : `${marker}\n**Slice check:** this slice changes ${check.policy.map((p) => `\`${p}\``).join(', ')}, which no implementer may edit. It is **team work** (\`team-improve\`, REQ-OPS-18): team files are made in the agent-team template by A10t (the health watcher copies this item there) and reach this repo in the daily re-render; eval content is made by A10 here. No decision is needed from \`${OWNER}\`, who reviews the resulting PR. Not dispatched.`,
     };
   }
   if (check.policy.length) {
@@ -679,6 +876,18 @@ function sliceCheckActions(check, { labels = [], comments = [], bots = SLICE_CHE
       removeLabels: ['status:planned', 'status:in-progress'].filter((l) => have.includes(l)),
       comment: posted(marker) ? null : `${marker}\n**Slice check:** this slice changes implementer policy paths, which no implementer may edit: ${check.policy.map((p) => `\`${p}\``).join(', ')}. Suggested owner: @${OWNER} or the console.\n\n` +
         `@${OWNER}, how should it be done?\n- **(A, recommended)** Delmar or the console makes the change as a Tier 2 PR (team files go to the template first, REQ-OPS-11).\n- **(B)** The planner re-slices so that only the non-policy part remains here.`,
+    };
+  }
+  if (check.consoleNoReason) {
+    // Without a reason it isn't console work: it goes back to A2 and off the console's queue (REQ-COORD-10, #290).
+    const marker = '<!-- slice-check: console-no-reason -->';
+    return {
+      addLabels: add(['needs-replan']),
+      removeLabels: ['console-work', 'status:planned', 'status:in-progress'].filter((l) => have.includes(l)),
+      comment: posted(marker) ? null : `${marker}\n**Slice check:** this slice is for the console but has no \`CONSOLE-REASON\` line, so it isn't console work and isn't dispatched. Planner: re-slice it (planner rules 1d2 and 1e).\n` +
+        '- Browser or run evidence on built code (headless Chrome, a local server, repeated runs) is a `QA: qa/<script> [args]` line on the slice it checks. qa-sweep runs it on the PR head; nobody runs it by hand.\n' +
+        '- Team files, the overlay and eval content are `team-improve` (A10t in the template, A10 for evals).\n' +
+        '- Only what needs the PC itself, an App, key or org setting, or the owner\'s own data is console work, and it ends with a line `CONSOLE-REASON: pc|identity|private-data`.',
     };
   }
   if (check.missing) {
@@ -772,7 +981,8 @@ function splitProposal(files, teamFiles) {
   return out;
 }
 /** A team file's path in the template repo: `.agents/SPEC.md` is the template's own spec; the rest live under team/. */
-function templatePathFor(p) { return p === '.agents/SPEC.md' ? p : `team/${p}`; }
+// A project's .claude/agents/x.md comes from the template's team/agents/x.md (#337).
+function templatePathFor(p) { return p === '.agents/SPEC.md' ? p : p.startsWith('.claude/agents/') ? `team/${p.slice('.claude/'.length)}` : `team/${p}`; }
 /** Rewrite a git patch's paths with `map` (diff, ---/+++ and rename/copy headers), so it applies in the template. */
 function retargetPatch(patch, map) {
   return String(patch).split('\n').map((l) => {
@@ -1051,6 +1261,27 @@ async function closeSuperseded({ gh, all, issue, implementer, newPr, repo, newBr
   return closed;
 }
 
+const OWNER_CHANGES_MARKER = (id) => `<!-- owner-changes:${id} -->`;
+/**
+ * Delmar's change request starts a fix round (#337 follow-up). His job is to point out gaps; on 2026-11-25 nothing
+ * acted on a change request of his: only AI-review and A7 findings started a fix round. Given the PR, its reviews and
+ * its comments: when his latest review on the current head asks for changes and no fix round was started for that
+ * review, the round to start ({ reviewId, issue, impl }, or { reviewId, noSlice } for a PR with no `Closes #n`).
+ * Otherwise null. His words reach the coder in the fix-round prompt (implement.yml).
+ */
+function ownerChangesPlan({ pr, reviews = [], comments = [], owner = OWNER }) {
+  if (!pr || pr.state !== 'open') return null;
+  const mine = reviews.filter((r) => r.user && r.user.login === owner && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED', 'COMMENTED'].includes(r.state))
+    .filter((r) => r.state !== 'COMMENTED');
+  const last = mine[mine.length - 1];
+  if (!last || last.state !== 'CHANGES_REQUESTED' || last.commit_id !== pr.head.sha) return null;
+  if (comments.some((c) => fromGateBot(c) && String(c.body || '').includes(OWNER_CHANGES_MARKER(last.id)))) return null;
+  const issue = closingIssues(pr.body)[0] || null;
+  if (!issue) return { reviewId: last.id, noSlice: true };
+  const impl = (pr.labels || []).some((l) => (l.name || l) === 'impl:local') ? 'local' : 'claude';
+  return { reviewId: last.id, issue, impl };
+}
+
 function fixRoundRefusal(pr, repoFullName) {
   if (!pr || pr.state !== 'open') return 'PR is not open';
   if (!pr.head || !pr.head.repo || pr.head.repo.full_name !== repoFullName) return 'head is not in this repo';
@@ -1190,8 +1421,8 @@ module.exports = {
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
   parseAutonomyLevel, effectiveLevel, requiredApprovals,
-  ownerApproval, ownerReviewAction, templateApproval, headApproval, tierApprovalStatus, coolingStatus, gitBlobSha, renderMatch, renderDirection, waiverCarries,
+  ownerApproval, ownerReviewAction, templateApproval, headApproval, tierApprovalStatus, qaLine, closingIssues, qaDispatchDecision, coolingStatus, gitBlobSha, renderMatch, renderDirection, waiverCarries,
   parseWaiveCommands, securityMarker, readSecurityMarker, uniqueFindingIds, inert, securityWaiverState,
-  trustedStatuses, qaCoveredPrs, runnerLost, qaRetryAction, qaReportPlan, releaseRetryAction, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
-  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, deniedTools, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, slicePolicyCheck, sliceCheckResult, sliceCheckActions, SLICE_CHECK_BOTS, CODER_BOTS, fixRoundRefusal, supersededSlicePrs, closeSuperseded, parseManualChecks, t3Verdict,
+  trustedStatuses, fixRoundFrom, FIX_ROUND_MARKER, fixRoundClaimWinner, claimRunLine, claimIsRun, runClaims, fromGateBot, roundCapPlan, QA_FIX_MARKER, QA_STUCK_MARKER, QA_LINE_REPLAN_MARKER, ownerChangesPlan, OWNER_CHANGES_MARKER, ROUND_CAP_MARKER, sourceLine, qaCoveredPrs, runnerLost, qaRetryAction, qaReportPlan, releaseRetryAction, mergeVerdict, guardCommits, guardVerdict, guardPrNumber, revertTrailer, GUARD_MARKER, guardActiveFor,
+  dublinHour, dublinDate, digestDue, decideFindings, applyRepro, carryOverRefusal, reviewRetryAction, ciRetryAction, modelNeverRan, parseLadderResume, MAX_NEVER_RAN, reviewRound, reviewedHead, roundKeepsPure, splitProposal, templatePathFor, retargetPatch, declaredSpecTier, specApprovalDefaulted, isUsageLimited, execMessages, metricsRecord, metricsNotice, deniedTools, finalResult, nextRung, POLICY_RE, changedPaths, policyViolations, slicePolicyCheck, sliceConsoleReason, SLICE_CONSOLE_REASONS, sliceCheckResult, sliceCheckActions, SLICE_CHECK_BOTS, CODER_BOTS, fixRoundRefusal, supersededSlicePrs, closeSuperseded, parseManualChecks, t3Verdict,
 };
