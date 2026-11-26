@@ -13,11 +13,12 @@ const BOT = { login: 'github-actions[bot]' };
 const fs = require('fs'); const os = require('os');
 const POLICY = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-policy-'));
 fs.writeFileSync(path.join(POLICY, 'RISK.md'), '# Risk\n\n```risk-rules\n0 **\n```\n');
+fs.mkdirSync(path.join(POLICY, '.agents')); fs.writeFileSync(path.join(POLICY, '.agents', 'PROJECT.md'), 'autonomy_level: 2\n');   // tier-approval reads the level
 const SHA = 'a'.repeat(40);
 
 /** A small GitHub: one PR (#7, slice #3), its comments, and dispatches that fail `failDispatch` times. */
-function stub({ pr, statuses = [], failDispatch = 0, slice = { number: 3, body: 'Slice\n\nQA: qa/run.js' }, delay = 0 } = {}) {
-  const st = { reqs: [], comments: { [pr.number]: [], [slice.number]: [] }, nextId: 100, failDispatch, dispatches: [] };
+function stub({ pr, statuses = [], failDispatch = 0, slice = { number: 3, body: 'Slice\n\nQA: qa/run.js' }, delay = 0, sliceStatus = 200, failLabels = 0 } = {}) {
+  const st = { reqs: [], comments: { [pr.number]: [], [slice.number]: [] }, nextId: 100, failDispatch, failLabels, dispatches: [] };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; }).on('end', async () => {
@@ -28,10 +29,11 @@ function stub({ pr, statuses = [], failDispatch = 0, slice = { number: 3, body: 
       const list = (a) => send(200, page && page !== '1' ? [] : a);
       let m;
       if (req.method === 'GET' && p === '/pulls') return list([pr]);
+      if (req.method === 'GET' && p === '/issues') return list([]);   // no circuit breaker open
       if (req.method === 'GET' && p === `/pulls/${pr.number}`) return send(200, pr);
       if (req.method === 'GET' && p === `/pulls/${pr.number}/files`) return list([{ filename: 'src/a.js' }]);
       if (req.method === 'GET' && p === `/pulls/${pr.number}/reviews`) return list(pr.reviews || []);
-      if (req.method === 'GET' && p === `/issues/${slice.number}`) return send(200, slice);
+      if (req.method === 'GET' && p === `/issues/${slice.number}`) return sliceStatus === 200 ? send(200, slice) : send(sliceStatus, { message: 'server error' });
       if (req.method === 'GET' && p === `/commits/${SHA}/statuses`) return list(statuses);
       if (req.method === 'GET' && p === `/commits/${SHA}/check-runs`) return send(200, { check_runs: page && page !== '1' ? [] : [{ name: 'ci', app: { slug: 'github-actions' }, head_sha: SHA, status: 'completed', conclusion: 'success' }] });
       if ((m = /^\/issues\/(\d+)\/comments$/.exec(p))) {
@@ -44,7 +46,10 @@ function stub({ pr, statuses = [], failDispatch = 0, slice = { number: 3, body: 
         for (const k of Object.keys(st.comments)) st.comments[k] = st.comments[k].filter((c) => c.id !== Number(m[1]));
         return send(204);
       }
-      if (/^\/issues\/\d+\/labels$/.test(p)) return send(200, []);
+      if (/^\/issues\/\d+\/labels$/.test(p)) {
+        if (req.method === 'POST' && st.failLabels > 0) { st.failLabels--; return send(500, { message: 'labels failed' }); }
+        return send(200, []);
+      }
       if ((m = /^\/actions\/workflows\/(.+)\/dispatches$/.exec(p))) {
         if (st.failDispatch > 0) { st.failDispatch--; return send(422, { message: 'dispatch refused' }); }
         st.dispatches.push({ workflow: m[1], inputs: b.inputs }); return send(204);
@@ -114,6 +119,41 @@ test('round-cap: a run that failed after its marker is finished by the retry, on
     assert.equal(st.comments[7].length, 1, 'one PR comment');
     assert.equal(st.comments[3].length, 1, 'one slice comment');
     assert.equal((await gate(st, ['round-cap', '--pr', '7', '--from', 'security', '--round', '3'])).out, 'round-cap: #7 is closed');
+  } finally { st.server.close(); }
+});
+
+test('round-cap: a PR with no slice whose label failed after its comment gets the label on the retry', async () => {
+  const st = await stub({ pr: openPr({ body: 'Change, no slice', labels: [{ name: 'round:3' }] }), failLabels: 1 });
+  try {
+    assert.notEqual((await gate(st, ['round-cap', '--pr', '7', '--from', 'review', '--round', '3'])).code, 0, 'the label POST failed');
+    const r2 = await gate(st, ['round-cap', '--pr', '7', '--from', 'review', '--round', '3']);
+    assert.equal(r2.code, 0, r2.out);
+    const labelled = st.reqs.filter((q) => q.method === 'POST' && q.url === '/issues/7/labels');
+    assert.equal(labelled.length, 2, 'the retry adds the label again');
+    assert.ok(labelled[1].body.labels.includes('console-work'));
+    assert.equal(st.comments[7].length, 1, 'one PR comment');
+  } finally { st.server.close(); }
+});
+
+test('tier-approval: a closing issue that cannot be read fails closed; one that is not there has no QA line', async () => {
+  const ok = [{ context: 'ai-review', state: 'success', creator: BOT, updated_at: '2026-11-26T10:00:00Z' }, { context: 'security', state: 'success', creator: BOT, updated_at: '2026-11-26T10:00:00Z' }];
+  const posted = (st) => st.reqs.filter((q) => q.method === 'POST' && /^\/statuses\//.test(q.url) && q.body.context === 'tier-approval');
+  let st = await stub({ pr: openPr(), statuses: ok, sliceStatus: 500 });
+  try {
+    const r = await gate(st, ['tier-approval', '--pr', '7']);
+    assert.notEqual(r.code, 0, 'a 5xx on the slice is not "no QA line"'); assert.match(r.out, /issues\/3 → 500/);
+    assert.equal(posted(st).length, 0, 'no tier-approval status is set from a failed read');
+  } finally { st.server.close(); }
+  st = await stub({ pr: openPr({ body: 'Change\n\nCloses #99' }), statuses: ok });
+  try {
+    const r = await gate(st, ['tier-approval', '--pr', '7']);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(posted(st)[0].body.state, 'success', 'a 404 issue has no QA line, so Tier 0 needs no wait');
+  } finally { st.server.close(); }
+  st = await stub({ pr: openPr(), statuses: ok });
+  try {
+    assert.equal((await gate(st, ['tier-approval', '--pr', '7'])).code, 0);
+    assert.notEqual(posted(st)[0].body.state, 'success', 'a readable QA: line still holds the gate for its round');
   } finally { st.server.close(); }
 });
 
