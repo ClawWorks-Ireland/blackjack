@@ -1,0 +1,14 @@
+{
+  "name": "casino-advisor",
+  "version": "0.1.0",
+  "description": "Casino Advisor — MV3 browser extension for real-time blackjack strategy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/card-engine.test.js tests/simulator.test.js",
+    "test:engine": "node --test tests/card-engine.test.js",
+    "test:sim": "node --test tests/simulator.test.js",
+    "sim": "node simulator.js"
+  },
+  "devDependencies": {}
+}

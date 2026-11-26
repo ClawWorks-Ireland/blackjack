@@ -1,0 +1,181 @@
+/* Casino Advisor — Side Panel Styles */
+
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --surface2: #0f3460;
+  --accent: #e94560;
+  --accent-green: #00b894;
+  --accent-yellow: #fdcb6e;
+  --text: #eee;
+  --text-muted: #aaa;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  min-width: 280px;
+  max-width: 360px;
+}
+
+#app { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--surface2);
+}
+
+.logo { font-weight: 700; font-size: 15px; }
+
+.phase-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.phase-idle    { background: #444; color: #aaa; }
+.phase-betting { background: var(--accent-yellow); color: #333; }
+.phase-dealing { background: var(--accent-green); color: #111; }
+.phase-resolved{ background: var(--surface2); color: var(--text-muted); }
+
+/* Count grid */
+.count-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.count-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.count-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.count-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.count-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Advice sections */
+.advice-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.hidden { display: none !important; }
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+/* Bet advice */
+.bet-advice {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-yellow);
+  line-height: 1.4;
+}
+
+/* Dealer row */
+.dealer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.label { color: var(--text-muted); }
+
+.card-display {
+  font-size: 16px;
+  font-weight: 700;
+  background: var(--surface2);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* Seat cards */
+.seat-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  gap: 8px;
+}
+.seat-row:last-child { border-bottom: none; }
+
+.seat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.seat-label { font-size: 10px; color: var(--text-muted); }
+.seat-cards { font-size: 13px; font-weight: 600; letter-spacing: 1px; }
+.seat-total { font-size: 11px; color: var(--text-muted); }
+
+.seat-advice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.action-badge {
+  font-size: 14px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.action-H  { background: var(--accent); color: #fff; }
+.action-S  { background: var(--accent-green); color: #111; }
+.action-D  { background: var(--accent-yellow); color: #333; }
+.action-SP { background: #a29bfe; color: #111; }
+
+.action-reason { font-size: 10px; color: var(--text-muted); text-align: right; max-width: 120px; line-height: 1.3; }
+
+/* No table state */
+.no-table {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.hint { font-size: 11px; margin-top: 6px; }
