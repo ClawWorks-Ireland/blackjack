@@ -6,6 +6,7 @@
 const { chromium } = require('./lib/browser');
 const { reachReport } = require('./lib/reach');
 const { runGraceCheck } = require('./lib/grace');
+const { AC6_SEED, ac6Verdict } = require('./lib/ac6');
 
 const URL_ = process.argv[2];
 const checks = {};
@@ -223,47 +224,105 @@ const record = (name, res) => put(name, res.pass, {
     // behaviour, #189 Q1 a), so x goes first while the report is open. A round
     // counts as dealt once in-hand is set or the bankroll moves, not only when
     // it finishes (#stat-rounds counts finished rounds).
+    // The verdict is ac6Verdict (unit-tested in qa/lib/ac6.test.js) and rests on
+    // the random run alone. The seeded run and the repro (AC6_SEED, where round 2
+    // ends at the deal) are evidence for #189 AC-2 and AC-4 and go in the detail.
     {
-      const p = await freshPage(b);
-      await p.fill('#bet', '10');
-      await p.click('#deal');
-      await playOut(p);
-      await p.waitForTimeout(100);
-      const before = await rounds(p);
-      const bank0 = await bankroll(p);
-      const rebet2Usable = await enabled(p, '#rebet-2');
-      const dealUsable = await enabled(p, '#deal');
-      await p.click('#report-open');
-      const opened = await reportOpen(p);
-      const focusOnOpen = await active(p);
-      await p.keyboard.press('x');
-      await p.waitForTimeout(150);
-      const openAfterX = await reportOpen(p);
-      const inHandAfterX = await inHand(p);
-      const bankAfterX = await bankroll(p);
-      let focusBeforeEnter = null;
-      let inHandAfterEnter = null;
-      let bankAfterEnter = null;
-      let openAfterEnter = null;
-      if (openAfterX) {
-        focusBeforeEnter = await active(p);
-        await p.keyboard.press('Enter');
+      const ac6Run = async (p) => {
+        await p.fill('#bet', '10');
+        await p.click('#deal');
+        await playOut(p);
+        await p.waitForTimeout(100);
+        const before = await rounds(p);
+        const bank0 = await bankroll(p);
+        const rebet2Usable = await enabled(p, '#rebet-2');
+        const dealUsable = await enabled(p, '#deal');
+        await p.click('#report-open');
+        const opened = await reportOpen(p);
+        const focusOnOpen = await active(p);
+        await p.keyboard.press('x');
         await p.waitForTimeout(150);
-        inHandAfterEnter = await inHand(p);
-        bankAfterEnter = await bankroll(p);
-        openAfterEnter = await reportOpen(p);
-      }
-      await playOut(p);
-      const dealt = (await rounds(p)) - before;
-      const pass = rebet2Usable && dealUsable && opened && openAfterX &&
-        inHandAfterX === false && bankAfterX === bank0 &&
-        inHandAfterEnter === false && bankAfterEnter === bank0 && dealt === 0;
-      put('AC6 session report has no grace window', pass, {
-        rebet2Usable, dealUsable, opened, focusOnOpen, openAfterX, inHandAfterX,
-        focusBeforeEnter, inHandAfterEnter, openAfterEnter,
-        bankBefore: bank0, bankAfterX, bankAfterEnter, dealt,
-      });
+        const openAfterX = await reportOpen(p);
+        const inHandAfterX = await inHand(p);
+        const bankAfterX = await bankroll(p);
+        let focusBeforeEnter = null;
+        let inHandAfterEnter = null;
+        let bankAfterEnter = null;
+        let openAfterEnter = null;
+        if (openAfterX) {
+          focusBeforeEnter = await active(p);
+          await p.keyboard.press('Enter');
+          await p.waitForTimeout(150);
+          inHandAfterEnter = await inHand(p);
+          bankAfterEnter = await bankroll(p);
+          openAfterEnter = await reportOpen(p);
+        }
+        await playOut(p);
+        const dealt = (await rounds(p)) - before;
+        return {
+          rebet2Usable, dealUsable, opened, focusOnOpen, openAfterX, inHandAfterX,
+          focusBeforeEnter, inHandAfterEnter, openAfterEnter,
+          bankBefore: bank0, bankAfterX, bankAfterEnter, dealt,
+        };
+      };
+
+      // A table on a typed seed. freshPage's reload would restore the game it saved
+      // under blackjack.game (web/app.js loadGame), so storage is cleared and the
+      // seed set in one evaluate before the reload.
+      const seededPage = async (br, seed) => {
+        const p = await br.newPage();
+        p.on('pageerror', (e) => errors.push(e.stack || String(e)));
+        await p.addInitScript(installRecorder);
+        await p.goto(URL_);
+        await p.evaluate((s) => {
+          localStorage.clear();
+          localStorage.setItem('blackjack.prefs', JSON.stringify({ speed: 'off' }));
+          localStorage.setItem('blackjack.rules', JSON.stringify({ decks: 1 }));
+          localStorage.setItem('blackjack.seed', s);
+        }, seed);
+        await p.reload();
+        await p.waitForSelector('#deal');
+        const seedInPlay = await p.evaluate(() => {
+          try {
+            const g = JSON.parse(localStorage.getItem('blackjack.game'));
+            return { seed: g.seed, shoeNo: g.shoeNo };
+          } catch (e) { return null; }
+        });
+        return { p, seedInPlay };
+      };
+
+      const p = await freshPage(b);
+      const randomDetail = await ac6Run(p);
       await p.close();
+
+      let seeded;
+      let sp = null;
+      try {
+        const made = await seededPage(b, AC6_SEED);
+        sp = made.p;
+        const seededDetail = await ac6Run(sp);
+        // Old-sequence repro: the report is closed now, so x deals Rebet x2. On
+        // AC6_SEED that round ends at the deal and #stat-rounds goes up within 150 ms.
+        let reproStarted = null;
+        let reproRoundsDelta = null;
+        if (seededDetail.openAfterEnter === false) {
+          const bankNow = await bankroll(sp);
+          const roundsNow = await rounds(sp);
+          await sp.keyboard.press('x');
+          await sp.waitForTimeout(150);
+          reproRoundsDelta = (await rounds(sp)) - roundsNow;
+          reproStarted = (await inHand(sp)) || (await bankroll(sp)) !== bankNow;
+        }
+        seeded = {
+          seed: AC6_SEED, seedInPlay: made.seedInPlay, ...seededDetail,
+          verdict: ac6Verdict(seededDetail), reproStarted, reproRoundsDelta,
+        };
+      } catch (e) {
+        seeded = { error: String(e) };
+      }
+      if (sp) await sp.close().catch(() => {});
+
+      put('AC6 session report has no grace window', ac6Verdict(randomDetail), { ...randomDetail, seeded });
     }
     // AC7: a held Enter (auto-repeat) deals exactly one round.
     {
