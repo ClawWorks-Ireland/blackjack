@@ -21,26 +21,43 @@ const reportText = (p) => p.evaluate(() => ({ title: document.getElementById('re
 const bankroll = (p) => p.$eval('#bankroll', (e) => Number(e.textContent.replace(/[^\d]/g, '')));
 const active = (p) => p.evaluate(() => document.activeElement && document.activeElement.id);
 
-// Harness recorder, installed before the page's own scripts. window.__b109 holds
-// when #report last opened (openedAt) and the first keydown since (keyAt), both
-// on the page's own clock, so pressMs does not include any Playwright latency.
+// Harness recorder, installed before the page's own scripts. window.__b109.opens
+// has one entry per opening of #report, stamped in a showModal wrapper just before
+// the native call, i.e. before the app starts its grace window. The first keydown
+// after an opening is stamped on that entry (keyAt = the event's timeStamp,
+// handledAt = performance.now() when the page's capture listener runs, which is
+// where the app's own listener checks performance.now()), together with the
+// pre-deal values. All on the page's clock, so no Playwright latency in pressMs.
 function installRecorder() {
-  const rec = { openedAt: null, keyAt: null };
+  const rec = { opens: [] };
   window.__b109 = rec;
+  const native = HTMLDialogElement.prototype.showModal;
+  HTMLDialogElement.prototype.showModal = function showModal(...args) {
+    // No reads of rounds or bank here: render() opens a held report before renderStats().
+    if (this.id === 'report' && !this.open) rec.opens.push({ openedAt: performance.now(), keyAt: null });
+    return native.apply(this, args);
+  };
   window.addEventListener('keydown', (e) => {
-    if (rec.openedAt !== null && rec.keyAt === null) rec.keyAt = e.timeStamp;
-  }, true);
-  document.addEventListener('DOMContentLoaded', () => {
     const dlg = document.getElementById('report');
-    if (!dlg) return;
-    const opened = () => { rec.openedAt = performance.now(); rec.keyAt = null; };
-    if (dlg.open) opened();
-    let was = dlg.open;
-    new MutationObserver(() => {
-      if (dlg.open && !was) opened();
-      was = dlg.open;
-    }).observe(dlg, { attributes: true, attributeFilter: ['open'] });
-  });
+    const cur = rec.opens[rec.opens.length - 1];
+    if (!dlg || !dlg.open || !cur || cur.keyAt !== null) return;
+    const text = (id) => document.getElementById(id).textContent;
+    cur.keyAt = e.timeStamp;
+    cur.handledAt = performance.now();
+    cur.focus = document.activeElement && document.activeElement.id;
+    cur.rounds = Number(text('stat-rounds').replace(/[^\d]/g, ''));
+    cur.bank = Number(text('bankroll').replace(/[^\d]/g, ''));
+    cur.title = text('report-title');
+    cur.sub = text('report-sub');
+  }, true);
+  // The report's close event (it doesn't bubble, but the capture phase sees it) is stamped on the
+  // keyed opening that is still unclosed. A held report reopens once the dealt hand settles, which
+  // with animations off can be inside any fixed wait, so "is it closed now" is not evidence.
+  window.addEventListener('close', (e) => {
+    if (!e.target || e.target.id !== 'report') return;
+    const k = rec.opens.find((o) => typeof o.keyAt === 'number' && !o.closedAt);
+    if (k) k.closedAt = performance.now();
+  }, true);
 }
 
 async function freshPage(b) {
@@ -99,51 +116,63 @@ async function reach(names, opts) {
   return null;
 }
 
-// One round trip just before the key press: everything slow comes after it.
-const snapshot = (p) => p.evaluate(() => {
-  const num = (id) => Number(document.getElementById(id).textContent.replace(/[^\d]/g, ''));
+/**
+ * The page's own record of the first keyed opening of #report:
+ * { open, pressMs, handledMs, openedAt, keyAt, handledAt, focus, rounds, bank, title, sub }.
+ * With no key seen: { open: false, pressMs: null, handledMs: null, rounds: null }.
+ */
+const pressRecord = (p) => p.evaluate(() => {
+  const e = ((window.__b109 && window.__b109.opens) || []).find((o) => typeof o.keyAt === 'number');
+  if (!e) return { open: false, pressMs: null, handledMs: null, rounds: null };
   return {
-    open: document.getElementById('report').open,
-    rounds: num('stat-rounds'),
-    title: document.getElementById('report-title').textContent,
-    sub: document.getElementById('report-sub').textContent,
-    focus: document.activeElement && document.activeElement.id,
-    bank: num('bankroll'),
+    open: true,
+    pressMs: e.keyAt - e.openedAt,
+    handledMs: e.handledAt - e.openedAt,
+    openedAt: e.openedAt,
+    keyAt: e.keyAt,
+    handledAt: e.handledAt,
+    focus: e.focus,
+    rounds: e.rounds,
+    bank: e.bank,
+    title: e.title,
+    sub: e.sub,
   };
 });
 
-/** The page's own timing of the press: { pressMs, openedAt, keyAt } (pressMs null if either is missing). */
-const pressRecord = (p) => p.evaluate(() => {
-  const { openedAt, keyAt } = window.__b109 || {};
-  const ok = typeof openedAt === 'number' && typeof keyAt === 'number';
-  return { pressMs: ok ? keyAt - openedAt : null, openedAt: openedAt ?? null, keyAt: keyAt ?? null };
+/** Did the report the key was pressed on close (at any point since the press)? */
+const closedByKey = (p) => p.evaluate(() => {
+  const e = ((window.__b109 && window.__b109.opens) || []).find((o) => typeof o.keyAt === 'number');
+  return !!(e && e.closedAt);
 });
 
 /**
  * Reach a report, press a key, and judge it with runGraceCheck (late presses are
- * retried on a fresh table). press(page, snap) -> { extraOk, detail }.
- * The page of the final attempt is returned open, with its snapshot.
+ * retried on a fresh table). The press is the first page call after reachReport
+ * returns. press(page) -> { extraOk, detail }.
+ * The page of the final attempt is returned open, with its record.
  */
 async function graceCheck(press, o = ops) {
   let page = null;
-  let snap = null;
+  let record = null;
   const res = await runGraceCheck(async () => {
     if (page) { await page.close().catch(() => {}); page = null; }
     const r = await reachReport(o);
     if (!r.ok) return { ok: false, detail: { ...reachFailure(r), reachReason: r.reason } };
     page = r.table;
-    snap = await snapshot(page);
-    const { extraOk, detail } = await press(page, snap);
-    const { pressMs } = await pressRecord(page);
+    const { extraOk, detail } = await press(page);
+    record = await pressRecord(page);
     await playOut(page);
-    const dealt = (await rounds(page)) - snap.rounds;
-    return { open: snap.open, pressMs, dealt, extraOk, detail: { ...detail, dealt, tables: r.tables } };
+    const dealt = record.open ? (await rounds(page)) - record.rounds : null;
+    return {
+      open: record.open, pressMs: record.pressMs, handledMs: record.handledMs, dealt, extraOk,
+      detail: { ...detail, focus: record.focus ?? null, bank: record.bank ?? null, dealt, tables: r.tables },
+    };
   });
-  return { res, page, snap };
+  return { res, page, record };
 }
 
 const record = (name, res) => put(name, res.pass, {
-  ...res.detail, pressMs: res.pressMs, outcome: res.outcome, attempts: res.attempts, history: res.history, reason: res.reason,
+  ...res.detail, pressMs: res.pressMs, handledMs: res.handledMs, outcome: res.outcome, attempts: res.attempts, history: res.history, reason: res.reason,
 });
 
 (async () => {
@@ -152,17 +181,17 @@ const record = (name, res) => put(name, res.pass, {
   try {
     // AC1 + AC2: Enter pressed just as the report opens.
     {
-      const { res, page: p, snap } = await graceCheck(async (pg, s) => {
+      const { res, page: p, record: rec } = await graceCheck(async (pg) => {
         await pg.keyboard.press('Enter');
         await pg.waitForTimeout(100);
-        const closed = !(await reportOpen(pg));
-        return { extraOk: closed, detail: { focus: s.focus, closed } };
+        const closed = await closedByKey(pg);
+        return { extraOk: closed, detail: { closed } };
       });
       record('AC1 Enter in grace window deals one round', res);
       if (res.reason === 'no-report') {
         put('AC2 held report reopens for the same shoe between rounds', false, res.detail);
       } else {
-      const first = { title: snap.title, sub: snap.sub };
+      const first = { title: rec.title, sub: rec.sub };
       const r = { tables: res.detail.tables };
       let reopened = false;
       try { await p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: 1500 }); reopened = true; } catch (e) { /* stays closed */ }
@@ -175,13 +204,13 @@ const record = (name, res) => put(name, res.pass, {
     }
     // AC3: x in the grace window deals one round at twice the last bet.
     {
-      const { res, page: p } = await graceCheck(async (pg, s) => {
+      const { res, page: p } = await graceCheck(async (pg) => {
         await pg.keyboard.press('x');
         await pg.waitForTimeout(100);
-        const closed = !(await reportOpen(pg));
+        const closed = await closedByKey(pg);
         const bet = await pg.$eval('#bet', (e) => e.value);
         const guess = await pg.$eval('#rep-guess', (e) => e.value);
-        return { extraOk: closed && bet === '20' && !/x/i.test(guess), detail: { closed, bet, guess, bank: s.bank } };
+        return { extraOk: closed && bet === '20' && !/x/i.test(guess), detail: { closed, bet, guess } };
       });
       record('AC3 x in grace window deals one round at twice the last bet', res);
       if (p) await p.close();
