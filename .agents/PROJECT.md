@@ -36,6 +36,8 @@ no_lint_or_types: true   # G4 'lint, types pass' is vacuous here until one is ad
 owner_login: delmarolivier   # the sole human approver (H)
 test_command: npm test
 qa_command: npm run qa:ci   # browser QA round after each merge (qa.yml, team v2.8): sandbox VM, headless Chrome
+source_repos:   # REQ-COORD-10, Delmar 2026-11-25: org repos slices may read (blackjack#199 imports packages/casino-advisor)
+  - botversusbot.com
 test_tools:   # commands implementers and verifiers may run to test
   - npm test
   - node --test

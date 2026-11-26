@@ -3,7 +3,7 @@
 name: orchestrator
 on:
   schedule:
-    - cron: '7 * * * *'      # hourly, 24x7; the 08:00 Dublin digest hour is checked below (DST-safe)
+    - cron: '7 * * * *'      # hourly, 24x7, in this project's slot of the hour (render.js); the 08:00 Dublin digest hour is checked below (DST-safe)
   issues:
     types: [opened, labeled, closed]
   pull_request_target:
@@ -124,3 +124,20 @@ jobs:
           fi
       - if: failure() && steps.claude.outcome == 'failure'
         run: node scripts/gates/gate.js throttle-check --file "${{ steps.claude.outputs.execution_file }}"
+
+  # QA rounds on PR heads (REQ-COORD-10, team v2.32). Model-free: for each open PR whose slice has a `QA:` line and
+  # whose ci, ai-review and security are green, set `qa` pending and dispatch qa.yml on its head. A status write is
+  # as strong as a key (REQ-CFG-3), so this runs as its own job on a key VM, never in the model's job.
+  qa-sweep:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: qa-sweep
+      cancel-in-progress: false
+    runs-on: [self-hosted, vm-keyed]
+    timeout-minutes: 10
+    permissions: { contents: read, pull-requests: read, issues: read, statuses: write, actions: write }
+    steps:
+      - uses: actions/checkout@v4   # the gate scripts on main only
+        with: { ref: main, persist-credentials: false }
+      - env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: node scripts/gates/gate.js qa-sweep

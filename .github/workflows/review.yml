@@ -39,6 +39,12 @@ jobs:
           node scripts/gates/gate.js status --sha "$SHA" --context ai-review --state pending --description "AI review running"
           TIER=$(node scripts/gates/gate.js floor --pr "$PR" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tier))')
           if [ "$TIER" = "2" ]; then L='["logic","state","contract","performance","rules"]'; else L='["logic","state","contract"]'; fi   # project type (REQ-OPS-17)
+          # A security slice gets the rules lens at any tier (SecurityClaw#75): REVIEW.md's invariants went unchecked on a
+          # Tier 0 PR whose placeholder domains were real, because only Tier 2 ran the lens that compares against them.
+          SLICE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q .body | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -n "$SLICE" ] && [ "$(gh issue view "$SLICE" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name]|index("security") != null')" = true ]; then
+            L=$(node -e 'const l=JSON.parse(process.argv[1]); if (!l.includes("rules")) l.push("rules"); console.log(JSON.stringify(l))' "$L")
+          fi
           LAST=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name|select(startswith("round:"))|ltrimstr("round:")|tonumber]|max // 0')
           # Rounds count the coder's changes: a pure branch update is re-reviewed in the same round.
           PURE=$(node scripts/gates/gate.js pure-update --pr "$PR" --sha "$SHA" || echo pure=false)
@@ -47,18 +53,8 @@ jobs:
           if [ "$ROUND" -gt 3 ]; then
             echo "capped=true" >> "$GITHUB_OUTPUT"
             node scripts/gates/gate.js status --sha "$SHA" --context ai-review --state failure --description "Round cap (3) reached: escalated (REQ-FLOW-1)"
-            # No slice behind the PR (a re-render, or one the console opened): there is nothing to re-slice, so it is
-            # console work, not a question for the owner (spec §1.1; home-automation#15, 2026-11-23).
-            if ! gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q .body | grep -qiE 'closes #[0-9]+'; then
-              gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label console-work
-              gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Round cap (3) reached on a PR with no slice to re-slice. It is **console work** (\`console-work\`): the console opens a fresh PR with the open findings fixed and closes this one."
-              exit 0
-            fi
-            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label needs-human
-            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "ROLE: AI review (A5/A6)   ITEM: #$PR   RESULT: needs-human
-          WHAT CHANGED: nothing; a 4th review round was requested.
-          EVIDENCE: three rounds ran with Important findings still open.
-          NEXT: @delmarolivier Re-slice via A2 (recommended) or take over by hand? Reply \`re-slice\` or \`take over\`."
+            # Back to A2 (or console work with no slice), never an ask of the owner (gate.js round-cap; SecurityClaw#44).
+            node scripts/gates/gate.js round-cap --pr "$PR" --from review --round "$ROUND"
           else
             echo "capped=false" >> "$GITHUB_OUTPUT"
             gh label create "round:$ROUND" -R "$GITHUB_REPOSITORY" --color ededed 2>/dev/null || true
@@ -313,8 +309,11 @@ jobs:
           node scripts/gates/gate.js review-decide --candidates candidates.json --votes votes/votes-1.json,votes/votes-2.json,votes/votes-3.json \
             --pr "$PR" --sha "$SHA" --round "${{ needs.prep.outputs.round }}" --repro repro/repro.json | tee result.json
           echo "important=$(node -p 'require("./result.json").important')" >> "$GITHUB_OUTPUT"
+      - name: Fix round needed? (Important findings, or A7 already blocked this head; REQ-COORD-10)
+        id: fx
+        run: node scripts/gates/gate.js fix-round-check --from review --pr "$PR" --sha "$SHA" --important "${{ steps.d.outputs.important }}" >> "$GITHUB_OUTPUT"
       - name: Next round — dispatch the implementer fix job
-        if: steps.d.outputs.important != '0' && needs.prep.outputs.round != '3'
+        if: steps.fx.outputs.dispatch == 'true' && needs.prep.outputs.round != '3'
         run: |
           IMPL=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
           ISSUE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
@@ -323,10 +322,15 @@ jobs:
           # daily re-render supersedes this PR.
           if [ -z "$ISSUE" ]; then
             gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label console-work || true
-            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "AI review found Important issues, and this PR has no \`Closes #n\` slice to send back to an implementer. It is **console work** (\`console-work\`): the console fixes it (template first for team files), and a re-render PR is superseded by the next daily re-render."
+            # The reason line (REQ-COORD-6): without it the watcher reports the PR to A10t as a routing defect (#295).
+            NL=$'\n'
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "AI review found Important issues (or A7 blocked it), and this PR has no \`Closes #n\` slice to send back to an implementer. It is **console work** (\`console-work\`): the console fixes it (template first for team files), and a re-render PR is superseded by the next daily re-render.${NL}${NL}CONSOLE-REASON: stuck"
             exit 0
           fi
           gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR"
+      - name: Round cap — round 3 still needs a fix, so escalate now (REQ-FLOW-1; SecurityClaw#44)
+        if: steps.fx.outputs.dispatch == 'true' && needs.prep.outputs.round == '3'
+        run: node scripts/gates/gate.js round-cap --pr "$PR" --from review --round 3
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: review-decision, path: "review-decision.json", retention-days: 90 }
