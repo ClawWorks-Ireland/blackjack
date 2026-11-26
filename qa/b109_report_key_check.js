@@ -50,6 +50,14 @@ function installRecorder() {
     cur.title = text('report-title');
     cur.sub = text('report-sub');
   }, true);
+  // The report's close event (it doesn't bubble, but the capture phase sees it) is stamped on the
+  // keyed opening that is still unclosed. A held report reopens once the dealt hand settles, which
+  // with animations off can be inside any fixed wait, so "is it closed now" is not evidence.
+  window.addEventListener('close', (e) => {
+    if (!e.target || e.target.id !== 'report') return;
+    const k = rec.opens.find((o) => typeof o.keyAt === 'number' && !o.closedAt);
+    if (k) k.closedAt = performance.now();
+  }, true);
 }
 
 async function freshPage(b) {
@@ -131,6 +139,12 @@ const pressRecord = (p) => p.evaluate(() => {
   };
 });
 
+/** Did the report the key was pressed on close (at any point since the press)? */
+const closedByKey = (p) => p.evaluate(() => {
+  const e = ((window.__b109 && window.__b109.opens) || []).find((o) => typeof o.keyAt === 'number');
+  return !!(e && e.closedAt);
+});
+
 /**
  * Reach a report, press a key, and judge it with runGraceCheck (late presses are
  * retried on a fresh table). The press is the first page call after reachReport
@@ -170,7 +184,7 @@ const record = (name, res) => put(name, res.pass, {
       const { res, page: p, record: rec } = await graceCheck(async (pg) => {
         await pg.keyboard.press('Enter');
         await pg.waitForTimeout(100);
-        const closed = !(await reportOpen(pg));
+        const closed = await closedByKey(pg);
         return { extraOk: closed, detail: { closed } };
       });
       record('AC1 Enter in grace window deals one round', res);
@@ -193,7 +207,7 @@ const record = (name, res) => put(name, res.pass, {
       const { res, page: p } = await graceCheck(async (pg) => {
         await pg.keyboard.press('x');
         await pg.waitForTimeout(100);
-        const closed = !(await reportOpen(pg));
+        const closed = await closedByKey(pg);
         const bet = await pg.$eval('#bet', (e) => e.value);
         const guess = await pg.$eval('#rep-guess', (e) => e.value);
         return { extraOk: closed && bet === '20' && !/x/i.test(guess), detail: { closed, bet, guess } };

@@ -26,12 +26,12 @@ if (!sha || !Number.isInteger(runs) || runs < 0 || runs > 5 || process.argv.leng
 function run(cmd, argv, cwd) {
   return new Promise((resolve) => {
     const child = spawn(cmd, argv, { cwd, shell: false });
-    let text = '';
-    const take = (d) => { text += d; process.stdout.write(d); };
-    child.stdout.on('data', take);
-    child.stderr.on('data', take);
-    child.on('error', () => resolve({ code: 2, text }));
-    child.on('close', (code) => resolve({ code: code === null ? 2 : code, text }));
+    let text = ''; // stdout and stderr, as printed
+    let out = ''; // stdout alone (a check's JSON; stderr noise must not break its parse)
+    child.stdout.on('data', (d) => { text += d; out += d; process.stdout.write(d); });
+    child.stderr.on('data', (d) => { text += d; process.stdout.write(d); });
+    child.on('error', () => resolve({ code: 2, text, out }));
+    child.on('close', (code) => resolve({ code: code === null ? 2 : code, text, out }));
   });
 }
 
@@ -44,8 +44,10 @@ const readIf = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch (_) { r
   const round = await run(process.execPath, [path.join(QA, 'run-round.js'), sha], REPO);
   if (round.code >= 2) { console.log(`verdict: error (run-round exit ${round.code})`); process.exit(2); }
 
-  // run-round.js names its directories by the first 7 characters of the commit.
-  const sha7 = sha.slice(0, 7);
+  // run-round.js resolves the commit-ish and names its directories by the first 7 characters of the hash.
+  const resolved = await run('git', ['rev-parse', '--verify', `${sha}^{commit}`], REPO);
+  if (resolved.code !== 0) { console.log('verdict: error (could not resolve the commit)'); process.exit(2); }
+  const sha7 = resolved.out.trim().slice(0, 7);
   const out = path.join(QA, 'reports', sha7);
   const snap = path.join(QA, '.snapshots', sha7);
   const roundJson = parseCheck(readIf(path.join(out, 'b109_report_key_check.out')));
@@ -72,10 +74,15 @@ const readIf = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch (_) { r
         if (Date.now() - started > BUDGET_MS) { repeats.push({ skipped: true }); continue; }
         const r = await run(process.execPath, [path.join(QA, 'b109_report_key_check.js'), url], QA);
         fs.writeFileSync(path.join(out, `b109_repeat_${k}.out`), r.text);
-        repeats.push(parseCheck(r.text));
+        repeats.push(parseCheck(r.out));
       }
     } finally {
-      server.kill();
+      // Wait for the server to exit so the port is free before anything else binds it.
+      await new Promise((resolve) => {
+        if (server.exitCode !== null || server.signalCode !== null) return resolve();
+        server.once('exit', resolve);
+        server.kill();
+      });
     }
   }
 
