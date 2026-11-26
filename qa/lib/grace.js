@@ -11,9 +11,10 @@ const MAX_ATTEMPTS = 3;
  * One key press -> 'not-open' | 'late' | 'dealt-one' | 'no-deal' | 'two-deals'.
  * Checked in that order, so a late press is 'late' whatever was dealt.
  */
-function classify({ open, pressMs, dealt }, graceMs = GRACE_MS) {
+function classify({ open, pressMs, handledMs, dealt }, graceMs = GRACE_MS) {
   if (open === false || pressMs === null || pressMs === undefined) return 'not-open';
   if (pressMs >= graceMs) return 'late';
+  if (typeof handledMs === 'number' && handledMs >= graceMs) return 'late';
   if (dealt === 1) return 'dealt-one';
   if (dealt === 0) return 'no-deal';
   if (dealt >= 2) return 'two-deals';
@@ -39,7 +40,10 @@ async function runGraceCheck(attempt, opts = {}) {
       return { pass: false, outcome: null, reason: 'no-report', pressMs: null, attempts, history, detail: last.detail };
     }
     outcome = classify(last, graceMs);
-    history.push({ pressMs: last.pressMs ?? null, outcome });
+    // handledMs is left out of an entry when the attempt had none (older callers).
+    history.push(typeof last.handledMs === 'number'
+      ? { pressMs: last.pressMs ?? null, handledMs: last.handledMs, outcome }
+      : { pressMs: last.pressMs ?? null, outcome });
     if (outcome !== 'late') break;
   }
   const { extraOk = true, detail } = last;
@@ -50,7 +54,7 @@ async function runGraceCheck(attempt, opts = {}) {
     else if (outcome === 'dealt-one') reason = 'extra';
     else reason = outcome;
   }
-  return { pass, outcome, reason, pressMs: last.pressMs ?? null, attempts, history, detail };
+  return { pass, outcome, reason, pressMs: last.pressMs ?? null, handledMs: last.handledMs ?? null, attempts, history, detail };
 }
 
 module.exports = { runGraceCheck, classify, GRACE_MS, MAX_ATTEMPTS };
