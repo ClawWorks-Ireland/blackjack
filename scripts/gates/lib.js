@@ -451,11 +451,19 @@ function releaseRetryAction({ run, jobs = [], annotations = [] }) {
  * (those workflows run on review events, which use the PR's own workflow files).
  * Returns {ok, behind, reasons[]}.
  */
+/** update-branch's error for a PR that conflicts with main (GitHub: 422 "merge conflict between base and head"). */
+const updateConflict = (e) => !!e && e.status === 422 && /conflict/i.test(String(e.message));
+
 function mergeVerdict({ pr, statuses, checkRuns, reviews, tier, level, now = new Date(), coolingHours = 24, behindBy = 0, qa = null }) {
   const reasons = [];
   if (pr.state !== 'open') reasons.push(`PR is ${pr.state}`);
   if (pr.draft) reasons.push('PR is a draft');
   if (pr.base.ref !== 'main') reasons.push(`base is ${pr.base.ref}, not main`);
+  // blackjack#239 (template#377): a PR that conflicts with main can be neither merged nor updated: GitHub refuses
+  // update-branch with a 422, so while it was the oldest PR behind main every merge run picked it and failed (18 runs in
+  // a day). A reason here keeps it out of ok, behind, staleReview and staleCi. The rebase is a fix round (A0). Only
+  // GitHub's own verdict counts: mergeable is null while it is still computing, and then the update goes ahead.
+  if (pr.mergeable === false || pr.mergeable_state === 'dirty') reasons.push('conflicts with main: needs a rebase (fix round)');
   const head = pr.head.sha;
   const st = trustedStatuses(statuses);
   // tier-approval is judged live below (tierApprovalStatus: the current level and reviews), not from its stored
@@ -1416,7 +1424,7 @@ async function withRetry(attempt, { method, url, retries = 3, delayMs = 1000, sl
 }
 
 module.exports = {
-  retryableCall, withRetry, STALE_CI_CONCLUSIONS,
+  retryableCall, withRetry, STALE_CI_CONCLUSIONS, updateConflict,
   digestStamp, ownerUnassign, OWNER_ASK_LABELS, CONSOLE_APP_BOT,
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
   parseRiskRules, globToRegExp, tierForPath, riskFloor, effectiveTier,
