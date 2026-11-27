@@ -1,0 +1,11 @@
+{
+  "description": "Basic strategy — optimal play per H17 S17 rules",
+  "strategy": "basic",
+  "decks": 6,
+  "penetration": 0.75,
+  "startingBankroll": 1000,
+  "bet": 25,
+  "maxHands": 200,
+  "minBet": 10,
+  "maxBet": 500
+}

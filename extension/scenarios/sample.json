@@ -1,0 +1,11 @@
+{
+  "description": "Sample scenario — basic strategy, 6-deck shoe, 75% penetration, 100 hands",
+  "strategy": "basic",
+  "decks": 6,
+  "penetration": 0.75,
+  "startingBankroll": 1000,
+  "bet": 25,
+  "maxHands": 100,
+  "minBet": 10,
+  "maxBet": 500
+}

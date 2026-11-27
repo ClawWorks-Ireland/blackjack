@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Casino Advisor</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <span class="logo">🃏 Casino Advisor</span>
+      <span id="phase-badge" class="phase-badge phase-idle">Idle</span>
+    </header>
+
+    <!-- Count Display -->
+    <section class="count-section">
+      <div class="count-grid">
+        <div class="count-item">
+          <span class="count-label">Running Count</span>
+          <span id="running-count" class="count-value">—</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">True Count</span>
+          <span id="true-count" class="count-value">—</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">Decks Left</span>
+          <span id="decks-remaining" class="count-value">—</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">Penetration</span>
+          <span id="penetration" class="count-value">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bet Advice -->
+    <section id="bet-advice-section" class="advice-section hidden">
+      <h2 class="section-title">Bet Sizing</h2>
+      <div id="bet-advice" class="bet-advice">—</div>
+    </section>
+
+    <!-- Hand Advice -->
+    <section id="hand-advice-section" class="advice-section hidden">
+      <h2 class="section-title">Play Advice</h2>
+
+      <!-- Dealer upcard -->
+      <div class="dealer-row">
+        <span class="label">Dealer shows:</span>
+        <span id="dealer-upcard" class="card-display">—</span>
+      </div>
+
+      <!-- Per-seat advice -->
+      <div id="seats-container"></div>
+    </section>
+
+    <!-- No table detected -->
+    <div id="no-table" class="no-table">
+      <p>No Evolution Gaming blackjack table detected.</p>
+      <p class="hint">Navigate to an Evolution Gaming live blackjack table to activate.</p>
+    </div>
+  </div>
+
+  <script src="sidepanel.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Casino Advisor",
+  "version": "0.1.0",
+  "description": "Real-time blackjack strategy advisor powered by card counting and basic strategy.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "*://*.egcvi.com/*",
+    "*://*.evo-games.com/*",
+    "*://*.evolution.com/*",
+    "*://*.pragmaticplaylive.net/*",
+    "*://*.pragmatic-play.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.egcvi.com/*",
+        "*://*.evo-games.com/*",
+        "*://*.evolution.com/*",
+        "*://*.pragmaticplaylive.net/*",
+        "*://*.pragmatic-play.com/*"
+      ],
+      "js": ["src/content/inject.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "*://*.egcvi.com/*",
+        "*://*.evo-games.com/*",
+        "*://*.evolution.com/*",
+        "*://*.pragmaticplaylive.net/*",
+        "*://*.pragmatic-play.com/*"
+      ],
+      "js": ["src/content/bridge.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+  "action": {
+    "default_title": "Casino Advisor",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
