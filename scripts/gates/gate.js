@@ -231,7 +231,14 @@ const commands = {
   async 'update-branch'() {
     const pr = await gh('GET', repo(`/pulls/${args.pr}`));
     if (pr.state !== 'open' || pr.merged_at) throw new Error(`#${args.pr} is ${pr.merged_at ? 'merged' : pr.state}: not updating it`);
-    await gh('PUT', repo(`/pulls/${args.pr}/update-branch`), { expected_head_sha: pr.head.sha });
+    // GitHub may still have been computing mergeable when the plan ran (null, so mergeVerdict let it through): a 422
+    // conflict is then the PR's state, not a failure of this run, and the next plan skips it (template#377).
+    try {
+      await gh('PUT', repo(`/pulls/${args.pr}/update-branch`), { expected_head_sha: pr.head.sha });
+    } catch (e) {
+      if (G.updateConflict(e)) { console.log(`#${args.pr}: conflicts with main, not updated (needs a rebase fix round)`); return; }
+      throw e;
+    }
     console.log(`#${args.pr}: update-branch requested (gates will re-run on the new head)`);
   },
   async guard() {

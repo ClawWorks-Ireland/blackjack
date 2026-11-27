@@ -166,6 +166,34 @@ test('T17 serial merge: a ready PR behind main is updated first, not merged', ()
   assert.equal(v.behind, true);
 });
 
+test('a PR that conflicts with main is neither merged nor updated (blackjack#239, template#377)', () => {
+  for (const conflict of [{ mergeable: false }, { mergeable_state: 'dirty' }]) {
+    const p = readyPr({ behindBy: 3 });
+    Object.assign(p.pr, conflict);
+    const v = G.mergeVerdict(p);
+    assert.equal(v.ok, false);
+    assert.equal(v.behind, false, 'never picked for update-branch, which GitHub refuses with a 422');
+    assert.match(v.reasons.join(' '), /conflicts with main/);
+    // nor as a stale review or stale ci update
+    p.statuses = p.statuses.map((x) => (x.context === 'ai-review' ? { ...x, state: 'failure' } : x));
+    assert.equal(G.mergeVerdict(p).staleReview, false);
+  }
+  // GitHub still computing (null): not a conflict yet, so the update goes ahead
+  const p = readyPr({ behindBy: 3 });
+  p.pr.mergeable = null;
+  assert.equal(G.mergeVerdict(p).behind, true);
+  p.pr.mergeable = true; p.pr.mergeable_state = 'behind';
+  assert.equal(G.mergeVerdict(p).behind, true);
+});
+
+test('update-branch treats only a 422 conflict as the PR state, not a failed run (template#377)', () => {
+  const err = (status, message) => Object.assign(new Error(`PUT /pulls/1/update-branch → ${status}: ${message}`), { status });
+  assert.equal(G.updateConflict(err(422, 'merge conflict between base and head')), true);
+  assert.equal(G.updateConflict(err(422, 'expected head sha didn’t match current head ref.')), false);
+  assert.equal(G.updateConflict(err(403, 'Resource not accessible by integration')), false);
+  assert.equal(G.updateConflict(null), false);
+});
+
 test('Tier 2 merge needs cooling elapsed and a trusted tier2-cooling status', () => {
   const p = readyPr({ tier: 2 });
   assert.equal(G.mergeVerdict(p).ok, false);

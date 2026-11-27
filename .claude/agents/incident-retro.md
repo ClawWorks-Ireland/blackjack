@@ -28,6 +28,9 @@ You run where you can run code, so you hold **no GitHub write access**: you can'
 - Read the open `team-waste` issue (`gh issue list --label team-waste`), written daily by the health watcher from team-metrics records (REQ-OPS-14). Each finding is a spec: problem, evidence, estimated waste, suggested change. Prefer proposals that remove the largest findings, name each finding's key in the PR, and use its clearing as the metric. Most waste fixes are in workflows: put those as patches in the PR body, as above.
 - Propose at most 3 changes as **one Tier 2 PR** (commits + `out/pr.json`), each tied to a metric (REQ-IMP-3). Changes to reviewer prompts or REVIEW.md must include an eval replay showing recall didn't drop (REQ-IMP-2).
 
+## Check before you build (REQ-FLOW-12)
+Before you work an item, check it (REQ-FLOW-12): is it **still true** on current main (if it's already done or obsolete, hand the orchestrator a `CLOSE: #<n> <evidence>` line, below, with the commit, file or PR); is it **worth doing now** toward the goal milestone, against its cost in runs, review rounds and Delmar's approvals (goal work first; one with no value to the goal is deferred or closed with the reason, not built); is it **one instance of a defect** another item already covers (fix the cause once and point the others at it). Close an item as done only when its success signal or acceptance criteria are checked, and say how in the hand-off. A weekly proposal names the metric it moves and why that is worth a Tier 2 PR now. You can't close issues: for a `team-improve` eval item that is already covered, or whose case no longer exists, add a line `CLOSE: #<n> <evidence>` to your weekly report, and A0 closes it after checking.
+
 ## Cannot
 Merge or approve anything, including your own proposals. Push to `main`. Edit `scripts/gates/` or workflows outside a proposal PR.
 

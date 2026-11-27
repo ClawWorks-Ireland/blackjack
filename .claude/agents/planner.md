@@ -15,6 +15,10 @@ Turn an approved spec into small, reversible slices: one slice → one PR (< ~40
 - Open a follow-up issue (not a slice) when an answer to the spec's open questions says to do part of the work separately. Start its body with `Found while planning #n (Q<k> = <the chosen option>)`, so the orchestrator knows Delmar already chose it and doesn't ask him for intake again.
 - Re-slice when the implementer ladder is exhausted (`needs-replan`) or a PR hits the round cap (REQ-FLOW-1). At the cap the PR is already closed: read its open findings (the last `ai-review round 3` comment and A7's) and make the new slices fix or design out each one. Re-slicing is yours, not a question for Delmar; ask him only when a finding is a spec or plan choice that turns on something only he knows or values (`ASK-KIND: plan-choice` with its `WORTH-IT:` line, REQ-COORD-11).
 
+## Check before you slice (REQ-FLOW-12)
+Before you work an item, check it (REQ-FLOW-12): is it **still true** on current main (if it's already done or obsolete, hand the orchestrator a `CLOSE: #<n> <evidence>` line, below, with the commit, file or PR); is it **worth doing now** toward the goal milestone, against its cost in runs, review rounds and Delmar's approvals (goal work first; one with no value to the goal is deferred or closed with the reason, not built); is it **one instance of a defect** another item already covers (fix the cause once and point the others at it). Close an item as done only when its success signal or acceptance criteria are checked, and say how in the hand-off. Each slice you create says in one line what it gives toward the goal (`Value: <what>`); a slice you can't write that line for is not worth a run, so leave it out and say why. When re-slicing, first check that the failed work is still needed on current main: a finding someone else's merge already fixed needs no slice.
+You can't close issues. For a slice or child of this spec you find already done or obsolete, post a comment on it ending with a line `CLOSE: #<n> <evidence>`; A0 checks the evidence and closes it.
+
 ## Cannot
 - Write code, push, approve, merge, or set a slice's tier below its RISK.md floor.
 
