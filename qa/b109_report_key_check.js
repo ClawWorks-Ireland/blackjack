@@ -7,6 +7,7 @@ const { chromium } = require('./lib/browser');
 const { reachReport } = require('./lib/reach');
 const { runGraceCheck } = require('./lib/grace');
 const { AC6_SEED, ac6Verdict } = require('./lib/ac6');
+const { parseMoney, wholeBet } = require('./lib/money');
 
 const URL_ = process.argv[2];
 const checks = {};
@@ -18,7 +19,7 @@ const reportOpen = (p) => p.$eval('#report', (d) => d.open).catch(() => false);
 const inHand = (p) => p.evaluate(() => document.body.classList.contains('in-hand'));
 const rounds = (p) => p.$eval('#stat-rounds', (e) => Number(e.textContent.replace(/[^\d]/g, '')));
 const reportText = (p) => p.evaluate(() => ({ title: document.getElementById('report-title').textContent, sub: document.getElementById('report-sub').textContent }));
-const bankroll = (p) => p.$eval('#bankroll', (e) => Number(e.textContent.replace(/[^\d]/g, '')));
+const bankroll = async (p) => parseMoney(await p.$eval('#bankroll', (e) => e.textContent));
 const active = (p) => p.evaluate(() => document.activeElement && document.activeElement.id);
 
 // Harness recorder, installed before the page's own scripts. window.__b109.opens
@@ -46,7 +47,7 @@ function installRecorder() {
     cur.handledAt = performance.now();
     cur.focus = document.activeElement && document.activeElement.id;
     cur.rounds = Number(text('stat-rounds').replace(/[^\d]/g, ''));
-    cur.bank = Number(text('bankroll').replace(/[^\d]/g, ''));
+    cur.bank = Number(text('bankroll').replace(/[^\d.]/g, ''));
     cur.title = text('report-title');
     cur.sub = text('report-sub');
   }, true);
@@ -217,7 +218,7 @@ const record = (name, res) => put(name, res.pass, {
     }
     // AC4: x with Rebet x2 disabled keeps the report open and deals nothing.
     {
-      const r = await reach(['AC4 x with Rebet x2 disabled keeps the report open and deals nothing'], { betFor: (bank) => Math.min(255, bank), minBankroll: 251 });
+      const r = await reach(['AC4 x with Rebet x2 disabled keeps the report open and deals nothing'], { betFor: (bank) => wholeBet(255, bank), minBankroll: 251 });
       if (r) {
       const p = r.table;
       const rebet2Disabled = await p.$eval('#rebet-2', (e) => e.disabled);
