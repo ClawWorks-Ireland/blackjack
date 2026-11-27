@@ -122,10 +122,23 @@ test('round-cap: a run that failed after its marker is finished by the retry, on
   } finally { st.server.close(); }
 });
 
-test('round-cap: a PR with no slice whose label failed after its comment gets the label on the retry', async () => {
+test('round-cap: a PR with no slice that was handled is not labelled again after the console clears it (SecurityClaw#94)', async () => {
+  const st = await stub({ pr: openPr({ body: 'Change, no slice', labels: [{ name: 'round:3' }] }) });
+  try {
+    assert.equal((await gate(st, ['round-cap', '--pr', '7', '--from', 'review', '--round', '3'])).code, 0);
+    const r2 = await gate(st, ['round-cap', '--pr', '7', '--from', 'review', '--round', '3']);
+    assert.equal(r2.code, 0, r2.out);
+    assert.match(r2.out, /already handled/);
+    assert.equal(st.reqs.filter((q) => q.method === 'POST' && q.url === '/issues/7/labels').length, 1, 'labelled once');
+    assert.equal(st.comments[7].length, 1);
+  } finally { st.server.close(); }
+});
+
+test('round-cap: a PR with no slice whose label failed gets the label and its comment on the retry', async () => {
   const st = await stub({ pr: openPr({ body: 'Change, no slice', labels: [{ name: 'round:3' }] }), failLabels: 1 });
   try {
     assert.notEqual((await gate(st, ['round-cap', '--pr', '7', '--from', 'review', '--round', '3'])).code, 0, 'the label POST failed');
+    assert.equal(st.comments[7].length, 0, 'no marker without the label');
     const r2 = await gate(st, ['round-cap', '--pr', '7', '--from', 'review', '--round', '3']);
     assert.equal(r2.code, 0, r2.out);
     const labelled = st.reqs.filter((q) => q.method === 'POST' && q.url === '/issues/7/labels');
@@ -205,6 +218,36 @@ test('qa-sweep: an invalid QA: line goes back to A2 once per line text', async (
     assert.deepEqual(st.dispatches, [{ workflow: 'spec-plan.yml', inputs: { issue: '3', role: 'plan', replan: 'true' } }]);
     assert.equal((await gate(st, ['qa-sweep'])).code, 0);
     assert.equal(st.dispatches.length, 1, 'not sent twice for the same line');
+  } finally { st.server.close(); }
+});
+
+test('qa-sweep: a stuck round whose label failed is labelled on the next sweep, one comment (finance-insights#70)', async () => {
+  const qaErr = { context: 'qa', state: 'error', creator: BOT, updated_at: '2026-11-26T10:02:00Z' };
+  const st = await stub({ pr: openPr(), statuses: [qaFailed[0], qaFailed[1], qaErr, { ...qaErr, updated_at: '2026-11-26T10:03:00Z' }], failLabels: 1 });
+  try {
+    assert.notEqual((await gate(st, ['qa-sweep'])).code, 0, 'the label POST failed');
+    assert.equal(st.comments[7].length, 0, 'no marker without the label');
+    const r2 = await gate(st, ['qa-sweep']);
+    assert.equal(r2.code, 0, r2.out);
+    const labelled = st.reqs.filter((q) => q.method === 'POST' && q.url === '/issues/7/labels');
+    assert.equal(labelled.length, 2, 'the next sweep adds the label');
+    assert.equal(st.comments[7].length, 1, 'one stuck comment');
+    assert.equal((await gate(st, ['qa-sweep'])).code, 0);
+    assert.equal(st.comments[7].length, 1, 'not posted twice');
+  } finally { st.server.close(); }
+});
+
+test('owner-changes: a PR with no slice whose label failed is labelled on the next review event (finance-insights#70)', async () => {
+  const pr = openPr({ body: 'Change, no slice', reviews: [{ id: 5, user: { login: require('./lib.js').OWNER }, state: 'CHANGES_REQUESTED', commit_id: SHA }] });
+  const st = await stub({ pr, failLabels: 1 });
+  try {
+    assert.notEqual((await gate(st, ['owner-changes', '--pr', '7'])).code, 0, 'the label POST failed');
+    assert.equal(st.comments[7].length, 0, 'no marker without the label');
+    const r2 = await gate(st, ['owner-changes', '--pr', '7']);
+    assert.equal(r2.code, 0, r2.out);
+    assert.equal(st.reqs.filter((q) => q.method === 'POST' && q.url === '/issues/7/labels').length, 2);
+    assert.equal(st.comments[7].length, 1, 'one comment');
+    assert.match((await gate(st, ['owner-changes', '--pr', '7'])).out, /nothing to start/);
   } finally { st.server.close(); }
 });
 
