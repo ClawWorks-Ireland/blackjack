@@ -550,8 +550,10 @@ async function qaSweepOne(p) {
       return;
     }
     if (d.stuck) {
-      await gh('POST', repo(`/issues/${p.number}/comments`), { body: `${G.QA_STUCK_MARKER(head)}\nThe QA round could not run on ${head.slice(0, 7)} twice (a sandbox or runner problem, not the code). It is **console work** (\`console-work\`): the console checks the QA VM, then re-runs the round with \`gh workflow run qa.yml -f sha=${head} -f script=${f.qa.script} -f pr=${p.number}\`${f.qa.args.length ? ` (with \`-f args="${f.qa.args.join(' ')}"\`)` : ''}.\n\nCONSOLE-REASON: stuck` });
+      // The label goes first and the marker last: if the label fails, no marker is left, so the next sweep retries
+      // both (finance-insights#70's AI review).
       await gh('POST', repo(`/issues/${p.number}/labels`), { labels: ['console-work'] });
+      await gh('POST', repo(`/issues/${p.number}/comments`), { body: `${G.QA_STUCK_MARKER(head)}\nThe QA round could not run on ${head.slice(0, 7)} twice (a sandbox or runner problem, not the code). It is **console work** (\`console-work\`): the console checks the QA VM, then re-runs the round with \`gh workflow run qa.yml -f sha=${head} -f script=${f.qa.script} -f pr=${p.number}\`${f.qa.args.length ? ` (with \`-f args="${f.qa.args.join(' ')}"\`)` : ''}.\n\nCONSOLE-REASON: stuck` });
       console.log(`#${p.number}: ${d.why}; console work`);
       return;
     }
@@ -640,12 +642,13 @@ async function roundCap(n, from, round = null) {
   const comments = await all(repo(`/issues/${n}/comments`));
   const handled = comments.some((c) => G.fromGateBot(c) && String(c.body || '').includes(G.ROUND_CAP_MARKER));   // a look-alike counts for nothing
   const plan = G.roundCapPlan({ pr, round: round || labelRound(pr), comments: [], from, runUrl: RUN_URL });
-  // A capped PR with no slice is finished by its console-work label: a retry adds it again if the first run failed
-  // after its comment (finance-insights#69's review). Labels add idempotently.
-  if (!plan || (handled && !plan.close && !plan.prLabels.length)) { console.log(`round-cap: nothing to do on #${n} (under the cap, or already handled)`); return; }
+  // A capped PR with no slice is finished by its console-work label, so the label goes first and the marker last: a
+  // failed label leaves no marker and the retry does both (finance-insights#69), and once the marker is there a later
+  // run never adds the label again after the console has cleared it (SecurityClaw#94's review).
+  if (!plan || (handled && !plan.close)) { console.log(`round-cap: nothing to do on #${n} (under the cap, or already handled)`); return; }
+  if (plan.prLabels.length) await gh('POST', repo(`/issues/${n}/labels`), { labels: plan.prLabels });
   if (handled) console.log(`round-cap: #${n} was capped but is still open; finishing the escalation`);
   else await gh('POST', repo(`/issues/${n}/comments`), { body: plan.prComment });
-  if (plan.prLabels.length) await gh('POST', repo(`/issues/${n}/labels`), { labels: plan.prLabels });
   if (plan.issue) {
     const said = handled && (await all(repo(`/issues/${plan.issue}/comments`))).some((c) => G.fromGateBot(c) && String(c.body || '').includes(`PR #${n} used its three review rounds`));
     if (!said) await gh('POST', repo(`/issues/${plan.issue}/comments`), { body: plan.issueComment });
@@ -666,8 +669,9 @@ commands['owner-changes'] = async () => {
   const plan = G.ownerChangesPlan({ pr, reviews: await all(repo(`/pulls/${n}/reviews`)), comments: await all(repo(`/issues/${n}/comments`)) });
   if (!plan) { console.log(`owner-changes: nothing to start on #${n}`); return; }
   if (plan.noSlice) {
-    await gh('POST', repo(`/issues/${n}/comments`), { body: `${G.OWNER_CHANGES_MARKER(plan.reviewId)}\n@${OWNER_LOGIN}'s change request is on a PR with no \`Closes #n\` slice, so no implementer can take it. It is **console work** (\`console-work\`): the console makes the change he asked for.\n\nCONSOLE-REASON: stuck` });
+    // Label first, marker last: a failed label leaves no marker, so the next review event retries (finance-insights#70).
     await gh('POST', repo(`/issues/${n}/labels`), { labels: ['console-work'] });
+    await gh('POST', repo(`/issues/${n}/comments`), { body: `${G.OWNER_CHANGES_MARKER(plan.reviewId)}\n@${OWNER_LOGIN}'s change request is on a PR with no \`Closes #n\` slice, so no implementer can take it. It is **console work** (\`console-work\`): the console makes the change he asked for.\n\nCONSOLE-REASON: stuck` });
     console.log(`owner-changes: #${n} is console work (no slice)`);
     return;
   }

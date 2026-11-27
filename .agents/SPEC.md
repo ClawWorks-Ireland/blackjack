@@ -1,6 +1,6 @@
 # Claude Agent Delivery Team — Requirements & Design Spec
 
-**Version:** 1.20 · **Date:** 2026-11-26 · **Owner:** Delmar (sole human approver, "H")
+**Version:** 1.21 · **Date:** 2026-11-26 · **Owner:** Delmar (sole human approver, "H")
 **Status:** Control plane running on the PC console (`~/console/agent-team-template`). The team runs blackjack, home-automation, finance-insights and botversusbot.com (the first legacy repo adopted); every repo's state is in `projects/README.md`. Next: move the legacy repos to the team or archive them (§13).
 
 ---
@@ -512,6 +512,7 @@ sensitive_paths_extra: []
 ---
 
 ## 14. Changelog
+- **1.21 (2026-11-26):** **A console-work hand-off labels before it marks** (team v2.46.1). REQ-FLOW-1, REQ-COORD-10. The AI review of finance-insights#70 (the v2.46.0 re-render) found two more of the hand-offs #442 fixed in round-cap: qa-sweep's stuck path and owner-changes on a PR with no slice posted their marker comment before the `console-work` label, so a failed label left the marker and every retry read the PR as handled. The PR then never reached the console, and in owner-changes Delmar's change request was dropped. The review of SecurityClaw#94 found that #442's own fix, a retry that re-adds the label, also re-added it on every later round-cap run after the console had cleared it. All three now add the label first and post the marker last, so a failed label leaves no marker and the next run does both, and a marker means the hand-off is complete. Three new `dispatch.test.js` cases fail on the old `gate.js`.
 - **1.20 (2026-11-26):** **An ask says why it is worth his time; the QA gate fails closed** (team v2.46.0). REQ-COORD-11, REQ-COORD-7, REQ-COORD-10, REQ-FLOW-1.
   - **The defect:** H's rule of 2026-11-25, push work to him only where the return is clear, was in CLAUDE.md and the 1.x notes, so it bound his own sessions but not the agents. The ask gate checked only that an ask's kind was his (a spec or plan exists for `spec-choice`, `plan-choice`), so a choice the team would take by its recommended option could still reach him, as an approval of the right thing.
   - **The fix:** REQ-COORD-11. A choice ask carries `WORTH-IT: <what turns on his answer>`, or `WORTH-IT: required approval (§7.1)` when it is only the approval the spec requires; a choice with no reason is decided by the team. The four agents that ask (A0, A1, A2, the incident retro) say so, and the watcher's ask gate bounces a choice without the line, from each project's render of this version onwards. Tested in `ownerload.test.js` and `routing.test.js`.
