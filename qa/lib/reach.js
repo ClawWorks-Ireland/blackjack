@@ -53,4 +53,23 @@ async function reachReport(ops, opts = {}) {
   return { ok: false, table: null, tables, rounds, bankroll, broke, reason: classify({ broke, rounds }) };
 }
 
-module.exports = { reachReport, classify, MAX_TABLES, NO_REPORT_ROUNDS };
+/** The diagnosis recorded when no report was reached (the last reachReport result). */
+function reachFailure(r) {
+  const detail = { reason: r.reason, tables: r.tables, rounds: r.rounds, bankroll: r.bankroll, broke: r.broke };
+  if (r.reason === 'no-report') detail.note = 'game defect: shoe passed the cut card without a report';
+  return detail;
+}
+
+/**
+ * Reach a shoe report, or record every named check as failed with the diagnosis
+ * (put(name, false, detail)) and return null. Never throws for an unreached report.
+ */
+async function reachOrFail(ops, opts, names, put) {
+  const r = await reachReport(ops, opts);
+  if (r.ok) return r;
+  const detail = reachFailure(r);
+  for (const n of names) put(n, false, detail);
+  return null;
+}
+
+module.exports = { reachReport, reachFailure, reachOrFail, classify, MAX_TABLES, NO_REPORT_ROUNDS };
