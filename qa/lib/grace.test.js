@@ -150,6 +150,30 @@ test('grace: unreachable report stops with no-report', async () => {
   assert.equal(s.calls.length, 1);
 });
 
+test('runGraceCheck: unreached with detail.reason broke -> pass false, reached false, reason broke', async () => {
+  const s = scripted([{ ok: false, detail: { reason: 'broke', tables: 10 } }]);
+  const r = await runGraceCheck(s.attempt);
+  assert.equal(r.pass, false);
+  assert.equal(r.reached, false);
+  assert.equal(r.reason, 'broke');
+  assert.deepEqual(r.detail, { reason: 'broke', tables: 10 });
+});
+
+test('runGraceCheck: unreached with no detail -> reached false, reason no-report', async () => {
+  const s = scripted([{ ok: false }]);
+  const r = await runGraceCheck(s.attempt);
+  assert.equal(r.pass, false);
+  assert.equal(r.reached, false);
+  assert.equal(r.reason, 'no-report');
+});
+
+test('runGraceCheck: reached attempt -> reached true', async () => {
+  const s = scripted([{ open: true, pressMs: 100, dealt: 1 }]);
+  const r = await runGraceCheck(s.attempt);
+  assert.equal(r.pass, true);
+  assert.equal(r.reached, true);
+});
+
 test('grace: graceMs option moves the late boundary', async () => {
   const s = scripted([{ open: true, pressMs: 300, dealt: 1 }]);
   const r = await runGraceCheck(s.attempt, { maxAttempts: 1, graceMs: 200 });

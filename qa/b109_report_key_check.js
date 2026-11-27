@@ -4,7 +4,7 @@
 // Single-deck table so the cut card comes quickly. Stands on everything.
 // Usage: node qa/b109_report_key_check.js <url>
 const { chromium } = require('./lib/browser');
-const { reachReport } = require('./lib/reach');
+const { reachReport, reachFailure, reachOrFail } = require('./lib/reach');
 const { runGraceCheck } = require('./lib/grace');
 const { AC6_SEED, ac6Verdict } = require('./lib/ac6');
 const { parseMoney, wholeBet } = require('./lib/money');
@@ -102,20 +102,8 @@ const ops = {
   waitReport: (p, ms) => p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: ms }).then(() => true, () => false),
 };
 
-const reachFailure = (r) => {
-  const detail = { reason: r.reason, tables: r.tables, rounds: r.rounds, bankroll: r.bankroll, broke: r.broke };
-  if (r.reason === 'no-report') detail.note = 'game defect: shoe passed the cut card without a report';
-  return detail;
-};
-
 /** Reach a shoe report, or fail every named check with the diagnosis and return null. */
-async function reach(names, opts) {
-  const r = await reachReport(ops, opts);
-  if (r.ok) return r;
-  const detail = reachFailure(r);
-  for (const n of names) put(n, false, detail);
-  return null;
-}
+const reach = (names, opts) => reachOrFail(ops, opts, names, put);
 
 /**
  * The page's own record of the first keyed opening of #report:
@@ -189,7 +177,7 @@ const record = (name, res) => put(name, res.pass, {
         return { extraOk: closed, detail: { closed } };
       });
       record('AC1 Enter in grace window deals one round', res);
-      if (res.reason === 'no-report') {
+      if (res.reached === false) {
         put('AC2 held report reopens for the same shoe between rounds', false, res.detail);
       } else {
       const first = { title: rec.title, sub: rec.sub };

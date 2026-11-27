@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { reachReport, classify, MAX_TABLES, NO_REPORT_ROUNDS } = require('./reach');
+const { reachReport, reachFailure, reachOrFail, classify, MAX_TABLES, NO_REPORT_ROUNDS } = require('./reach');
 
 // Fake tables: each table is a script of per-round outcomes { bankroll, report }.
 // start is the opening bankroll. A table with bankroll <= 0 is broke.
@@ -102,6 +102,45 @@ test('classify: not broke, 10 rounds -> broke', () => {
 });
 test('classify: broke, 30 rounds -> broke', () => {
   assert.equal(classify({ broke: true, rounds: 30 }), 'broke');
+});
+
+const NAMES = ['AC4 check', 'AC5 check'];
+const brokeResult = { ok: false, table: null, tables: 10, rounds: 7, bankroll: 0, broke: true, reason: 'broke' };
+
+test('reachOrFail: every table broke -> put called once per name with pass false and detail keys reason, tables, rounds, bankroll, broke; returns null; does not throw', async () => {
+  const f = fake([{ start: 10, script: [{ bankroll: 0 }] }]);
+  const puts = [];
+  const r = await reachOrFail(f.ops, {}, NAMES, (n, pass, detail) => puts.push({ n, pass, detail }));
+  assert.equal(r, null);
+  assert.deepEqual(puts.map((p) => p.n), NAMES);
+  for (const p of puts) {
+    assert.equal(p.pass, false);
+    assert.deepEqual(Object.keys(p.detail), ['reason', 'tables', 'rounds', 'bankroll', 'broke']);
+    assert.equal(p.detail.reason, 'broke');
+    assert.equal(p.detail.tables, 10);
+    assert.equal(p.detail.broke, true);
+  }
+  assert.deepEqual(reachFailure(brokeResult), { reason: 'broke', tables: 10, rounds: 7, bankroll: 0, broke: true });
+});
+
+test('reachOrFail: no-report -> detail.note names a game defect', async () => {
+  const script = Array.from({ length: 40 }, () => ({ bankroll: 1000 }));
+  const f = fake([{ start: 1000, script }]);
+  const puts = [];
+  const r = await reachOrFail(f.ops, {}, ['AC5 check'], (n, pass, detail) => puts.push({ n, pass, detail }));
+  assert.equal(r, null);
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].detail.reason, 'no-report');
+  assert.match(puts[0].detail.note, /game defect/);
+});
+
+test('reachOrFail: report reached -> returns the result and put is never called', async () => {
+  const f = fake([{ script: [{ bankroll: 990 }, { bankroll: 1000, report: true }] }]);
+  let calls = 0;
+  const r = await reachOrFail(f.ops, {}, NAMES, () => { calls++; });
+  assert.equal(r.ok, true);
+  assert.equal(r.tables, 1);
+  assert.equal(calls, 0);
 });
 
 test('reach: maxTables 1 and broke -> ok false, tables 1', async () => {

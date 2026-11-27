@@ -25,7 +25,8 @@ function classify({ open, pressMs, handledMs, dealt }, graceMs = GRACE_MS) {
  * attempt(n) (async) -> { open, pressMs, dealt, extraOk = true, detail }, or
  *   { ok: false, detail } when no report could be reached.
  * Late presses are retried up to maxAttempts; anything else stops the loop.
- * Returns { pass, outcome, reason, pressMs, attempts, history[, detail] }.
+ * Returns { pass, reached, outcome, reason, pressMs, attempts, history[, detail] }.
+ * reached is false when no report was reached; reason is then detail.reason, else 'no-report'.
  */
 async function runGraceCheck(attempt, opts = {}) {
   const { maxAttempts = MAX_ATTEMPTS, graceMs = GRACE_MS } = opts;
@@ -37,7 +38,8 @@ async function runGraceCheck(attempt, opts = {}) {
     attempts++;
     last = await attempt(attempts);
     if (last && last.ok === false) {
-      return { pass: false, outcome: null, reason: 'no-report', pressMs: null, attempts, history, detail: last.detail };
+      const reason = last.detail && last.detail.reason ? last.detail.reason : 'no-report';
+      return { pass: false, reached: false, outcome: null, reason, pressMs: null, attempts, history, detail: last.detail };
     }
     outcome = classify(last, graceMs);
     // handledMs is left out of an entry when the attempt had none (older callers).
@@ -54,7 +56,7 @@ async function runGraceCheck(attempt, opts = {}) {
     else if (outcome === 'dealt-one') reason = 'extra';
     else reason = outcome;
   }
-  return { pass, outcome, reason, pressMs: last.pressMs ?? null, handledMs: last.handledMs ?? null, attempts, history, detail };
+  return { pass, reached: true, outcome, reason, pressMs: last.pressMs ?? null, handledMs: last.handledMs ?? null, attempts, history, detail };
 }
 
 module.exports = { runGraceCheck, classify, GRACE_MS, MAX_ATTEMPTS };
