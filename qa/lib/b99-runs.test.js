@@ -88,6 +88,8 @@ test('b99-runs: runVerdict marks an in-window no-deal or two-deals on the panel 
     assert.equal(runVerdict(report({ AC1: bad({ ...ac1Ok, ...d, pressMs: 600 }) })), 'fail', outcome);
     assert.equal(runVerdict(report({ AC1: bad({ ...ac1Ok, ...d, hit: 'backdrop' }) })), 'fail', outcome);
     assert.equal(runVerdict(report({ AC1: bad({ ...ac1Ok, ...d, handledMs: undefined }) })), 'fail', outcome);
+    // A harness error in the run means it is not a game defect, whatever AC1 recorded.
+    assert.equal(runVerdict(report({ AC1: bad({ ...ac1Ok, ...d }) }, { errors: ['HARNESS boom'] })), 'fail', outcome);
   }
 });
 

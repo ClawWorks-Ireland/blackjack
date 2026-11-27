@@ -1,7 +1,13 @@
 'use strict';
-// Pure parts of the B99 PR-head runner (qa/b99_pr_check.js) and of the AC2 gate in
-// qa/b99_report_click_check.js: judge one run's JSON, turn a round's verdicts into
-// an exit code, and build the PR-comment lines. No browser, fs or subprocess here.
+// Pure parts of the B99 PR-head runner (qa/b99_pr_check.js): judge one run's JSON, turn
+// a round's verdicts into an exit code, and build the PR-comment lines. No browser, fs
+// or subprocess here.
+//
+// Field contract (#225 AC-d): runVerdict reads AC1 detail fields (outcome, reason, pressMs,
+// handledMs, hit, closed, dealt, attempts) that qa/b99_report_click_check.js does not write
+// on main yet. That check is #229's to change, and #229 also calls ac2Gate from its AC2 and
+// adds the 'harness-late' and 'AC1 did not deal' reasons. Until #229 merges, a real run
+// judges 'fail' (this slice has no QA: line for that reason). Don't edit that check here.
 // Not shared with qa/lib/grace.js (#227 is editing it); GRACE_MS is repeated on purpose.
 
 const GRACE_MS = 500;
@@ -99,7 +105,7 @@ function runVerdict(report) {
     if (failing.length > 0 && failing.every((k) => toleratedFailure(k, found[k]))) return 'tolerated';
   }
 
-  if (found.AC1 && !passed(found.AC1) && (ac1.outcome === 'no-deal' || ac1.outcome === 'two-deals') &&
+  if (errors.length === 0 && found.AC1 && !passed(found.AC1) && (ac1.outcome === 'no-deal' || ac1.outcome === 'two-deals') &&
       num(ac1.pressMs) && ac1.pressMs < GRACE_MS && num(ac1.handledMs) && ac1.handledMs < GRACE_MS &&
       ac1.hit === 'panel') return 'defect';
 
