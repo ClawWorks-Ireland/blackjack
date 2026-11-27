@@ -4,6 +4,8 @@
 // Single-deck table so the cut card comes quickly. Stands on everything.
 // Usage: node qa/b99_report_click_check.js <url>
 const { chromium } = require('./lib/browser');
+const { runGraceCheck, GRACE_MS } = require('./lib/grace');
+const { ac2Gate } = require('./lib/b99-runs');
 
 const URL_ = process.argv[2];
 const checks = {};
@@ -21,25 +23,33 @@ async function freshPage(b, viewport) {
   const p = await b.newPage({ viewport: viewport || VIEWPORT });
   p.on('pageerror', (e) => errors.push(e.stack || String(e)));
   await p.addInitScript(() => {
-    // Page-side timing: when the shoe report opened, and when the press (pointerdown) landed.
+    // Page-side timing: when the shoe report opened (stamped in a showModal wrapper just before
+    // the native call, i.e. before the app starts its grace window), and when the press
+    // (pointerdown) landed and was handled.
     window.__reportOpenedAt = null;
-    // Only the first press while the report is open counts, and its delay is fixed at that moment,
+    // Only the first press while the report is open counts, and it is fixed at that moment,
     // so later clicks (playOut) and a reopened report cannot overwrite it.
-    window.__pressDelay = null;
+    window.__press = null;
+    const native = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function showModal(...args) {
+      if (this.id === 'report' && !this.open) window.__reportOpenedAt = performance.now();
+      return native.apply(this, args);
+    };
     document.addEventListener('pointerdown', (e) => {
       const r = document.getElementById('report');
-      if (window.__pressDelay === null && r && r.open && typeof window.__reportOpenedAt === 'number') {
-        window.__pressDelay = e.timeStamp - window.__reportOpenedAt;
+      if (window.__press === null && r && r.open && typeof window.__reportOpenedAt === 'number') {
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const text = (id) => { const n = document.getElementById(id); return n ? n.textContent : null; };
+        window.__press = {
+          pressMs: e.timeStamp - window.__reportOpenedAt,
+          handledMs: performance.now() - window.__reportOpenedAt,
+          hit: el === r ? 'backdrop' : (el && r.contains(el) ? 'panel' : 'none'),
+          point: { x: e.clientX, y: e.clientY },
+          title: text('report-title'),
+          sub: text('report-sub'),
+        };
       }
     }, true);
-    const watch = () => {
-      const r = document.getElementById('report');
-      if (!r) return;
-      const stamp = () => { if (r.open) window.__reportOpenedAt = performance.now(); };
-      new MutationObserver(stamp).observe(r, { attributes: true, attributeFilter: ['open'] });
-      stamp();
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();
   });
   await p.goto(URL_);
   await p.evaluate(() => {
@@ -54,10 +64,10 @@ async function freshPage(b, viewport) {
 
 /** ms from the report opening to the press landing in the page, or null if either is missing. */
 const pressTiming = (p) => p.evaluate(() => {
-  return { pressAt: typeof window.__pressDelay === 'number' ? window.__pressDelay : null };
+  const s = window.__press;
+  if (!s) return { pressMs: null, pressAt: null, handledMs: null, hit: null, point: null, title: null, sub: null };
+  return { pressMs: s.pressMs, pressAt: s.pressMs, handledMs: s.handledMs, hit: s.hit, point: s.point, title: s.title, sub: s.sub };
 });
-
-const GRACE_MS = 500;
 /**
  * Run attemptFn(freshPage) up to 3 times, each on a fresh page. It returns { p, pass, detail }
  * (plus noPress: true when it never pressed, so the verdict stands). A press that landed
@@ -145,31 +155,51 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   try {
     // AC1 + AC2: Deal clicked just as the report opens.
     {
-      let first, closed;
-      const p = await graceCheck('AC1 deal click in grace window deals one round', b, async (mk) => {
-        const p = await mk();
-        if (!(await reachReport(p))) throw new Error('no shoe report appeared');
-        first = await reportText(p);
-        const before = await rounds(p);
-        const rec = await hitRecord(p, '#deal');
-        const at = rec.point;
+      let p = null;
+      let rec = null;
+      const res = await runGraceCheck(async () => {
+        if (p) { await p.close().catch(() => {}); p = null; }
+        p = await freshPage(b);
+        // Read what the press needs while the hand is over and the report is not open yet;
+        // once it opens, the press is the very next Playwright call.
+        const got = await reachReport(p, async (pg) => ({ before: await rounds(pg), at: await center(pg, '#deal').catch(() => null) }));
+        if (!got || !got.read.at) return { ok: false, detail: { reason: 'no shoe report appeared or no #deal point' } };
+        const { before, at } = got.read;
         await p.mouse.click(at.x, at.y);
         await p.waitForTimeout(100);
-        closed = !(await reportOpen(p));
+        const closed = !(await reportOpen(p));
+        rec = await pressTiming(p);
         await playOut(p);
         const dealt = (await rounds(p)) - before;
         return {
-          p, pass: rec.hit === 'panel' && closed && dealt === 1,
-          detail: { ...rec, closed, dealt, precondition: rec.hit === 'panel' ? 'ok' : 'deal centre is not under the panel' },
+          open: rec.pressMs !== null, pressMs: rec.pressMs, handledMs: rec.handledMs, dealt, extraOk: closed && rec.hit === 'panel',
+          detail: {
+            point: rec.point, hit: rec.hit, closed, dealt, viewport: p.viewportSize(),
+            ...(rec.hit !== 'panel' ? { precondition: 'deal centre is not under the panel' } : {}),
+          },
         };
       });
-      let reopened = false;
-      try { await p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: 1500 }); reopened = true; } catch (e) { /* stays closed */ }
-      const again = reopened ? await reportText(p) : null;
-      const between = !(await inHand(p));
-      put('AC2 held report reopens for the same shoe between rounds',
-        closed && reopened && between && again.title === first.title && again.sub === first.sub, { closedBefore: closed, reopened, between, first, again });
-      await p.close();
+      put('AC1 deal click in grace window deals one round', res.pass, {
+        ...res.detail, outcome: res.outcome, reason: res.reason, pressMs: res.pressMs, handledMs: res.handledMs,
+        hit: res.detail && res.detail.hit !== undefined ? res.detail.hit : null,
+        closed: res.detail && res.detail.closed !== undefined ? res.detail.closed : null,
+        dealt: res.detail && res.detail.dealt !== undefined ? res.detail.dealt : null,
+        attempts: res.attempts, history: res.history,
+      });
+      const gate = ac2Gate(checks['AC1 deal click in grace window deals one round'].detail);
+      const AC2 = 'AC2 held report reopens for the same shoe between rounds';
+      if (gate) {
+        put(AC2, false, gate);
+      } else {
+        const first = { title: rec.title, sub: rec.sub };
+        let reopened = false;
+        try { await p.waitForFunction(() => document.getElementById('report').open, null, { polling: 'raf', timeout: 1500 }); reopened = true; } catch (e) { /* stays closed */ }
+        const again = reopened ? await reportText(p) : null;
+        const between = !(await inHand(p));
+        put(AC2, reopened && between && again.title === first.title && again.sub === first.sub,
+          { closedBefore: true, reopened, between, first, again });
+      }
+      if (p) await p.close().catch(() => {});
     }
     // AC1b: a point over #deal that is backdrop also deals in the grace window.
     {
