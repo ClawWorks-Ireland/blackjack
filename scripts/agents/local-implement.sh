@@ -21,6 +21,8 @@ WT="$(cd "$1" && pwd)"; PROMPT_FILE="$(abspath "$2")"; LOG="$(abspath "$3")"
 [ -r "$PROMPT_FILE" ] && [ -s "$PROMPT_FILE" ] || { echo "Prompt file missing or empty: $PROMPT_FILE" >&2; exit 2; }
 : "${LOCAL_TIMEOUT_MIN:=45}" "${LOCAL_MAX_TURNS:=60}" "${LOCAL_MODEL:=qwen3.5:9b}"
 
+# no-wifi: Ollama on localhost (REQ-OPS-21 covers what crosses the wifi); a stopped Ollama (the gaming pause) should
+# fail this attempt at once, not after minutes of backoff.
 curl -sf -m 5 http://localhost:11434/api/version >/dev/null || { echo "Ollama not reachable on localhost:11434" >&2; exit 3; }
 
 # No subscription or GitHub credentials in this session (REQ-CFG-7, REQ-GATE-3).

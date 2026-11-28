@@ -1405,25 +1405,54 @@ function retryableCall(method, url) {
   if (['GET', 'HEAD', 'DELETE'].includes(m)) return true;
   return m === 'POST' && /\/statuses\/[^/?]+(\?|$)/.test(String(url));
 }
-const RETRY_STATUSES = [502, 503, 504];
+const RETRY_STATUSES = [429, 500, 502, 503, 504];   // a 429 and a 500 too, as REQ-OPS-21 (reads, deletes and status posts only)
 /**
  * Run `attempt()` (one fetch, resolving to a Response) and retry a retryable call up to `retries` times, with
- * backoff, on 502/503/504 or a network error (fetch rejects). A 4xx, or any other status, is returned at once.
+ * backoff, on a 5xx (500, 502, 503, 504), a 429 or a network error (fetch rejects). Any other 4xx is returned at once.
  * Returns the last Response; rethrows the last network error.
  */
-async function withRetry(attempt, { method, url, retries = 3, delayMs = 1000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = () => {} } = {}) {
+// The team's retry policy (spec 1.3, REQ-OPS-21; the same numbers as the watcher's retry.js, which a rendered
+// project can't import): exponential backoff from 2 s, capped at 60 s, with equal jitter (a random point between half
+// and all of each wait), so jobs that lost the same wifi drop don't all retry at once. A network error (fetch
+// rejects: the runners are on the PC, on wifi) gets 7 retries, about 1.5 to 3 minutes, longer than a typical drop;
+// a 502/503/504 gets 3, a few seconds. Delmar, 2026-11-27: "exponential backoff and retry strategy".
+const BACKOFF = { base: 2000, cap: 60000, tries: 3, netTries: 7 };
+const backoffDelay = (i, random = Math.random) => { const d = Math.min(BACKOFF.cap, BACKOFF.base * 2 ** i); return Math.round(d / 2 + random() * (d / 2)); };
+async function withRetry(attempt, { method, url, retries = BACKOFF.tries, netRetries = BACKOFF.netTries, random = Math.random, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = () => {} } = {}) {
   const may = retryableCall(method, url);
   for (let i = 0; ; i++) {
     let res; let err;
     try { res = await attempt(); } catch (e) { err = e; }
     const transient = err || RETRY_STATUSES.includes(res.status);
-    if (!transient || !may || i >= retries) { if (err) throw err; return res; }
-    log(`${method} ${url}: ${err ? `network error (${String(err.message).slice(0, 80)})` : res.status}; retry ${i + 1} of ${retries}`);
-    await sleep(delayMs * 2 ** i);
+    const max = err ? netRetries : retries;
+    if (!transient || !may || i >= max) { if (err) throw err; return res; }
+    log(`${method} ${url}: ${err ? `network drop (${String(err.message).slice(0, 80)})` : res.status}; retry ${i + 1} of ${max}`);
+    await sleep(backoffDelay(i, random));
+  }
+}
+
+/**
+ * The same policy for synchronous calls that only fail on a dropped connection: git fetch and push over https
+ * (gate.js gitNet). Re-pushing the same commit is safe, since git says "up to date" if the first push landed, and a
+ * real refusal (non-fast-forward, permissions) isn't a network error, so it fails at once. NET_ERR names what git, curl
+ * and gh print for a drop.
+ */
+const NET_ERR = /network is unreachable|no route to host|could not resolve host|couldn't resolve|no such host|error connecting to|failed to connect|couldn't connect|connection refused|connection reset|connection timed out|operation timed out|remote end hung up|early EOF|RPC failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|gnutls_handshake|TLS handshake timeout/i;
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function withRetrySync(fn, { netRetries = BACKOFF.netTries, random = Math.random, sleep = sleepSync, log = (m) => console.error(m) } = {}) {
+  for (let i = 0; ; i++) {
+    try { return fn(); } catch (e) {
+      const text = `${e && e.message} ${e && e.stderr ? e.stderr : ''}`;
+      if (!NET_ERR.test(text) || i >= netRetries) throw e;
+      const ms = backoffDelay(i, random);
+      log(`network drop, retry ${i + 1} of ${netRetries} in ${Math.round(ms / 100) / 10}s: ${text.trim().slice(0, 120)}`);
+      sleep(ms);
+    }
   }
 }
 
 module.exports = {
+  withRetrySync, NET_ERR,
   retryableCall, withRetry, STALE_CI_CONCLUSIONS, updateConflict,
   digestStamp, ownerUnassign, OWNER_ASK_LABELS, CONSOLE_APP_BOT,
   OWNER, GATE_BOT, MERGE_BOT, REQUIRED_STATUSES, REQUIRED_CHECK,
