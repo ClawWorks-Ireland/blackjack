@@ -31,11 +31,12 @@ jobs:
         with: { ref: "${{ github.event.pull_request.head.sha }}", path: pr-head, persist-credentials: false }
       - id: s
         run: |
+          retry() { local i=0 n d e; e=$(mktemp); while :; do "$@" 2>"$e" && { cat "$e" >&2; rm -f "$e"; return 0; }; if grep -qiE 'network is unreachable|no route to host|could not resolve host|no such host|server misbehaving|error connecting to|check your internet connection|connection refused|failed to connect|couldn.t connect|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|connect: ' "$e"; then n=7; elif [ -n "${RETRY_WRITE:-}" ]; then break; elif grep -qiE 'connection reset|ECONNRESET|socket hang up|i/o timeout|TLS handshake timeout|ETIMEDOUT|connection timed out|operation timed out|context deadline exceeded|Client.Timeout|unexpected EOF|SSL_ERROR_SYSCALL|recv failure|send failure' "$e"; then n=7; elif grep -qiE 'HTTP 5[0-9][0-9]|HTTP 429|returned error: (429|5[0-9][0-9])|bad gateway|service unavailable|gateway time-?out|something went wrong|rate limit|abuse detection|was submitted too quickly|timed? ?out|EOF' "$e"; then n=3; else break; fi; [ "$i" -lt "$n" ] || break; d=$((2 << i)); [ "$d" -gt 60 ] && d=60; echo "::warning::network call failed, retrying in about ${d}s (spec 1.3, exponential backoff): $1 $2" >&2; sleep $((d / 2 + RANDOM % (d / 2 + 1))); i=$((i + 1)); done; cat "$e" >&2; rm -f "$e"; return 1; }
           if [ "$(node scripts/gates/gate.js carry-over --pr "$PR" --sha "$SHA" --context security)" = carried=true ]; then
             echo "carried=true" >> "$GITHUB_OUTPUT"; exit 0   # same changes as the reviewed head; only main moved
           fi
           node scripts/gates/gate.js status --sha "$SHA" --context security --state pending --description "A7 security review running"
-          gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
+          retry gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > pr.diff
           echo "schema=$(node -p 'JSON.stringify(require("./.agents/schemas/security.json")).replace(/\x27/g, "\\u0027")')" >> "$GITHUB_OUTPUT"   # no single quote can reach the '...' argument (blackjack#46)
       - id: app   # this role's own GitHub identity (spec §8.5, REQ-ID-1)
         if: steps.s.outputs.carried != 'true'
@@ -115,21 +116,22 @@ jobs:
       - uses: actions/checkout@v4   # the gate scripts on main only
         with: { ref: main, persist-credentials: false }
       - run: |
+          retry() { local i=0 n d e; e=$(mktemp); while :; do "$@" 2>"$e" && { cat "$e" >&2; rm -f "$e"; return 0; }; if grep -qiE 'network is unreachable|no route to host|could not resolve host|no such host|server misbehaving|error connecting to|check your internet connection|connection refused|failed to connect|couldn.t connect|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|connect: ' "$e"; then n=7; elif [ -n "${RETRY_WRITE:-}" ]; then break; elif grep -qiE 'connection reset|ECONNRESET|socket hang up|i/o timeout|TLS handshake timeout|ETIMEDOUT|connection timed out|operation timed out|context deadline exceeded|Client.Timeout|unexpected EOF|SSL_ERROR_SYSCALL|recv failure|send failure' "$e"; then n=7; elif grep -qiE 'HTTP 5[0-9][0-9]|HTTP 429|returned error: (429|5[0-9][0-9])|bad gateway|service unavailable|gateway time-?out|something went wrong|rate limit|abuse detection|was submitted too quickly|timed? ?out|EOF' "$e"; then n=3; else break; fi; [ "$i" -lt "$n" ] || break; d=$((2 << i)); [ "$d" -gt 60 ] && d=60; echo "::warning::network call failed, retrying in about ${d}s (spec 1.3, exponential backoff): $1 $2" >&2; sleep $((d / 2 + RANDOM % (d / 2 + 1))); i=$((i + 1)); done; cat "$e" >&2; rm -f "$e"; return 1; }
           D=$(node scripts/gates/gate.js fix-round-check --claim --from security --pr "$PR")   # judges the PR's current head
           [ "$D" = dispatch=true ] || { echo "No fix round from A7 ($D): not blocked, or ai-review decides"; exit 0; }
-          LABELS=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name]|join(" ")')
+          LABELS=$(retry gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name]|join(" ")')
           case " $LABELS " in *" round:3 "*) node scripts/gates/gate.js round-cap --pr "$PR" --from security --round 3; exit 0 ;; esac   # REQ-FLOW-1
-          IMPL=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
-          ISSUE=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>console.log(require("./scripts/gates/lib.js").closingIssues(s)[0]||""))')   # one rule with lib.js closingIssues (#404 follow-up)
+          IMPL=$(retry gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q 'if any(.labels[]; .name=="impl:local") then "local" else "claude" end')
+          ISSUE=$(retry gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body -q '.body' | node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>console.log(require("./scripts/gates/lib.js").closingIssues(s)[0]||""))')   # one rule with lib.js closingIssues (#404 follow-up)
           if [ -z "$ISSUE" ]; then
-            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label console-work || true
+            retry gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label console-work || true
             # The reason line (REQ-COORD-6): without it the watcher reports the PR to A10t as a routing defect (#295).
             NL=$'\n'
-            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "A7 blocked this PR, and it has no \`Closes #n\` slice to send back to an implementer. It is **console work** (\`console-work\`): the console fixes it (template first for team files).${NL}${NL}CONSOLE-REASON: stuck"
+            RETRY_WRITE=1 retry gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "A7 blocked this PR, and it has no \`Closes #n\` slice to send back to an implementer. It is **console work** (\`console-work\`): the console fixes it (template first for team files).${NL}${NL}CONSOLE-REASON: stuck"
             exit 0
           fi
           # A failed dispatch frees the claim, so the next event (or a re-run) on this head can start the round (#425).
-          gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR" \
+          RETRY_WRITE=1 retry gh workflow run implement.yml -R "$GITHUB_REPOSITORY" --ref main -f issue="$ISSUE" -f implementer="$IMPL" -f attempt=1 -f pr="$PR" \
             || { node scripts/gates/gate.js unclaim-fix-round --pr "$PR"; exit 1; }
           echo "Fix round dispatched for #$PR (slice #$ISSUE, $IMPL): it gets A7's findings"
 
@@ -149,8 +151,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { ref: main, persist-credentials: false }
       - run: |
+          retry() { local i=0 n d e; e=$(mktemp); while :; do "$@" 2>"$e" && { cat "$e" >&2; rm -f "$e"; return 0; }; if grep -qiE 'network is unreachable|no route to host|could not resolve host|no such host|server misbehaving|error connecting to|check your internet connection|connection refused|failed to connect|couldn.t connect|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|connect: ' "$e"; then n=7; elif [ -n "${RETRY_WRITE:-}" ]; then break; elif grep -qiE 'connection reset|ECONNRESET|socket hang up|i/o timeout|TLS handshake timeout|ETIMEDOUT|connection timed out|operation timed out|context deadline exceeded|Client.Timeout|unexpected EOF|SSL_ERROR_SYSCALL|recv failure|send failure' "$e"; then n=7; elif grep -qiE 'HTTP 5[0-9][0-9]|HTTP 429|returned error: (429|5[0-9][0-9])|bad gateway|service unavailable|gateway time-?out|something went wrong|rate limit|abuse detection|was submitted too quickly|timed? ?out|EOF' "$e"; then n=3; else break; fi; [ "$i" -lt "$n" ] || break; d=$((2 << i)); [ "$d" -gt 60 ] && d=60; echo "::warning::network call failed, retrying in about ${d}s (spec 1.3, exponential backoff): $1 $2" >&2; sleep $((d / 2 + RANDOM % (d / 2 + 1))); i=$((i + 1)); done; cat "$e" >&2; rm -f "$e"; return 1; }
           TIER=$(node scripts/gates/gate.js floor --pr "$PR" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tier))')
-          if [ "$TIER" != "2" ]; then gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Security waivers apply to Tier 2 PRs only (G7). This PR is Tier $TIER: fix the finding instead."; exit 0; fi
+          if [ "$TIER" != "2" ]; then RETRY_WRITE=1 retry gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Security waivers apply to Tier 2 PRs only (G7). This PR is Tier $TIER: fix the finding instead."; exit 0; fi
           # Recomputes `security` from every owner waiver line on the PR against A7's findings at the head, so a run
           # cancelled in the concurrency queue loses nothing (home-automation#18). A waiver names a finding in the
           # latest list A7 posted before it, so one posted while A7 is still reviewing a head doesn't apply there:

@@ -1124,15 +1124,15 @@ test('withRetry: a 504 then 201 succeeds; a 4xx and a merge are never retried (S
   const run = async (codes, method, url) => {
     let calls = 0; const slept = [];
     const res = await G.withRetry(async () => ({ status: codes[Math.min(calls++, codes.length - 1)] }),
-      { method, url, sleep: async (ms) => { slept.push(ms); } });
+      { method, url, random: () => 1, sleep: async (ms) => { slept.push(ms); } });
     return { status: res.status, calls, slept };
   };
   const st = '/repos/o/r/statuses/' + 'a'.repeat(40);
-  assert.deepEqual(await run([504, 201], 'POST', st), { status: 201, calls: 2, slept: [1000] });
+  assert.deepEqual(await run([504, 201], 'POST', st), { status: 201, calls: 2, slept: [2000] });
   assert.deepEqual(await run([422], 'POST', st), { status: 422, calls: 1, slept: [] }, 'a 4xx is final');
   assert.deepEqual(await run([404, 200], 'GET', '/repos/o/r/pulls/1'), { status: 404, calls: 1, slept: [] });
   assert.deepEqual(await run([502, 503, 504, 504, 200], 'GET', '/repos/o/r/pulls/1'),
-    { status: 504, calls: 4, slept: [1000, 2000, 4000] }, 'three retries, then the last response');
+    { status: 504, calls: 4, slept: [2000, 4000, 8000] }, 'three retries, then the last response');
   assert.deepEqual(await run([504, 200], 'PUT', '/repos/o/r/pulls/1/merge'), { status: 504, calls: 1, slept: [] }, 'never a merge');
   assert.deepEqual(await run([504, 200], 'PUT', '/repos/o/r/pulls/1/update-branch'), { status: 504, calls: 1, slept: [] });
   assert.deepEqual(await run([504, 201], 'POST', '/repos/o/r/issues/1/comments'), { status: 504, calls: 1, slept: [] }, 'a comment could post twice');
@@ -1365,4 +1365,47 @@ test('#337 follow-up: Delmar\'s change request starts one fix round, with his wo
   assert.ok(G.ownerChangesPlan({ pr, reviews: [rv(2, 'CHANGES_REQUESTED')], comments: [{ user: { login: 'mallory' }, body: G.OWNER_CHANGES_MARKER(2) }] }), 'a look-alike marker cannot stop his change request');
   assert.deepEqual(G.ownerChangesPlan({ pr: { ...pr, body: 'Re-render' }, reviews: [rv(2, 'CHANGES_REQUESTED')] }), { reviewId: 2, noSlice: true });
   assert.equal(G.ownerChangesPlan({ pr: { ...pr, state: 'closed' }, reviews: [rv(2, 'CHANGES_REQUESTED')] }), null);
+});
+
+test('withRetry: exponential backoff with jitter rides out a wifi drop; a merge still never retries (2026-11-27)', async () => {
+  const slept = [];
+  let n = 0;
+  const top = () => 1;   // the top of each jitter range, so the waits are exact
+  const res = await G.withRetry(async () => { if (n++ < 7) throw new TypeError('fetch failed'); return { status: 200 }; },
+    { method: 'GET', url: '/x', random: top, sleep: async (ms) => { slept.push(ms); } });
+  assert.equal(res.status, 200, 'seven drops in a row, then through');
+  assert.deepEqual(slept, [2000, 4000, 8000, 16000, 32000, 60000, 60000], 'exponential from 2 s, capped at 60 s');
+  const bottom = [];
+  await assert.rejects(G.withRetry(async () => { throw new TypeError('fetch failed'); }, { method: 'GET', url: '/x', random: () => 0, sleep: async (ms) => { bottom.push(ms); } }), /fetch failed/);
+  assert.ok(bottom.reduce((a, b) => a + b, 0) >= 90000, 'even at the bottom of the jitter, longer than a typical drop');
+  const five = [];
+  await G.withRetry(async () => ({ status: 503 }), { method: 'GET', url: '/x', random: top, sleep: async (ms) => { five.push(ms); } });
+  assert.deepEqual(five, [2000, 4000, 8000], 'a 5xx gets a few seconds, not minutes');
+  let m = 0;
+  await assert.rejects(G.withRetry(async () => { m++; throw new TypeError('fetch failed'); }, { method: 'PUT', url: '/repos/o/r/pulls/1/merge', sleep: async () => {} }), /fetch failed/);
+  assert.equal(m, 1, 'a merge is never retried, even on a drop');
+});
+
+test('withRetrySync: a git fetch or push that hits a wifi drop is retried; a refusal is not (REQ-OPS-21)', () => {
+  const err = (stderr) => Object.assign(new Error('Command failed: git push'), { stderr });
+  let n = 0;
+  const waits = [];
+  assert.equal(G.withRetrySync(() => { if (++n < 3) throw err('fatal: unable to access \'https://github.com/o/r.git/\': Could not resolve host: github.com'); return 'pushed'; },
+    { random: () => 1, sleep: (ms) => waits.push(ms), log: () => {} }), 'pushed');
+  assert.deepEqual(waits, [2000, 4000], 'the team\'s exponential backoff');
+  n = 0;
+  assert.throws(() => G.withRetrySync(() => { n++; throw err(' ! [rejected]        main -> main (non-fast-forward)'); }, { sleep: () => {}, log: () => {} }), /git push/);
+  assert.equal(n, 1, 'a real refusal fails at once');
+  n = 0;
+  assert.throws(() => G.withRetrySync(() => { n++; throw err('fatal: the remote end hung up unexpectedly'); }, { sleep: () => {}, log: () => {} }));
+  assert.equal(n, 8, '7 retries on a drop, then it gives up');
+});
+
+test('withRetry: a 429 and a 500 are retried too, as REQ-OPS-21 says (#649 review)', async () => {
+  for (const code of [429, 500]) {
+    let calls = 0;
+    const res = await G.withRetry(async () => ({ status: calls++ === 0 ? code : 200 }), { method: 'GET', url: '/x', sleep: async () => {} });
+    assert.equal(res.status, 200, `a ${code} then through`);
+    assert.equal(calls, 2);
+  }
 });
