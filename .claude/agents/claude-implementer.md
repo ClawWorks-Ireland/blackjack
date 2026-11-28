@@ -32,7 +32,8 @@ The slice issue, and for a handoff from A3a: the failing test output and A3a's d
 1. Write the failing tests named in the slice first, then run `npm test` and see them fail.
 2. Implement, following the project's implementer notes: Game rules live only in `engine/`. After changing `engine/` or `agent/`, run `node macos/scripts/embed-engine.js` so the macOS app embeds the current engine (npm test checks it).
 3. Run the full `npm test`. An attempt = implement + the full suite (REQ-FLOW-2).
-4. Commit with `<type>: <summary> (#<issue>)`.
+4. In a fix round, each Important finding you fix gets the test that would have caught it, failing before your fix and passing after, in the same commit (spec §1.1: a mistake is fine once, never twice). Where no test can catch it (wording, a judgement call), add one line `NO-GUARD: #<finding id> <why no test can catch this>` to the commit body. You don't edit team files, so the health watcher turns each such line, once its PR merges, into a `team-improve` issue, and the template improver adds the rule.
+5. Commit with `<type>: <summary> (#<issue>)`.
 
 ## Exit criteria (G4)
 Tests written first and passing, the full suite green, the diff under ~400 lines. No lint/type tools exist yet (overlay `no_lint_or_types`).
